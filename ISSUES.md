@@ -1720,3 +1720,90 @@ remove.
 Not ticketed. Opens on explicit go-ahead: transcript harvest, blind labelling UI,
 gold labels, Brier with Murphy decomposition, ECE, RPS, decision-curve analysis,
 and the writeup.
+
+## JEV-45: we may be paying ~245ms per Jev call for a gateway hop we never chose deliberately
+
+Status: ready-for-agent
+Labels: latency, arms, threat-to-validity, prior-art
+Blocked by: none — pure measurement, no live-behaviour change
+
+**Where this came from.** `clownware/bouncer` PR #33 (merged 2026-09-19) corrected
+its own published Jev latency from ~190ms to a measured **437ms median / 549ms
+p95** over 66 calls from an installed plugin, and decomposed it: ~95ms socket +
+~193ms TLS + ~245ms request/model/response. The ~190ms had been measured by a
+script that made one call and then looped **inside the same process over a
+connection Node kept open**; a hook is a process per tool call, so every call is
+the cold one. Their note: "it scales with distance to the host."
+
+**The trap does not apply to us, and that is worth recording.**
+`src/arms/timed_http.py:8` already says connection pooling "would hide exactly
+the thing being measured", and opens a connection by hand per call.
+`hooks/inline_shadow_bash.sh` shells out to `curl` — a fresh process, so a fresh
+connection. `bench_inline.py` spawns the hook per iteration. All three
+instruments measure cold. An independent party arriving at the same conclusion
+from the opposite direction is a citation, not a correction.
+
+**But the comparison surfaces something we did not know.** Our `jev` rows,
+n=568 successful:
+
+| | ours | bouncer |
+|---|---|---|
+| DNS + TCP + TLS (p50) | **72–79ms** | ~288ms |
+| request + model + response | **~490ms** | ~245ms |
+| total | **563ms p50 / 817ms p95** | 437ms p50 / 549ms p95 |
+
+Our connection setup is **4× cheaper** than theirs and our server-side time is
+**2× longer**. We are 29% slower overall on the metric that is co-primary.
+
+**Three hypotheses, two already eliminated against our own data.**
+
+1. ~~Concurrent dispatch (JEV-33) inflates it through contention.~~ **No.**
+   Split by `arm_dispatch` on live rows: sequential **565.7ms** p50 (n=254) vs
+   concurrent **564.6ms** p50 (n=213). Indistinguishable. This is also a partial
+   discharge of A5.3's declared latency bias — for the API clock, concurrency
+   costs nothing. (The ~170ms spawn contention measured under JEV-43 is a
+   different clock and is unaffected by this.)
+2. ~~Our payloads are bigger.~~ **No.** Pearson r(`input_tokens`, `total_ms`) =
+   **0.046** across 568 rows. Median payload is 389 input tokens; the Q1 bucket
+   sits at 548ms p50 and the Q3 bucket at 600ms. Jev's latency is near-constant
+   in payload size over our range.
+3. **The gateway hop.** We call `POST https://ai-gateway.vercel.sh/v1/evaluate`.
+   Bouncer calls `POST https://api.typesafe.ai/v1/systemone` **directly**
+   (their `CLAUDE.md:161`). That fits the decomposition exactly: a Vercel edge
+   node is near us, so our TLS is fast; but our server-side time then contains
+   the Vercel→TypeSafe leg that theirs does not. **~245ms — roughly half our
+   Jev latency — may be a proxy we never chose deliberately.**
+
+**Why this matters more than it looks.** Wall-clock is co-primary (A3.5). If the
+treatment arm carries a ~245ms avoidable tax per call, every latency figure we
+publish understates Jev and we will have made the classifier look worse than it
+is — the mirror image of the mistake bouncer made in its own favour.
+
+**What to do.** Measure, do not switch. A/B the two endpoints over the frozen
+canary set, N≥20 each, interleaved, same process, cold connection per call, and
+decompose both. Then decide, and record the decision either way:
+
+- If the gap is the hop, this is an **arm-config** question, not a bug. Changing
+  the endpoint mid-window is a new `arm_config_id` and a **third era boundary**
+  after `cc-haiku45-cli-v1/v2` — do not do it silently, and do not pool across it.
+- The gateway is also what the pre-registration's data-path disclosure describes.
+  Switching to the vendor directly **changes who sees our unredacted command
+  text**, so §"Privacy" needs re-stating, not just the latency table.
+- Report the result regardless of direction. "The convenient endpoint costs 43%
+  of the classifier's latency budget" is a publishable finding about deploying
+  Jev in a hook, and nobody has written it down.
+
+**Acceptance criteria**
+
+- [ ] A/B over the canary set, both endpoints, interleaved, cold per call,
+      decomposed DNS/TCP/TLS/TTFB, with a paired CI on the difference
+- [ ] The response contract checked, not assumed: the two endpoints have
+      different paths (`/v1/evaluate` vs `/v1/systemone`) and may differ in
+      `usage` shape and in whether `providerMetadata.typesafe.confidence`
+      survives — JEV-02's four open vendor questions re-asked against the direct
+      path before any switch is contemplated
+- [ ] A written decision: switch (with a new `arm_config_id` and a declared era
+      boundary), or stay (with the tax quantified and disclosed as a limitation)
+- [ ] Privacy/data-path section updated if and only if the endpoint changes
+- [ ] The eliminated hypotheses above written into the report — the null result
+      on concurrency is itself the evidence A5.3 asks for
