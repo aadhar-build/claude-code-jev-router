@@ -698,3 +698,96 @@ Task duration is the co-primary. **Blocking duration is reported beside it every
 time**, and if the two diverge sharply — a large task speedup with little
 blocking time saved — that divergence *is* the finding, and it is stated plainly
 rather than left for a reader to infer.
+
+---
+
+# Amendment 5 — concurrent arm dispatch, and the bias it introduces
+
+**2026-09-20.** A change made to the collection machinery mid-window, recorded
+here because it alters the meaning of a reported metric and, more seriously,
+**alters it in a direction that favours the treatment arm.**
+
+## A5.1 — What changed, and why it could not wait
+
+Arms were evaluated **serially** in a randomised order until
+**2026-09-20T14:24:13Z**. From that moment they are **dispatched concurrently**,
+in a randomised submission order.
+
+The change was forced, not chosen. Serial four-arm evaluation took a median
+**20.1s** of arm time per capture, and captures arrived faster than that during
+active work. Past the backpressure cap the hook fails open and **drops captures
+silently** — attrition that never reaches the attrition count §4 commits to
+reporting. Waiting would have traded a known measurement change for an unknown
+and unmeasurable data loss.
+
+The realised gain is smaller than the ticket claimed. That estimate was ~4×; it
+was never reachable, because concurrency is bounded by the slowest arm and the
+arms are wildly unequal (`jev` 0.57s, `cc_sonnet5` 2.9s, `cc_opus5` 4.9s,
+`cc_haiku45` 11.6s), putting the theoretical floor at ~1.76×. **Measured:
+20.1s → 16.5s, about 1.2×**, the remaining gap being contention between four
+simultaneous process spawns. The 4× figure is not quoted anywhere.
+
+## A5.2 — The era marker
+
+`arm_dispatch` is recorded on every run row from the boundary onward, with the
+value `concurrent`. **Its absence means the prior sequential era.** `replay.py`
+and `canary.py` remain sequential and correctly omit it.
+
+Three new fields make the change auditable rather than merely declared:
+`dispatch_offset_ms` (when each arm's call actually started, relative to the
+decision), `dispatch_wall_ms` (the decision's total), and `concurrent_arms`
+(how many were in flight, so contention is conditionable).
+
+`arm_order` and `arm_order_position` are **narrowed, not redefined**: they now
+record the randomised *submission* order. The invariant
+`arm == arm_order[arm_order_position]` holds in both eras.
+
+**The randomisation requirement is satisfied more strongly, not relaxed.** It
+existed so that no arm systematically occupied the late slots of a ~20s serial
+window, or the cold first slot. Concurrency removes that hazard rather than
+guarding against it: there are no late slots, because there are no slots.
+`dispatch_offset_ms` lets the analysis *verify* the residual stagger is
+negligible — measured max **5.25ms** — instead of trusting the design.
+
+## A5.3 — The bias, stated plainly
+
+**Concurrent dispatch biases per-arm wall-clock in favour of `jev`, which is the
+treatment arm.**
+
+The mechanism is not subtle. Under contention, `jev` is a single HTTP request
+and barely competes for local CPU, while each `cc_*` arm pays a process spawn.
+Running them simultaneously therefore inflates the baselines' measured latency
+more than the treatment's. **A change made mid-study that flatters the
+treatment on a reported metric is exactly what a sceptical reader should
+suspect**, and it would be indefensible to leave it implicit.
+
+Three commitments follow:
+
+1. **Latency is never pooled across the boundary.** Per-arm latency is reported
+   separately for the sequential and concurrent eras, with the era stated and
+   the row counts given.
+2. **The bias is quantified, not just disclosed.** Every `cc_*` row carries
+   `raw.duration_api_ms`, which separates API time from process spawn. The
+   spawn-contention component is therefore **measurable**, and the writeup
+   reports it rather than asserting it is small.
+3. **No latency comparison between `jev` and a `cc_*` arm is a headline claim**
+   from concurrent-era data. The sequential era already contains enough rows for
+   that comparison, and it is the era in which the comparison is fair.
+
+**Agreement, answers, cost and attrition pool freely across the boundary** — the
+arms received identical bytes and identical questions in both eras, and none of
+those quantities depends on dispatch timing.
+
+## A5.4 — The collection window now contains two boundaries
+
+Recorded together, because an analyst who finds one and not the other will draw
+a wrong conclusion:
+
+| timestamp | change | what it affects |
+|---|---|---|
+| **2026-09-20T12:07:24Z** | three arms → four (`cc_sonnet5` added; the worker had been holding stale config) | rows before it have no `cc_sonnet5`; the `jev` vs `cc_opus5` primary spans both sides unaffected |
+| **2026-09-20T14:24:13Z** | sequential → concurrent dispatch | per-arm latency only; marked by `arm_dispatch` |
+
+Neither boundary touches the primary metric, which is PABAK between `jev` and
+`cc_opus5` on `pre_bash.destructive` — both arms are present, on identical
+bytes, throughout.
