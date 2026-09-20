@@ -67,22 +67,27 @@ find live.
 | wave | tickets | why these together |
 |---|---|---|
 | **A1** | **51**, **30 + 31** (one agent), **31b**, **44** | The shutdown/config-staleness cluster. 51 first because until it lands "stopped" is four manual steps and a belief. 30+31 share an agent (same drain loop); 31b is the same class of defect in five more fields. 44 pins the interpreter |
-| **A2** | **49**, **16**, **32**, **43** | The measurement instruments, before anything depends on their numbers. 49 corrects the cost pipeline **before** JEV-27 sizes a study on its output. 16 is a replay writer (`run_context: replay`). 43 resolves the contaminated wall-clock that 33 and 41 already quote |
+| **A2** | **49**, **16** (run A only, 90 calls), **32**, **43** | The measurement instruments, before anything depends on their numbers. 49 corrects the cost pipeline **before** JEV-27 sizes a study on its output. 16 is a replay writer (`run_context: replay`). 43 resolves the contaminated wall-clock that 33 and 41 already quote |
 | **A3** | **27**, **46**, **47**, **48** | The science design, downstream of a corrected cost distribution (49) and a known flip rate (16). 46 replaces the rejected static-heuristic arm; 27 sizes a **three**-arm study, which is why it follows 46 |
 | **A4** | **34**, **29**, **17**, **28** | 34 builds `agent_route` **in shadow, deciding nothing** — buildable offline against replayed states. 29 builds and freezes the blinded grader. 17 replaces fitted thresholds with a rule. 28 reconciles Fable pricing, now inside a primary outcome |
 | **A5** | **35**, **36**, **25**, **50** | 35 writes the actuator **and its two gates** but does not arm it. 36 writes outcome measurement against fixtures. 50 is the writeup correction and touches no code |
-| **A6** | **22**, **10**, **39**, **12** | **Reclassified from Phase B on review**: all four are offline. 22 and 10 replay the *existing* 60 synthetic items against the arms; 39 and 12 read rows already on disk. None needs a hook, a surface or a running worker |
+| **A6** | **39**, **12** | **Reclassified from Phase B on review**: all four are offline. 22 and 10 replay the *existing* 60 synthetic items against the arms; 39 and 12 read rows already on disk. None needs a hook, a surface or a running worker |
 | **A7** | **37**, **45** | The gate's own prerequisites. 37 builds the canary scheduler and wrapper so JEV-52 step 5 has something to run; 45 records the endpoint limitation and checks whether Cloudflare access is open |
 
-**⚠️ Waves A2 and A6 spend money without being "live".** JEV-16, 22 and 10 are
-offline *replay* sweeps — no hook fires, no session is affected, the worker
-stays stopped — but they do make API calls against the arms (JEV-16 alone is
-~1,390 calls, ~31 min, ~$0.018 plus ~190 subscription calls). This is a
-different thing from live collection and the plan treats it as permitted, but
-it is called out here rather than buried because "the experiment is stopped"
-and "nothing is calling the API" are not the same claim. **If the operator wants
-zero spend during Phase A, A2 and A6 move to after the gate and the plan loses
-its offline validation of the analysis path — say so and it will be changed.**
+**Spend decision (operator, 2026-09-20): minimise API spend, keep the analysis.**
+Offline replay is permitted in Phase A but is cut to the minimum that still
+exercises the analysis path against real arm responses:
+
+| ticket | as planned | **cut to** | rationale |
+|---|---|---|---|
+| **JEV-16** | 1,390 calls (~$0.018 + ~190 subscription) | **run A only — 90 calls** | Run A is the only one unblocking a ruling that is live today: A7.5's verdict on the 334 live v1 rows. Runs B (1,200 calls, Jev N=20 over all 60) and C (100, Opus reference wobble) **defer to Phase B**, where they cost the same and block nothing |
+| **JEV-22** | 5 arms x 60 items = 300 calls | **defer to B1** | Nothing in Phase A reads its output. Its only Phase-A value was producing a Fable session for JEV-28, which JEV-28 can generate itself at a fraction of the cost |
+| **JEV-10** | 3 sweeps x 60 items x N | **defer to B1** | Phrasing, option-order and truncation sweeps inform the writeup, not the build |
+| **JEV-32, 39, 12, 49** | — | **unchanged, zero new calls** | All four read the **2,005 rows already on disk**. This is the analysis validation, and it is free |
+
+**Phase A therefore costs ~90 API calls total.** The analysis path is still
+exercised end to end on real responses, because the 2,005 existing rows are real
+responses. What is deferred is *additional* sweeps, not *any* validation.
 
 ### The gate — JEV-52 (to be written)
 
@@ -102,7 +107,7 @@ A single ticket, done by one agent, no parallelism:
 
 | wave | tickets | why |
 |---|---|---|
-| **B1** | **09** | Alone. The inline shadow hook is the window's first live registration, and the one-registration-per-window rule makes it a wave by itself |
+| **B1** | **09**, **22**, **10**, **16** (runs B+C) | Alone. The inline shadow hook is the window's first live registration, and the one-registration-per-window rule makes it a wave by itself |
 | **B2** | **23**, **18**, **24b** | The routing A/B itself. 18 is the next surface in the queue. 24b adopts the working rule whose baseline 24a already froze |
 | **B3** | **19**, **20** | The last two surfaces |
 | **B4** | **53** | The writeup. Alone, because it depends on everything and owns no code |
