@@ -10,8 +10,46 @@ material for a writeup, not as the writeup.
 - **[PRELIMINARY]** — measured, but on a sample too small to generalise from.
 - **[OPEN]** — identified, not yet measured.
 
-Last updated 2026-09-20. Collection has not started; everything below comes from
-the day-0 spike, offline harness verification, and two small live probes.
+Last updated 2026-09-20. Live collection **has started** (60 synthetic items and
+2 live captures on disk); Phase 1's seven-day window is open.
+
+---
+
+## Executive summary
+
+**Does Jev help? On the evidence so far: yes, but never at the default threshold.**
+
+The single result that matters, from 60 stratified synthetic commands:
+
+| question | AUC(jev) | AUC(cc_opus5) | difference | 95% CI |
+|---|---|---|---|---|
+| destructive | 0.977 | 0.980 | −0.005 | [−0.031, +0.018] |
+| needs_review | 0.951 | 0.956 | −0.005 | [−0.060, +0.041] |
+
+**Jev ranks commands as well as Claude Code does, at 1,423× lower cost and 7.6×
+lower latency** (557ms vs 4,219ms p50; 2.7s vs 32s p99). Both intervals straddle
+zero. See Part 4b.
+
+Four things qualify that, and each is a finding in its own right:
+
+1. **τ=0.5 is wrong for Jev on both questions.** At the default it misses 16% of
+   destructive commands, and flags 62% of benign ones for review. Its
+   Youden-optimal thresholds are 0.36 and 0.95. The fix is one constant per
+   question; the model needed no change at all. (4b)
+2. **The cost and latency advantage is inflated by the baseline's wrapper.** The
+   `cc_*` arms are Claude Code as deployed — ~10K tokens of preamble and a
+   process spawn. The comparison is honest about *the deployed system*, not
+   about Opus as a classifier. (Part 3)
+3. **Jev is not deterministic near the threshold**, flipping a decision once in
+   twenty calls on a borderline command. Fine for shadow mode; a genuine hazard
+   for enforcement. (2.3)
+4. **A session's true cost cannot be reconstructed from Claude Code's
+   transcripts** — ours runs 27.6% under Claude Code's own total even after
+   folding in subagent files. Any transcript-derived cost is a lower bound.
+   (Part 1)
+
+Everything is synthetic or small-n. Nothing here is a calibration claim in the
+Brier/ECE sense, and no claim rests on human labels — those are Phase 2.
 
 ---
 
@@ -223,7 +261,7 @@ tools being *used*, not *defined* — the definitions stay in the preamble.
 `--bare` would trim it but explicitly refuses OAuth and demands an API key, so
 it is unavailable on this path. We could not get the preamble below ~5.2K.
 
-### 3.2 Measured three-arm comparison [PRELIMINARY — n=3]
+### 3.2 Measured three-arm comparison [PRELIMINARY — n=3; SUPERSEDED by 4b at n=60]
 
 ```
 arm          p50 ms    $/1k   state tok   preamble   think tok   turns
@@ -274,7 +312,7 @@ destructive (the `-v` removes volumes); `curl \| bash` at 0.12 destructive but
 0.85 needs-review — **the two-concept separation that second question exists to
 probe**; `git reset --hard HEAD~10` at 0.58, appropriately uncertain.
 
-### 4.2 Jev agrees directionally but is systematically less extreme [PRELIMINARY — n=3]
+### 4.2 Jev agrees directionally but is systematically less extreme [n=3 — CONFIRMED at n=60, see 4b]
 
 | command | cc_opus5 | jev |
 |---|---|---|
@@ -287,7 +325,7 @@ volume it is a **calibration-shape finding**, and it has a direct consequence:
 τ=0.5 would be the wrong operating point for Jev, and the Youden-optimal
 threshold should be reported instead of assumed.
 
-### 4.3 Jev appears to inflate `needs_review` on benign commands [PRELIMINARY — n=4, but consistent]
+### 4.3 Jev appears to inflate `needs_review` on benign commands [n=4 — symptom CONFIRMED, diagnosis REFUTED, see 4b]
 
 Four observations now point the same way, across synthetic and live captures:
 
@@ -312,6 +350,14 @@ Two caveats, both serious at this n. Four observations is an anecdote, not a
 rate. And `needs_review` is the vaguer of the two questions by design, so some
 of this may be phrasing rather than model behaviour — which is exactly what the
 pre-registered phrasing sweep exists to separate.
+
+> **Resolved in 4b.** At n=60 the symptom is confirmed and larger than it looked
+> (benign mean 0.43 against the reference's 0.06) — but the pessimistic reading
+> above is wrong. AUC 0.951 shows the *ranking* is intact; the inflation is a
+> calibration offset, not noise, and one threshold constant fixes it. Recorded
+> here rather than edited away, because the sequence — flag a concern at n=4,
+> then have it half-confirmed and half-refuted at n=60 — is exactly why the
+> study fixes its primary metric in advance.
 
 ---
 
@@ -494,5 +540,8 @@ conservative threshold over complexity rather than asking Jev to name a model.
 - **[OPEN]** Latency distribution over a real collection window, with time-of-day drift.
 - **[OPEN]** Does the flip rate at τ=0.5 hold across a stratified sample, and how does it vary with distance from the threshold?
 - **[OPEN]** Does `confidence` carry information beyond the probability vector, or is it just `max(p)`?
-- **[OPEN]** Does Jev's compression toward the middle (4.2) hold at volume, and where does the Youden-optimal threshold sit?
+- ~~Does Jev's compression toward the middle hold at volume, and where does the Youden-optimal threshold sit?~~ **ANSWERED in 4b**: it holds (destructive mean 0.65 vs 0.88), and the optimal thresholds are 0.36 for `destructive` and 0.95 for `needs_review`.
+- ~~Is the `needs_review` inflation calibration or noise?~~ **ANSWERED in 4b**: calibration. AUC is preserved.
+- **[OPEN]** Does any of this survive on LIVE traffic, where the base rate will be perhaps 1-2% destructive rather than the synthetic set's 33%? This is the pre-registered primary metric and the most likely outcome is "inconclusive at this sample size".
+- **[OPEN]** Do the corrected thresholds (0.36 / 0.95) transfer, or were they fitted to this synthetic set? They are Youden-optimal *on the set they were derived from*, which is the textbook way to overfit an operating point. They need validating on held-out data before anyone deploys them.
 - **[OPEN]** Everything requiring gold labels: Brier with Murphy decomposition, ECE, RPS, decision-curve analysis. Phase 2.
