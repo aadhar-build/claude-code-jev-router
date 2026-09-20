@@ -507,7 +507,10 @@ runs **concurrently** with the `pre_bash` window.
 - [ ] Apply the `JEV_ARM_SUBPROCESS` recursion guard — the `cc_*` arms spawn `claude -p` in this repo, and an unguarded routing hook would rewrite the model of the study's own measurement subprocesses
 - [ ] **Decide the control arm before anything runs** (`PREREGISTRATION.md` A2.0.3): the current default is `inherit`, i.e. Opus on every task, which is a strawman. The competitor that matters is a two-line static `subagent_type -> tier` rule with no classifier in it
 - [ ] Randomise assignment per delegation; record `routing_arm` and `routing_context` on every capture including `pre_bash`
-- [ ] Primary outcome: **net cost including rework** — an escalated task charged at full cost plus the wasted one
+- [ ] **Two co-primary outcomes**: raw net cost AND net wall-clock per delegated task, each with its own interval, both reported regardless of which looks better
+- [ ] Charge the hook's own spawn latency to the treatment arm — measured in the A/B, not assumed from the enforce bench
+- [ ] Record **task duration** and **blocking duration** separately. A subagent that runs in the background can get objectively faster while the human waits exactly as long; if the two diverge, that divergence is the finding
+- [ ] Report the correlation between the two primaries — cheaper tiers are faster tiers, so this is largely one effect in two units
 - [ ] Escalation logged **prospectively at the moment of re-delegation**, with the `decision_id` it replaces — never reconstructed afterwards by prompt matching
 - [ ] Quality composite: friction proxies (interruptions, `is_error`, permission denials) + escalation rate
 - [ ] Aggressive thresholds justified by the 37.5–44.4% break-even, with the break-even arithmetic restated in the pre-registration

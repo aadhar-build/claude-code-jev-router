@@ -641,3 +641,60 @@ future-leakage test — plus two written for this hook:
 2. **Assignment ledger before spawn.** The assignment is durably recorded
    *before* the subagent starts. A ledger written afterwards is missing exactly
    when it matters most: when the task crashed.
+
+## A3.5 — Wall-clock is a co-primary outcome, not a secondary
+
+**Amended 2026-09-20, before any routed task.** A2.2 named raw net cost as the
+sole primary and A2.3 listed wall-clock among the secondaries. That split was
+not defensible and is corrected here.
+
+**The reasoning that was wrong.** Speed had been argued away as "a property of
+the model, not a contribution of the classifier" — Haiku is simply faster than
+Opus, so a speedup is not Jev's doing. **The same sentence is true of cost**, and
+cost was kept as the headline anyway. A correct downgrade earns its dollars and
+its seconds by exactly the same mechanism: picking the right tier for the task.
+One cannot be credited and the other dismissed.
+
+> **Co-primary: net wall-clock seconds per delegated task**, treatment vs
+> control, with a 95% bootstrap CI clustered on `session_id`.
+>
+> **Hypothesis: wall-clock per delegated task is lower in the treatment arm.**
+
+**"Net" carries the same discipline as it does for cost.** The routing hook is
+synchronous on the spawn critical path and its latency is charged to the
+treatment arm — measured in the A/B, never assumed from the ~624ms p50 the
+enforce-overhead bench produced. Escalation wall-clock is charged the same way
+cost is: the retry *plus* the run it replaced, because those elapse in sequence.
+
+**The two primaries are correlated and that is disclosed, not corrected for.**
+Cheaper tiers are faster tiers, so this is substantially one effect reported in
+two units, not two independent findings. Two commitments follow:
+
+1. **Both are reported regardless of outcome.** Neither is selected after the
+   fact as the one that looked better — reporting whichever of two correlated
+   outcomes won is the multiplicity failure this clause exists to prevent.
+2. **Their correlation is reported**, so a reader can see how much independent
+   information the second number carries.
+
+No multiplicity correction is applied, because success is not claimed on "either
+one wins". They are two separate pre-specified claims, each standing or falling
+on its own interval.
+
+### Measured duration is not felt duration
+
+Subagents run in the background by default. A delegated task that finishes in
+15s instead of 48s has objectively sped up — and if the session was not blocked
+on it, **the human experienced no speedup at all.** Reporting task duration as
+though it were user-perceived time would overstate the result.
+
+So both are recorded per delegated task:
+
+| measure | what it is |
+|---|---|
+| **task duration** | subagent wall-clock, from the subagent's own transcript |
+| **blocking duration** | the portion the orchestrator actually waited on |
+
+Task duration is the co-primary. **Blocking duration is reported beside it every
+time**, and if the two diverge sharply — a large task speedup with little
+blocking time saved — that divergence *is* the finding, and it is stated plainly
+rather than left for a reader to infer.

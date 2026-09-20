@@ -62,7 +62,7 @@ Full reasoning for each in `PREREGISTRATION.md` §A2.0.
 | Q17 | **Unit of routing is the delegated task, not the turn** — forced by the mechanism constraint, which still holds for turns. The *selection* mechanism is amended: the three listed here (`CLAUDE_CODE_SUBAGENT_MODEL`, `--agents`, frontmatter) are all static per-session or per-agent-type, so none of them lets Jev decide anything per task. The mechanism that does is a **`PreToolUse` hook on the `Agent` tool rewriting `tool_input.model` via `updatedInput`** — see *Four things a reader should be told plainly* §1. |
 | Q17b | **Adopt a global "delegate to a subagent where possible" working rule**, to increase the share of spend that is routable. *See the confound note below.* |
 | Q10 | **Quality measured by a blinded grader** (primary), with friction proxies and escalation rate as unblinded secondaries. Explicitly NOT self-rating. |
-| Q11 | **Primary outcome: raw net cost per delegated task.** Net-of-rework was the original recommendation and is now a conditional secondary — the link it needs has no producer, and a missed link flatters the treatment. |
+| Q11 | **Two co-primary outcomes: raw net cost and net wall-clock, per delegated task** (A3.5). The original answer named cost alone; speed was reinstated 2026-09-20 because the argument for excluding it applied just as well to cost. Net-of-rework was the original recommendation and is now a conditional secondary — the link it needs has no producer, and a missed link flatters the treatment. |
 | Q12 | **Runs concurrently with the `pre_bash` window.** Arm assignment must be recorded on every `pre_bash` capture so the analysis can condition on it — routing changes which model generates the commands, so the capture stream is no longer stationary. |
 | Q16 | **Aggressive thresholds.** Break-even is 37.5–44.4%; the economics have slack. |
 
@@ -322,6 +322,16 @@ per decision and removes neither — so **gating cannot make Claude Code faster 
 more token-efficient, by construction.** It can only make it safer, and this
 repository's near-zero destructive base rate cannot demonstrate that. See
 `FINDINGS.md` Part 4c.
+
+**Read that as a statement about gating only.** It was briefly over-extended into
+"speed is not reachable at all", on the grounds that routing's speedup is a
+property of the smaller model rather than a contribution of the classifier.
+**That argument is equally true of cost**, which was kept as the headline
+regardless — so it proves too much. Everything currently runs on Opus; moving
+delegated tasks onto smaller tiers makes them finish sooner, by the same act of
+picking the right tier that makes them cost less. Wall-clock is a **co-primary
+outcome** of the routing A/B (`PREREGISTRATION.md` A3.5), measured net of the
+hook's own latency, with felt time reported beside measured time.
 
 **2. Surface priority is reversed.** `pre_bash` was staged first because it was
 simplest to measure. **`user_prompt` / routing should have been first**: one turn
