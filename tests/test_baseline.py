@@ -79,15 +79,22 @@ class TestSnapshotIsIdempotent(unittest.TestCase):
             self.skipTest("no transcripts for this project on disk")
         bl.snapshot()
         before = len(bl.SESSIONS.read_text().splitlines())
-        # Forge an older digest for one session; it must be re-appended once.
+        # Forge an older digest for one session; it must be re-appended.
         lines = bl.SESSIONS.read_text().splitlines()
         row = json.loads(lines[0])
+        forged = row["session_id"]
         row["source"]["digest"] = "0" * 32
         lines[0] = json.dumps(row)
         bl.SESSIONS.write_text("\n".join(lines) + "\n")
-        bl.snapshot()
+        result = bl.snapshot()
         after = len(bl.SESSIONS.read_text().splitlines())
-        self.assertEqual(after - before, 1)
+        # The corpus is live: another session may legitimately have grown in the
+        # interval, so assert against what the run itself reports rather than a
+        # hard 1. What must hold is that the forged session came back and that
+        # the file grew by exactly the number of sessions claimed.
+        self.assertIn(forged, result["sessions_appended_this_run"])
+        self.assertEqual(after - before, len(result["sessions_appended_this_run"]))
+        self.assertEqual(result["sessions_appended_this_run"].count(forged), 1)
 
 
 class TestNoThirdPartyContent(unittest.TestCase):
