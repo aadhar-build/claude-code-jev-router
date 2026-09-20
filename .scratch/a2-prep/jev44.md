@@ -330,3 +330,36 @@ flagging it for whoever writes the dated go-live inventory (JEV-52 step 7) —
   `live_guard.sh` conservation check was run around every manual test
   invocation in this session and passed every time.
 - Did not install a crontab, and did not make any network call.
+
+---
+
+## 8. Disclosure: I briefly committed another agent's staged work, and undid it
+
+2026-09-20, ~22:18 IST. Declared here rather than quietly fixed, per the rule
+at `.scratch/wave2-prep.md:1003` ("report, do not repair — say so in your
+handover, immediately and specifically").
+
+**What happened.** Three agents were working in this one checkout at once.
+`git add -A` is forbidden here and I did not use it — but `git commit --amend`
+is the same hazard wearing a different hat: **it commits whatever is in the
+index, not whatever you just added.** Between my `git add <my files>` and my
+`git commit --amend`, another agent staged theirs. Commit `468ae3a` therefore
+carried, as well as my thirteen files:
+
+- `src/config_loader.py` (+18 −4) — JEV-30/31b
+- `.scratch/a2-prep/jev30-31b.md` (+32)
+- `tests/test_pipeline.py` — three hunks of JEV-51's sandbox fixes
+
+**What I did.** `git reset --mixed f4b8b1b` (my last clean commit), re-added
+only my own path, re-amended. HEAD is now `0f95f0b` with my thirteen files and
+nothing else; the other agents' changes are back in the working tree, byte for
+byte, verified by diff. Nothing was pushed and nothing was lost.
+
+**The one cost.** Their `git add` staging was cleared — their *content* is
+untouched but they will need to re-stage before committing. That is the whole
+of the damage and it is why this paragraph exists rather than a silent fix.
+
+**Rule for every agent in a shared checkout:** `git commit --amend` is as
+dangerous as `git add -A`. Check `git diff --cached --stat` **immediately
+before** committing or amending, and confirm every path in it is yours. Better,
+prefer a new commit to an amend while other agents are live.
