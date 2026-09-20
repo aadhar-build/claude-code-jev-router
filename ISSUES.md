@@ -389,7 +389,10 @@ This applies to the already-live `pre_bash` surface. It should not wait for `sto
 - [x] Parameterise the three existing gates on surface — they are hardcoded to `pre_bash`
 
 **Done 2026-09-20.** `./tests/gates.sh [surface]`, default `pre_bash`. **38
-assertions on `pre_bash`** (was 21), of which 10 are GATE 4. `tests/gate4_drain.py`
+assertions on `pre_bash`** (was 21), of which **16 are GATE 4**: 6 on the surface
+under test, 6 on `stop`, 3 on the negative control and 1 asserting the gate did
+not touch the live window. On `stop` itself the run is 32/10 — the same GATE 4
+minus the surface's own 6, which `stop` already contributes. `tests/gate4_drain.py`
 is the drain step: it repoints every writable path in `paths` at a sandbox,
 drains through the **real** `worker.drain_once()` with `FakeArm` only, and
 reports what happened as JSON.
