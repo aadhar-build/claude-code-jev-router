@@ -335,10 +335,20 @@ def question_set(surface: str, version: str | None = None) -> dict[str, Any]:
 
 # Existing callers (tests/test_pipeline.py, tests/gate4_drain.py) reach for
 # `cl.surfaces.cache_clear()`. Keep that working rather than rewriting call
-# sites in files this ticket does not own.
-surfaces.cache_clear = _surfaces.cache_clear  # type: ignore[attr-defined]
-arms_config.cache_clear = _arms_config.cache_clear  # type: ignore[attr-defined]
-pricing.cache_clear = _pricing.cache_clear  # type: ignore[attr-defined]
+# sites in files this ticket does not own -- but a shim that cleared the dict
+# and left `_SEEN` populated would be a HALF reset: the next author to edit the
+# same fixture config twice would get a ConfigStaleError out of their own test
+# setup and have no idea why. Clearing a cache means forgetting the file too.
+def _shim(cached, name):
+    def clear() -> None:
+        cached.cache_clear()
+        _SEEN.pop(str(paths.CONFIG / name), None)
+    return clear
+
+
+surfaces.cache_clear = _shim(_surfaces, "surfaces.json")  # type: ignore[attr-defined]
+arms_config.cache_clear = _shim(_arms_config, "arms.json")  # type: ignore[attr-defined]
+pricing.cache_clear = _shim(_pricing, "pricing.json")  # type: ignore[attr-defined]
 
 
 def arm(name: str) -> ArmConfig:
