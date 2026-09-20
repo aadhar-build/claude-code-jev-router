@@ -1467,9 +1467,11 @@ misconfiguration; the other half is the cache miss we are choosing to keep. The
 than weakens the reason wall-clock was made co-primary in JEV-23.
 
 **Era boundary.** `arm_config_id` goes `cc-haiku45-cli-v1` →
-`cc-haiku45-cli-v2-nothink`. **The boundary is the worker restart, which has
-NOT happened** — the worker was left running per JEV-30 and the operator
-decides when it restarts. Until then every new row is still v1. The
+`cc-haiku45-cli-v2-nothink`. **The restart has now happened** — worker pid
+94441, started 2026-09-20T15:15:33Z, and rows carrying
+`cc-haiku45-cli-v2-nothink` began appearing immediately after. (This paragraph
+previously said the restart had NOT happened; that was true when written and
+went stale the same afternoon. `PREREGISTRATION.md` A7.4 has it right.) The
 discriminator is the id on the row, not a wall-clock time, which is the more
 robust form: 334 live + 60 synthetic rows carry v1 and none of them pool with
 v2 on cost or latency.

@@ -825,10 +825,22 @@ credibility is that losses of this shape get declared.
 
 **The number of captures lost is unknown and unrecoverable.** A file deleted
 from the spool leaves no capture row and no run row; there is nothing to count
-afterwards. It is bounded above by the spool depth at those moments, and the
-observed high-water mark for the window is **20**, so the loss is at most tens
-of decision points and plausibly far fewer — the worker drains continuously and
-each reset caught only whatever happened to be waiting.
+afterwards. It is bounded above by the spool depth at those moments.
+
+**Correction, 2026-09-20.** This paragraph first stated the observed high-water
+mark for the window as **20**. That figure was wrong. `data/spool_watermark.json`
+records `max_total: 71` at **14:36:24Z** — inside the destruction window, and a
+genuine backlog rather than a test artifact (56 captures drained between 14:30Z
+and 14:50Z at roughly 3/min). The bound is therefore **71, not 20**.
+
+**And the instrument does not cover the whole window.** `spool_watch` was added
+by JEV-33 and its `first_sample_at` is **14:24:06Z** — fourteen minutes after the
+window opened at ~14:10Z. Depth during 14:10Z–14:24Z was never sampled, so 71 is
+an upper bound on the *observed* portion only and the true maximum depth over the
+full window is unknown. The loss is stated as **bounded above by 71 over the
+sampled portion, unbounded over the first fourteen minutes**, which is weaker
+than the original claim in both directions. It remains of unknown size, and is
+not estimated away.
 
 **It is reported as attrition of unknown size, not estimated away.** §4 commits
 to counting failed runs in attrition; this is a loss that structurally cannot

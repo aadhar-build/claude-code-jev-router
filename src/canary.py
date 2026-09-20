@@ -52,6 +52,9 @@ Exit codes, so a wrapper can act on them:
         or a decision flipped at tau
     2   no usable reference sweep; today's sweep was recorded as the baseline
     3   today's sweep is incomplete -- failed or missing rows. Not a comparison.
+    4   JITTER ONLY -- no hard flag, but at least one state crossed tau while
+        staying inside the jitter band. Not drift; not clean either. A wrapper
+        must handle this distinctly or it will read a tau-band flip as success.
 
 Usage:
     uv run src/canary.py                      # daily: jev, sweep then compare
