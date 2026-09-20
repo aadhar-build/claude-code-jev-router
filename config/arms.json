@@ -1,6 +1,7 @@
 {
   "_comment": "Each arm implements evaluate(state, questions, config) -> Run. arm_config_id is recorded on every row; change the config, change the id, never reuse one. The enabled set is SUBSCRIPTION-ONLY by deliberate choice: no ANTHROPIC_API_KEY is required to run this study. opus5/haiku45 remain defined but disabled -- they are the metered-API arms, and enabling them would turn the headline back into a model-vs-model comparison. See docs/SUBSCRIPTION-ARM.md.",
   "version": "arms-v1",
+ "_role_values": "role is a documentation label; NOTHING branches on it (verified 2026-09-20). Permitted values: classifier_under_test | headline_baseline | secondary_baseline | mid_tier_baseline | high_tier_baseline | metered_api_baseline (DISABLED) | test_double. Do NOT use 'treatment' or 'control' here -- those belong to the routing A/B, which assigns a ROUTING ARM to a delegated task. This file describes CLASSIFIER ARMS. See CONTEXT.md.",
   "arms": {
     "jev": {
       "arm_config_id": "jev-gateway-v1",
@@ -8,7 +9,7 @@
       "endpoint": "https://ai-gateway.vercel.sh/v1/evaluate",
       "model": "typesafe-ai/jev",
       "timeout_s": 10.0,
-      "role": "treatment"
+      "role": "classifier_under_test"
     },
     "opus5": {
       "arm_config_id": "opus5-effort-low-v1",

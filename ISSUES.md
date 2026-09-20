@@ -614,6 +614,37 @@ chosen after results are visible are not evidence.
 
 ---
 
+## JEV-31: Claimed spool files are never reaped — silent, unmeasured data loss
+
+**Status:** ready-for-agent
+**Labels:** defect, blocking, science
+
+**Blocked by:** None
+
+**What is wrong.** The worker claims a spool file by renaming it into
+`spool/claimed/` before doing any work — the atomicity fix that made two workers
+safe. **Nothing ever moves it back.** If the process dies between claim and
+completion, that decision point is lost permanently, and no code path notices:
+`spool/claimed/` is not scanned at startup, not scanned on drain, and not
+counted anywhere.
+
+There is one sitting there right now, claimed at 17:28 and never processed.
+
+**Why this is worse than ordinary data loss.** The pre-registration commits to
+measuring attrition — *"log every attempt including failures; report attrition
+by state-size bucket"*. A capture lost in `claimed/` is attrition that never
+appears in the attrition count, because no run row was ever written for it. It
+is invisible to the very number designed to catch it.
+
+- [ ] Reap at startup: any file in `spool/claimed/` older than a threshold, or claimed by a pid that is no longer alive, returns to `ready/`
+- [ ] Record the reap — a re-claimed capture must be distinguishable from a first-claim one, or a poison payload loops forever
+- [ ] Cap the retries and quarantine after N, so a payload that kills the worker cannot resurrect itself indefinitely
+- [ ] Count claimed-but-unprocessed files in the status output of `run-collection.sh`, so the operator can see the backlog
+- [ ] Recover the one stranded capture from 17:28 before the window closes
+- [ ] Report whether any other captures were lost this way during the window — and if the count cannot be recovered, say so rather than implying it is zero
+
+---
+
 ## JEV-30: The worker reads config once, and nothing says so
 
 **Status:** ready-for-agent
