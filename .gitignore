@@ -10,6 +10,14 @@
 
 # collected data, spool, logs — local only, never published from git
 data/
+# ...except the canary's frozen state set. It is a PRE-REGISTERED commitment —
+# the fixed bytes re-sent daily to detect vendor drift — and a pre-registered
+# fixture that is not under version control cannot be audited. It is safe to
+# commit: the states are synthetic (we wrote them), and the synthetic set is
+# already inside the publication scope. Its id is content-derived, so a
+# hand-edit is refused rather than silently compared against.
+!data/fixtures/
+!data/fixtures/canary-set-v1.json
 spool/
 logs/
 # reports/ is deliberately NOT ignored: reports are the publishable artifact,

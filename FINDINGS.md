@@ -190,7 +190,7 @@ response's own `usage` field and is exact.
 
 ## Part 2 — The Jev API contract, and three bugs it exposed
 
-Ticket JEV-02. Full detail in `docs/API-FINDINGS.md`.
+Ticket JEV-02. Full detail in **Appendix A**.
 
 ### 2.1 Gateway metadata confirms pricing at source [SOLID]
 
@@ -1034,3 +1034,377 @@ session can be reconciled.
 - **[OPEN]** Does any of this survive on LIVE traffic, where the base rate will be perhaps 1-2% destructive rather than the synthetic set's 33%? This is the pre-registered primary metric and the most likely outcome is "inconclusive at this sample size".
 - **[OPEN]** Do the corrected thresholds (0.36 / 0.95) transfer, or were they fitted to this synthetic set? They are Youden-optimal *on the set they were derived from*, which is the textbook way to overfit an operating point. They need validating on held-out data before anyone deploys them.
 - **[OPEN]** Everything requiring gold labels: Brier with Murphy decomposition, ECE, RPS, decision-curve analysis. Phase 2.
+
+---
+
+## Appendix A — The Jev API contract, as verified
+
+*Merged verbatim from `docs/API-FINDINGS.md` on 2026-09-20. Part 2 is the digest; this is the source record, ticket JEV-02.*
+
+
+Ticket JEV-02. Updated as the spike progresses. Anything not confirmed here is
+still an assumption, and code that depends on it says so.
+
+### Confirmed 2026-09-20
+
+**The gateway serves Jev, and its own metadata matches our pricing table.**
+`GET https://ai-gateway.vercel.sh/v1/models` returns 376 models including:
+
+```json
+{
+  "id": "typesafe-ai/jev",
+  "owned_by": "typesafe-ai",
+  "name": "Jev",
+  "type": "evaluation",
+  "pricing": {"input": "0.000000042", "output": "0"},
+  "context_window": 32000,
+  "max_tokens": 0,
+  "modalities": {"input": ["text"], "output": ["text"]}
+}
+```
+
+Three things worth pinning down from that:
+
+- **$0.042/1M input, output genuinely free.** `pricing.input` is `4.2e-8` per
+  token, exactly what `config/pricing.json` carries, and `pricing.output` is a
+  hard zero. The headline cost ratio does not rest on a marketing page.
+- **`context_window` is 32,000, not 64,000.** Secondary sources describe a 64K
+  window with a 32K state limit. The gateway itself reports 32,000, and the
+  gateway is what we call, so `state_builders.MAX_STATE_CHARS` is sized against
+  32K. Our cap of 60,000 characters is roughly 16K tokens — comfortably inside
+  it, and the truncation sweep will show whether that is even necessary.
+- **`max_tokens: 0` and `type: "evaluation"`.** Jev is not a generative model in
+  the gateway's own taxonomy. It cannot emit text, which is the structural
+  reason it cannot replace Claude as the coding model and can only ever own the
+  decision layer.
+
+**Authentication works; inference is billing-gated.** The key authenticates
+cleanly — `GET /v1/models` returns 200 — but `POST /v1/evaluate` returns:
+
+```
+HTTP 403 {"error": {"type": "customer_verification_required",
+  "message": "AI Gateway requires a valid credit card on file to service requests."}}
+```
+
+This is a billing gate on the key's Vercel **team scope**, not a bad credential;
+a wrong key returns 401. Adding a card to a different team or personal scope
+than the one the key belongs to will not clear it. Still returning 403 after a
+card was added, so the card and the key are most likely on different scopes.
+
+The arm classifies this as `error_kind: "account_gated"`, distinct from `"auth"`,
+and records it as a normal attrition row — which is the behaviour we wanted, and
+the first real confirmation that the fail-loud path works end to end.
+
+### Spike complete — 2026-09-20
+
+The billing gate cleared and `uv run src/arms/jev.py --selftest` ran in full.
+Five results, three of which were bugs in our client that would have corrupted
+the study silently.
+
+#### 1. Confidence DOES survive the REST path — and we were parsing it wrong
+
+We had assumed we might have to disclaim this, since it is documented only for
+the AI SDK. It is present, in two places at once:
+
+```json
+"answers": {"route": {"type": "choice", "choice": "write",
+                      "probabilities": {...}, "confidence": 0.92}},
+"providerMetadata": {"typesafe": {"confidence": {"route": 0.92, "risk": 0.67}}}
+```
+
+Present for `choice` and `score`, absent for `boolean`, exactly as the SDK docs
+describe. Our parser looked for a per-answer `providerMetadata` key that does not
+exist, so it was silently discarding the confidence signal on every call. **Fixed.**
+
+#### 2. `score` is a float, not a bucket index
+
+A real response carries `"score": 3.37`. Jev returns the **expected value across
+the anchor distribution**, which is strictly more information than a discrete
+bucket. Our parser cast it to `int`, which both threw that away and biased every
+score downward by up to a whole point. **Fixed** — the float is preserved.
+
+#### 3. `score` is 0-indexed at source, and our Claude arms are 1-indexed
+
+Five anchors come back with probability keys `"0".."4"` and the score on a 0–4
+scale. The Claude arms are schema'd 1–5. Left alone, **an identical judgement
+from the two arms would have differed by exactly one point on every single
+item** — a uniform offset that Spearman correlation would hide completely, and
+that only the Bland–Altman plot would ever have caught. Jev is now shifted onto
+the 1–n scale at the parsing boundary, so everything downstream is on one scale.
+Rows carry `score_index_origin: "jev_0_shifted_to_1"` so the conversion is
+auditable rather than invisible. **Fixed.**
+
+This one is worth dwelling on: all three arms would have "worked", produced
+plausible numbers, and been wrong. It is the strongest argument for running the
+spike before building on the contract rather than after.
+
+#### 4. Jev is not bit-deterministic, and on borderline items it flips decisions
+
+Ten identical calls on byte-identical state. The crude test — counting distinct
+answer signatures — reports 10/10 distinct, but that registers any difference in
+any digit and says nothing about whether a *decision* would change. What matters
+for a gate is the spread and the threshold crossings:
+
+| state | spread | sd | decision flips at τ=0.5 |
+|---|---|---|---|
+| `git reset --hard HEAD~10` (p≈0.56) | 0.04 | 0.015 | 0/10 |
+| `git reset --hard HEAD~10` (p≈0.97 question) | 0.00 | 0.000 | 0/10 |
+| `git push --force origin main` (p≈0.50) | 0.06 | 0.018 | **1/10** |
+
+So: when Jev is confident it is perfectly stable, and the wobble is confined to
+genuinely uncertain items — but on a command sitting near the threshold, **the
+same command produced a different decision on 1 call in 10.** For a shadow-mode
+study that is a measurable property. For enforce mode it is a deployment
+hazard: a borderline command would be gated inconsistently, which is worse than
+being gated always or never, because it is unreproducible for the user.
+
+**Second run, after the parser fixes.** All three fixes verified live:
+confidence captured (`{route: 0.90, risk: 0.62}`), score a float on the 1–5
+scale, probability keys shifted. Determinism on the same borderline command came
+back **0/10 flips** this time, against 1/10 on the first run.
+
+That difference is itself the point. Two runs, one flip in twenty — the flip
+rate is a property of how close an item sits to the threshold, not a fixed
+constant, and a ten-call sample cannot pin it down. **Do not quote "1 in 10"**;
+quote "observed at least once in twenty calls on a p≈0.50 item, rate not yet
+characterised." The determinism sweep exists to characterise it properly, and
+it now has a clear job.
+
+This also kills a hypothesis the design had been carrying — that Jev might be
+deterministic where temperature-zero LLMs are not, and that this would earn its
+own section. It does not. The determinism sweep now measures how much both
+wobble, which is a fairer question anyway.
+
+Input token counts *are* stable across identical calls (412 every time), so
+billing is reproducible even though answers are not.
+
+One data-hygiene note: the 0→1 shift is applied with `round(x + 1.0, 2)` to the
+precision the API itself reports. Without the rounding, `3.44 + 1.0` stores as
+`4.4399999999999995` — binary float noise that is not a measurement and would
+make two identical replays compare unequal.
+
+#### 5. Token cost is dominated by fixed overhead, not by state
+
+| state size | input tokens | fixed share |
+|---|---|---|
+| 12 chars | 281 | — |
+| 120 chars (a short bash command) | 307 | **91%** |
+| 330 chars (command + cwd, typical) | 357 | 78% |
+| 2,520 chars | 877 | 32% |
+
+Solving the two endpoints: **~278 tokens of fixed overhead per call**, plus
+0.238 tokens per character of state (≈4.2 chars/token, unremarkable).
+
+For the `pre_bash` gate — the whole point of this study — roughly **90% of every
+call's tokens are scaffolding, not the command being judged.** That does not
+threaten the cost story, since 307 tokens at $0.042/1M is $0.000013 a call. But
+it does mean "tokens per KB of state" is a misleading unit for short states, and
+the report should quote cost per decision instead.
+
+**Caching does not apply.** `usage` contains only `inputTokens` and
+`outputTokens` — no cache fields at all — so there is no cached-vs-uncached
+comparison to report, and the "report uncached as primary" plan is moot.
+
+#### 6. Latency
+
+535ms on a cold connection for a three-question call; 479–664ms across ten
+repeats of a two-boolean call, median 511ms. Decomposed: DNS 5ms, TCP 8ms,
+TLS 58ms — so **~71ms of setup and ~440ms genuinely server-side.**
+
+Against the claimed 70–500ms, the low end is not reachable from here and the
+median sits just above the top of the range. That is a single-machine, single
+-location sample and will be characterised properly over the collection window.
+
+### Still unanswered## Still unanswered — blocked on the billing gate
+
+These are the questions the spike exists to settle. Everything downstream
+assumes an answer, so none of them should be guessed:
+
+All five spike questions are now answered above. What remains needs volume
+rather than another spike:
+
+- [ ] Latency distribution over the full collection window, not one machine on
+      one afternoon — p50/p90/p99 with a time-of-day drift plot.
+- [ ] Whether the 1-in-10 decision flip rate at τ=0.5 holds across a stratified
+      sample, and how it varies with distance from the threshold. This is the
+      determinism sweep, and it is now a headline result rather than a footnote.
+- [ ] Whether `confidence` on `choice`/`score` carries information beyond the
+      probability vector itself — i.e. is it just max(p), or something more?
+
+---
+
+## Appendix B — Cost reconciliation: what a transcript does and does not tell you
+
+*Merged verbatim from `docs/COST-RECONCILIATION.md` on 2026-09-20. Part 1 is the digest; this is the source record.*
+
+
+Every cost number this study publishes depends on reading Claude Code's own
+transcripts correctly. So before trusting any of them, we reconciled our cost
+formula against Claude Code's own authoritative total — the undocumented
+`cost-state` line, which carries `totalCostUSD` plus per-model token counts and
+per-model `costUSD`.
+
+Method: one real session, 2,684 lines, `claude-opus-5[1m]`, plus 382 subagent
+lines. Reproduce with:
+
+```sh
+uv run src/session_metrics.py <transcript.jsonl> --reconcile
+```
+
+### What we confirmed exactly
+
+Solving for the implied input rate from `cost-state.modelUsage`, assuming the
+documented 1:5 input:output ratio and the 1.25× / 0.10× cache multipliers:
+
+| model | implied input rate | verdict |
+|---|---|---|
+| `claude-haiku-4-5-20251001` | **$1.0000/1M** | exact — matches published pricing |
+| `claude-sonnet-5` | **$2.0000/1M** | exact |
+| `claude-opus-5[1m]` | $5.1990/1M | *not* flat $5.00 — see below |
+
+Two things fell out of this that are worth stating plainly:
+
+**Web search is billed at exactly $0.01 per request.** The Haiku line was off by
+$0.48 until `webSearchRequests: 48` was priced in, at which point it matched to
+the cent. Any cost model that ignores `webSearchRequests` is wrong by that much.
+
+**The `[1m]` suffix does not mean every request was billed at the long-context
+premium.** It means the 1M context window was *enabled*. Premium pricing is
+applied per request, above a threshold, so the effective blended rate on a long
+session lands between the standard and premium rates — here $5.199 against a
+$5.00 standard rate. We price at the standard rate and publish the resulting
+shortfall rather than fitting a blended constant that would not transfer to
+another session.
+
+### Four traps in the transcript format
+
+**`input_tokens` is a trap.** A real line reads `"input_tokens": 2` beside
+`"cache_creation_input_tokens": 17315, "cache_read_input_tokens": 30419`.
+Summing `input_tokens` yields a cost figure wrong by four orders of magnitude.
+In this session: 7,788 input tokens against 101,494,941 cache reads.
+
+**Lines duplicate ~3.2×.** 1,047 assistant lines carry 328 unique `requestId`s.
+Deduplication by `requestId` is mandatory.
+
+**`usage.iterations[]` restates the same numbers.** A second, independent
+double-counting hazard that looks like additional data.
+
+**A session is not one file.** Claude Code writes the main transcript as
+`<session-id>.jsonl` and every subagent it spawns into a sibling
+`<session-id>/subagents/*.jsonl`. Those turns are billed to the session but
+appear nowhere in the main file. On this session, folding them in moved the
+reconciliation from **−32.0% to −27.6%** and added 38 requests, 1.95M cache
+reads and 524K cache writes. On an agent-heavy session the omission would be
+larger still.
+
+We found this *because* of the reconciliation check, not before it. A cost
+number that had never been compared against ground truth would have shipped 32%
+low and looked entirely reasonable.
+
+### The residual gap, and why we are not closing it
+
+After subagents, **−27.6%** remains. It decomposes into two parts:
+
+**Models that never appear on disk.** `cost-state` bills 929,938 Haiku input
+tokens and 41,772 Sonnet input tokens for this session. Neither model appears in
+any assistant line, in the main transcript or in any subagent file. These are
+background calls — title generation (`ai-title` is its own line type), mode
+classifiers, search summarisation — that Claude Code bills but does not
+transcribe. Together they account for roughly $5.09.
+
+**Opus work not written locally.** Our deduplicated Opus totals run about 10%
+under on cache reads and 40% under on output tokens. We verified this is not a
+parsing artefact: zero assistant lines carry usage without a `requestId`, and no
+non-assistant line type carries token counts.
+
+The honest conclusion is a limitation, not a bug:
+
+> **A session's true cost cannot be reconstructed from its transcripts.** The
+> transcript is a faithful record of the conversation, not a billing ledger.
+> Any study quoting per-session cost from transcripts alone — including the
+> "before" baseline in this one — is quoting a **lower bound**.
+
+So the baseline reports both numbers side by side, always: what we computed from
+the transcript, what Claude Code itself reported, and the delta between them. The
+delta is a published figure, not a defect to be tuned away. For the arm
+comparison this limitation does not apply at all — there we bill from each API
+response's own `usage` field, which is exact.
+
+---
+
+## Appendix C — Using the subscription instead of an API key
+
+*Merged verbatim from `docs/SUBSCRIPTION-ARM.md` on 2026-09-20. Part 3 is the digest; this is the source record.*
+
+
+`claude -p` authenticates with whatever credentials Claude Code already holds,
+so the baseline can run on a Pro/Max subscription with no `ANTHROPIC_API_KEY`.
+This works, and it is implemented as the `cc_opus5` and `cc_haiku45` arms.
+
+What follows is what it costs you in measurement terms, because it is not free.
+
+### Measured, not assumed
+
+One `pre_bash` question set (two boolean questions), Haiku 4.5, leanest
+invocation we could construct — custom system prompt, empty settings, no MCP
+servers, every tool disallowed, `--effort low`:
+
+| | direct Messages API | `claude -p` on the subscription |
+|---|---|---|
+| input tokens | ~386 | **5,214** cache-creation + 10 |
+| output tokens | ~25 | **1,374**, of which 997 thinking |
+| turns | 1 | **2** (structured output goes through a tool round trip) |
+| latency | well under 1s | **21.0s** wall, 16.7s API, 12.9s to first token |
+| cost | $0.0005 | $0.0173 list-basis (billed to the subscription) |
+
+Thirteen times the input tokens, fifty times the output, roughly twenty times
+the latency. None of it is attributable to the model. It is Claude Code's system
+prompt, its tool definitions, its thinking budget and its process spawn.
+
+`--effort low` did not suppress thinking, and `--disallowed-tools` prevents tools
+being *used*, not *defined* — the definitions are still in the preamble. `--bare`
+would trim it further but explicitly refuses OAuth and requires an API key, so it
+is not available on this path.
+
+### What this means for the study
+
+**These arms measure Claude Code as it actually ships, and that is worth
+measuring.** "Could I gate my hooks with the subscription I already pay for?"
+is a real question with a real answer, and the answer this produces is a strong
+one: at 21 seconds per decision, a headless Claude Code call **cannot be a hook
+gate at any latency budget.** That is a finding, and it is published as one.
+
+**They cannot be the headline baseline.** The headline claim is Jev against
+Opus 5 *as a classifier*. Routing that through the CLI would compare Jev to a
+5K-token preamble and a process spawn, which flatters Jev enormously for reasons
+having nothing to do with Jev. It is the same strawman the design review
+rejected, pointing the other way — and a reader who spots it discards the whole
+paper.
+
+So the arms are named `cc_*`, carry `role: deployment_realism`, and are reported
+in their own section.
+
+### Practical limits
+
+Serial, at ~21s per call, both `cc_*` arms:
+
+| workload | calls | wall clock |
+|---|---|---|
+| synthetic stress set (360 items) | 720 | ~4.2 hours |
+| one week of live `pre_bash` (~200) | 400 | ~2.3 hours |
+| determinism sweep, 20x on 50 states | 2,000 | ~11.7 hours |
+
+Two things follow. Subscription rate limits will bind long before the statistics
+do, so the `cc_*` arms should run on a **subsample** — a hundred or so stratified
+items is plenty to establish "21 seconds, therefore not deployable" — while the
+metered arms carry the full set. And a published benchmark driving thousands of
+automated subscription calls is worth a glance at your plan's terms first; the
+consumer subscription is sold for interactive use, and this is not that.
+
+### Recursion guard
+
+These arms spawn a real Claude Code session. With this project's hooks
+registered, that session would fire them and capture its own decisions back into
+the dataset. The worker exports `JEV_ARM_SUBPROCESS=1` to every arm subprocess
+and `capture.sh` exits on sight of it, on line one. Environment variables are
+inherited, so the guard holds however deep the spawn goes. Covered by a test.

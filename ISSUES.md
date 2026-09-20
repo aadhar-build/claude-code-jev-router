@@ -704,6 +704,37 @@ post-fix numbers.
 
 ---
 
+## JEV-33: The worker drains slower than the hook captures
+
+**Status:** ready-for-agent
+**Labels:** defect, science, blocking
+
+**Blocked by:** None
+
+**What is wrong.** Observed immediately after the four-arm restart: `spool/ready/`
+went 19 → 22 → 26 in about a minute while the worker was draining continuously.
+Each capture now costs four sequential `cc_*` calls at roughly 20s each, so a
+capture takes ~80s to process while captures arrive faster than that during
+active work.
+
+**Why it is not merely slow.** `capture.sh` implements backpressure: past
+`spool_backpressure_max_files` (500) the hook **stops writing and fails open**.
+That is correct behaviour for a hook — it must never wedge a session — but the
+consequence is that captures are dropped **silently**, with no run row, no
+capture row and therefore no entry in the attrition count the pre-registration
+commits to reporting. It is the third instance of the same failure shape as
+JEV-31 and JEV-32: a loss that is invisible to the measurement built to catch it.
+
+With a window running to 2026-10-20, a backlog that grows during every working
+session will reach 500.
+
+- [ ] Count and log the drop: when the hook refuses on backpressure, record that it happened somewhere durable, so dropped captures appear in attrition instead of vanishing
+- [ ] Evaluate arms **concurrently** rather than sequentially — they are independent HTTP/subprocess calls and the interleaving requirement is about *order randomisation*, not serialisation. This alone should cut per-capture time by ~4x
+- [ ] Decide whether every capture needs every arm. The primary metric needs `jev` and `cc_opus5`; `cc_sonnet5`, `cc_haiku45` and `cc_fable51` could be sampled rather than run on all
+- [ ] Report the spool high-water mark for the window, whatever is decided
+
+---
+
 ## JEV-30: The worker reads config once, and nothing says so
 
 **Status:** ready-for-agent
@@ -728,7 +759,8 @@ report it.
 
 - [ ] Log the resolved arm set, config version and config file mtime at worker startup — the operator should be able to see what the process actually loaded
 - [ ] Fail loudly, or at minimum warn on every drain cycle, if a config file's mtime is newer than the process start time
-- [ ] Record the configuration boundary in the collection log: which rows were collected under which arm set
+- [x] **Boundary recorded.** The worker was restarted at **2026-09-20T12:07:24Z**. Rows before that timestamp carry a three-arm `arm_order` (`cc_opus5`, `cc_haiku45`, `jev`) and **no `cc_sonnet5`**; rows after carry four. Verified on the first post-restart row at 12:07:43Z. The analysis must condition on this or report it — the `pre_bash` primary metric is `jev` vs `cc_opus5`, both present on both sides, so the headline is unaffected
+- [x] One stranded capture reaped from `spool/claimed/` before the restart (JEV-31), so the restart did not lose it
 - [ ] Decide and document whether a mid-window config change requires a restart, a new `arms_config_version` on every row, or is forbidden outright during a collection window
 
 ---
