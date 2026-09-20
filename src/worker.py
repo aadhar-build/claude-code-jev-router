@@ -11,14 +11,69 @@ launchd, no SessionStart self-start: when the output is a published measurement,
 
 Two properties matter more than anything else here:
 
-**Both arms run async, in one worker, interleaved per decision point with
-randomised arm order.** Making Jev inline and the LLMs offline would confound the
-comparison with process spawn, TLS setup and time-of-day network drift that only
-one arm pays. Enforce-mode latency is measured separately, by bench_inline.py.
+**Every arm runs offline, in one worker, on the same decision point.** Making Jev
+inline and the LLMs offline would confound the comparison with process spawn, TLS
+setup and time-of-day network drift that only one arm pays. Enforce-mode latency
+is measured separately, by bench_inline.py.
 
 **Every arm sees byte-identical state.** The state is built once, hashed once,
 and the hash is recorded on every row, so a serialisation drift fails loudly in
 analysis instead of silently skewing every comparison.
+
+--------------------------------------------------------------------------
+ARM DISPATCH: what `arm_order` and `arm_order_position` mean (JEV-33)
+--------------------------------------------------------------------------
+
+Until 2026-09-20 the arms were evaluated **sequentially** in a per-decision
+randomised order. The randomisation was never about the order itself; it existed
+so that no arm systematically occupied the late slots of a ~20-80s serial window
+and therefore systematically paid a slice of time-of-day network drift, nor
+systematically occupied the first slot and paid the cold-connection cost. In that
+era `arm_order` was causal: position N genuinely ran after positions 0..N-1, and
+`arm_order_position` was the control variable an analysis would condition on.
+
+Since JEV-33 the arms are dispatched **concurrently** — all of them start within
+a few hundred microseconds of one decision's t0. That does not weaken the
+protection the randomisation existed for; it removes the hazard outright. There
+are no late slots to be unlucky in, because there are no slots. Concurrency is
+the stronger version of the same guarantee, not a relaxation of it.
+
+But it changes what the two fields MEAN, and those fields are already on 750+
+committed rows, so they are not silently redefined:
+
+  arm_dispatch          NEW. "concurrent" on every row written by this code.
+                        ABSENT on every row written before the boundary, and
+                        absence is defined to mean "sequential". replay.py and
+                        canary.py rows are also sequential and also omit it.
+                        This is the era marker; condition on it, do not pool
+                        latency across it without saying so.
+  arm_order             Post-boundary: the randomised **submission** order into
+                        the thread pool. It no longer determines when a call
+                        ran, so it is NOT a latency-confound control any more.
+                        It is kept because the submission stagger is real,
+                        merely tiny, and because dropping a field mid-window is
+                        worse than narrowing one.
+  arm_order_position    Post-boundary: this arm's index in that submission
+                        order. The invariant row["arm"] ==
+                        row["arm_order"][row["arm_order_position"]] holds in
+                        both eras and is tested.
+  dispatch_offset_ms    NEW. Measured ms from the decision's t0 to the moment
+                        this arm's call actually began. This is the EMPIRICAL
+                        replacement for the order control: an analysis can now
+                        verify the stagger is negligible instead of trusting
+                        the design. Sequential-era rows do not have it.
+  dispatch_wall_ms      NEW. t0 to the last arm finishing, per decision. The
+                        direct drain-rate instrument.
+  concurrent_arms       NEW. How many arms were in flight together. Concurrent
+                        `claude -p` spawns contend for CPU, so a cc_* arm's
+                        total_ms is inflated relative to the sequential era by
+                        an amount this field lets an analysis condition on.
+                        `raw.duration_api_ms` separates API time from spawn.
+
+**The honest statement for the writeup**: pre- and post-boundary latency are
+different measurements of different things and must not be pooled. Agreement,
+answers, cost and attrition are unaffected — the arms see identical bytes and
+ask identical questions in both eras.
 """
 
 from __future__ import annotations
@@ -28,6 +83,7 @@ import json
 import random
 import sys
 import time
+from concurrent import futures
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +91,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import config_loader as cl  # noqa: E402
 import paths  # noqa: E402
+import spool_watch  # noqa: E402
 import state_builders as sb  # noqa: E402
 import store  # noqa: E402
 from arms.base import ArmConfig, Run, classify_exception  # noqa: E402
@@ -76,6 +133,39 @@ def evaluate_one(state: str, questions: dict[str, Any], config: ArmConfig) -> Ru
             error_kind=kind,
             error_detail=detail[:2000],
         )
+
+
+def _dispatch(
+    state: str,
+    questions: dict[str, Any],
+    order: list[ArmConfig],
+) -> tuple[list[Run], list[float], float]:
+    """Run every arm concurrently, returning results IN SUBMISSION ORDER.
+
+    Results are indexed by submission position rather than collected with
+    as_completed(), because the position is written onto the row: pairing a
+    future with the wrong arm would mislabel `arm_order_position` silently,
+    which is worse than being slow.
+
+    Note for whoever reads a wedged terminal: a Ctrl-C here blocks inside the
+    pool's shutdown until the in-flight `claude -p` calls return, which can be
+    up to the arm's timeout_s (180-240s). The worker is not hung.
+    """
+    if not order:
+        return [], [], 0.0
+
+    t0 = time.perf_counter()
+    offsets: list[float] = [0.0] * len(order)
+
+    def call(position: int, config: ArmConfig) -> Run:
+        offsets[position] = (time.perf_counter() - t0) * 1000.0
+        return evaluate_one(state, questions, config)
+
+    with futures.ThreadPoolExecutor(max_workers=len(order)) as pool:
+        pending = [pool.submit(call, i, c) for i, c in enumerate(order)]
+        results = [f.result() for f in pending]
+
+    return results, offsets, (time.perf_counter() - t0) * 1000.0
 
 
 def process_capture(
@@ -120,15 +210,15 @@ def process_capture(
         "run_context": run_context,
     }
 
-    # Randomised arm order per decision point: no arm systematically pays the
-    # cold-connection cost or a particular slice of time-of-day network drift.
+    # Randomised submission order per decision point, then CONCURRENT dispatch.
+    # See the module docstring: the randomisation existed so no arm
+    # systematically paid a late slot in a serial window; concurrency removes
+    # the slots entirely. The shuffle is kept so that the residual sub-
+    # millisecond submission stagger is still randomised rather than fixed.
     order = list(arms)
     rng.shuffle(order)
 
-    results: list[Run] = []
-    for config in order:
-        run = evaluate_one(state, questions, config)
-        results.append(run)
+    results, offsets, dispatch_wall_ms = _dispatch(state, questions, order)
 
     if dry_run:
         return decision_id, results
@@ -147,8 +237,15 @@ def process_capture(
                 "question_set_id": qsid,
                 "state_sha256": state_sha,
                 "run_context": run_context,
+                # See the module docstring for what these four mean now that
+                # the calls overlap. `arm_dispatch` is the era marker; its
+                # ABSENCE on a row means the sequential era.
+                "arm_dispatch": "concurrent",
                 "arm_order_position": position,
                 "arm_order": [c.name for c in order],
+                "concurrent_arms": len(order),
+                "dispatch_offset_ms": round(offsets[position], 3),
+                "dispatch_wall_ms": round(dispatch_wall_ms, 1),
                 "evaluated_at": store.utcnow(),
                 "pricing_version": cl.pricing()["version"],
                 "cost_usd": cl.cost_usd(run.response_model or "", usage) if run.ok else None,
@@ -166,6 +263,11 @@ def drain_once(arms: list[ArmConfig], *, verbose: bool = True) -> int:
     claimed_dir.mkdir(parents=True, exist_ok=True)
 
     for candidate in ready:
+        # Sample the depth on every claim, not once per poll cycle: the backlog
+        # peaks while the worker is mid-capture and a 30s poll steps over the
+        # peak it exists to catch (JEV-33).
+        spool_watch.sample()
+
         # Claim the file by renaming it out of ready/ before doing any work.
         # rename is atomic, so exactly one worker wins and the loser moves on.
         # Without this, two workers evaluate the same capture against the live
@@ -202,7 +304,7 @@ def drain_once(arms: list[ArmConfig], *, verbose: bool = True) -> int:
         processed += 1
         if verbose:
             ok = sum(1 for r in results if r.ok)
-            print(f"  {surface} {decision_id} -> {ok}/{len(results)} arms ok")
+            print(f"  {surface} {decision_id} -> {ok}/{len(results)} arms ok", flush=True)
     return processed
 
 
@@ -222,11 +324,12 @@ def _quarantine(spooled: Path, reason: str, *, verbose: bool) -> None:
         spooled.rename(dead / spooled.name)
     except FileNotFoundError:
         if verbose:
-            print(f"  {spooled.name} vanished before quarantine (another worker took it)")
+            print(f"  {spooled.name} vanished before quarantine (another worker took it)",
+                  flush=True)
         return
     (dead / f"{spooled.name}.reason").write_text(reason, encoding="utf-8")
     if verbose:
-        print(f"  quarantined {spooled.name}: {reason}")
+        print(f"  quarantined {spooled.name}: {reason}", flush=True)
 
 
 def main() -> int:
@@ -244,7 +347,11 @@ def main() -> int:
     names = args.arms.split(",") if args.arms else cl.arms_config()["enabled"]
     arms = [cl.arm(n.strip()) for n in names]
 
-    print(f"worker: arms={[a.name for a in arms]} spool={paths.SPOOL_READY}")
+    print(f"worker: arms={[a.name for a in arms]} spool={paths.SPOOL_READY}", flush=True)
+    print(f"worker: dispatch=concurrent ({len(arms)} arms in flight per decision); "
+          "rows carry arm_dispatch='concurrent' -- see the module docstring "
+          "for what arm_order means now", flush=True)
+    print(spool_watch.report(), flush=True)
     if args.once:
         n = drain_once(arms)
         print(f"drained {n} capture(s)")
@@ -254,6 +361,7 @@ def main() -> int:
     try:
         while True:
             drain_once(arms, verbose=True)
+            spool_watch.sample()  # keep the mark live even on an idle cycle
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nstopped")

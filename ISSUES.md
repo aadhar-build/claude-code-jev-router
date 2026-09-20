@@ -908,10 +908,109 @@ JEV-31 and JEV-32: a loss that is invisible to the measurement built to catch it
 With a window running to 2026-10-20, a backlog that grows during every working
 session will reach 500.
 
-- [ ] Count and log the drop: when the hook refuses on backpressure, record that it happened somewhere durable, so dropped captures appear in attrition instead of vanishing
-- [ ] Evaluate arms **concurrently** rather than sequentially — they are independent HTTP/subprocess calls and the interleaving requirement is about *order randomisation*, not serialisation. This alone should cut per-capture time by ~4x
-- [ ] Decide whether every capture needs every arm. The primary metric needs `jev` and `cc_opus5`; `cc_sonnet5`, `cc_haiku45` and `cc_fable51` could be sampled rather than run on all
-- [ ] Report the spool high-water mark for the window, whatever is decided
+- [x] Count and log the drop: when the hook refuses on backpressure, record that it happened somewhere durable, so dropped captures appear in attrition instead of vanishing
+- [x] Evaluate arms **concurrently** rather than sequentially — they are independent HTTP/subprocess calls and the interleaving requirement is about *order randomisation*, not serialisation. ~~This alone should cut per-capture time by ~4x~~ **The 4x was wrong; see below.**
+- [x] Decide whether every capture needs every arm. **Decided: every capture keeps every arm** (owner, 2026-09-20). Sampling would create a *third* configuration boundary stacked on JEV-30's arm-set boundary, and a third era is worse than 16.5s per capture. The drop counter now makes any future loss visible rather than silent, so sampling can be decided on evidence later instead of on fear. Not implemented.
+- [x] Report the spool high-water mark for the window, whatever is decided
+
+**Done 2026-09-20.** What changed:
+
+| | |
+|---|---|
+| `src/worker.py` | `_dispatch()` runs every arm in a thread pool. Results are indexed by submission position, never collected with `as_completed()` — pairing a future with the wrong arm would mislabel `arm_order_position` silently, and the row would still look well-formed |
+| `hooks/capture.sh` | a backpressure refusal appends one line to `data/drops/YYYY-MM-DD.jsonl`. Two forks, paid **only** on the drop path; the happy path is still fork-free at 6.0ms, the drop path is 9.1ms, both inside the 10ms budget |
+| `src/spool_watch.py` | new. Spool depth (ready **and** claimed), a monotonic high-water mark in `data/spool_watermark.json`, and the drop count |
+| `run-collection.sh` | `status` reports depth, peak and drops; `start` now uses `python3 -u`, because the worker had been block-buffering `logs/worker.log` under `nohup` and an operator tailing it saw nothing for hours |
+
+### The ~4x estimate was wrong, and the realised gain is ~1.2x
+
+The estimate in this ticket was mine and it was never reachable. Concurrency is
+bounded by the **slowest** arm, not by the mean, and the arms are wildly
+unequal. Measured on the 78 four-arm serial-era live decisions:
+
+| arm | median wall-clock |
+|---|---|
+| `jev` | 0.57s |
+| `cc_sonnet5` | 2.9s |
+| `cc_opus5` | 4.9s |
+| `cc_haiku45` | **11.6s** |
+| **serial sum per capture** | **20.1s** |
+
+So the theoretical floor was ~11.4s — a **1.76x** ceiling, not 4x. Measured
+after the change, over 17 concurrent decisions: `dispatch_wall_ms` median
+**16.5s**. The realised gain is **20.1s → 16.5s, ~1.2x**.
+
+The ~6s above the slowest-arm floor is **contention**: four simultaneous
+`claude -p` invocations each pay a Node startup and compete for CPU. That
+contention is systematic **by arm kind** — `jev` is one HTTP call and barely
+contends, the three `cc_*` arms each spawn a process — so it biases per-arm
+wall-clock **toward Jev**. `raw.duration_api_ms` is recorded on every `cc_*` row
+and separates API time from spawn, so the bias is measurable rather than assumed.
+
+The backlog does drain: `spool/ready` fell 20 → 10 over 3.7 minutes while new
+captures kept arriving. But 4x does not appear anywhere and should not be quoted.
+The remaining lever is arm sampling, deliberately not taken (above). **See JEV-41:
+`cc_haiku45` alone accounts for most of the floor, and the reason is fixable.**
+
+### Both era boundaries in the collection window, in one place
+
+An analyst needs these together, so they are recorded together rather than one
+per ticket:
+
+| boundary | at | before | after | ticket |
+|---|---|---|---|---|
+| arm set | **2026-09-20T12:07:24Z** | 3 arms (`cc_opus5`, `cc_haiku45`, `jev`) — no `cc_sonnet5` | 4 arms | JEV-30 |
+| arm dispatch | **2026-09-20T14:24:13Z** | serial, randomised order | concurrent, randomised submission order | JEV-33 |
+
+**The pooling rule.** Across the *dispatch* boundary: **wall-clock latency is
+NOT poolable** and must be reported per era, because concurrent `claude -p`
+spawns contend and the contention is arm-kind-dependent. **Agreement, answers,
+cost and attrition ARE poolable** — every arm sees byte-identical state and
+identical questions in both eras, and neither the state nor the question set
+changed. Across the *arm-set* boundary, condition on the arm set or report it;
+the `pre_bash` primary metric is `jev` vs `cc_opus5`, both present on both
+sides, so the headline is unaffected.
+
+Split the eras on the **presence of `arm_dispatch`** on a run row. Its absence
+means the sequential era — that is a definition, not an inference, and it is
+correct for `replay.py` and `canary.py` rows too, which remain sequential.
+
+### What `arm_order` means now
+
+The randomisation never protected *order*; it protected against one arm
+systematically occupying the late slots of a ~20s serial window (a slice of
+time-of-day network drift) or the first slot (cold-connection cost).
+**Concurrency removes that hazard rather than relaxing it: there are no late
+slots because there are no slots.** The requirement is satisfied more strongly.
+
+But the field's meaning narrows, and it is on 750+ committed rows, so it is
+marked rather than silently redefined. Post-boundary rows carry:
+
+| field | meaning |
+|---|---|
+| `arm_dispatch` | `"concurrent"`. **Absent = sequential era.** The era marker |
+| `arm_order` | the randomised **submission** order. No longer a latency-confound control. Kept because the stagger is real, merely tiny |
+| `arm_order_position` | index into it. `row["arm"] == row["arm_order"][row["arm_order_position"]]` holds in **both** eras and is now tested |
+| `dispatch_offset_ms` | measured ms from the decision's t0 to this arm's call starting. The **empirical** replacement for the order control: analysis can now verify the stagger is negligible instead of trusting the design. Measured max **5.25ms** |
+| `dispatch_wall_ms` | t0 to the last arm finishing. The drain-rate instrument |
+| `concurrent_arms` | how many were in flight, so contention is conditionable |
+
+Full statement in `src/worker.py`'s module docstring. `PREREGISTRATION.md`
+Amendment 5 is the owner's to write; this ticket did not touch that file.
+
+### Verified on live data
+
+68 concurrent rows across 17 decisions: the `arm_order_position` invariant holds
+on all 68, zero errors, and **no `rate_limit` or `cli_error`** — four concurrent
+`claude -p` calls on one subscription did not hit a config-dir lock or a 429,
+which was the risk worth checking before trusting this.
+
+**Not fixed here, and still open:** JEV-31 (claimed files are never reaped —
+one stranded file was reaped by hand before this restart, again), and JEV-31b
+(`spool_backpressure_max_files` in config is still inert; `capture.sh` still
+hardcodes `500`. They agree today; `spool_watch.cap()` reads the config value
+and its docstring says plainly that it is the number an operator *believes* is
+in force).
 
 ---
 
@@ -1145,6 +1244,71 @@ would be the dangerous part:
 The first three are what a master switch is for. The last two are why the
 experiment is pre-registered and staged rather than simply flagged, and they
 belong in the writeup's limitations rather than in a config file.
+
+---
+
+## JEV-41: `cc_haiku45` is the SLOWEST arm, not the fastest — and `--effort low` is not suppressing its thinking
+
+**Status:** ready-for-agent
+**Labels:** science, defect, cost
+**Blocked by:** None
+
+**What is wrong.** `config/arms.json` calls `cc_haiku45` "the actual incumbent"
+on the premise that nobody deploys Opus as a hook gate. The measurement says the
+opposite. Across **both** dispatch eras, so this is not a concurrency artefact:
+
+| arm | median API time | median wall | output tokens | **thinking tokens** | cache read |
+|---|---|---|---|---|---|
+| `cc_haiku45` | **8.1s** (10.4s over all n=335) | 11.6s | **1,019** | **741** | **0** |
+| `cc_opus5` | 3.4s | 4.9s | 174 | **0** | 10,777 |
+| `cc_sonnet5` | 1.5s | 2.9s | 95 | **0** | 4,898 |
+
+Haiku 4.5 is **2.4x slower than Opus 5** on the same question, on identical
+state, at the same `effort: low`.
+
+**Two candidate causes are already visible in the data and neither is asserted
+as the answer.**
+
+1. **`--effort low` appears not to suppress thinking on Haiku 4.5.** Opus and
+   Sonnet emit **zero** thinking tokens; Haiku emits **741** — 73% of its
+   output. `src/arms/claude_cli.py`'s docstring records "317 tokens, despite
+   `--effort low`" from the JEV-02 spike, so this was seen on day 0, measured on
+   Haiku, and generalised in prose to all the `cc_*` arms. It does not
+   generalise: it is a Haiku-specific behaviour, and it is now 741 tokens rather
+   than 317. Note this cuts **against** `arms.json`'s note that "low effort is
+   the correct lever" — it is the correct lever on Opus and is not working on
+   Haiku.
+2. **Haiku gets no prompt caching at all.** `cache_read_input_tokens` is **0**
+   on every one of 335 Haiku calls while it writes 5,524 cache-creation tokens
+   every time; Opus reads 10,777 cached tokens per call. Haiku is paying a cold
+   preamble on every single invocation.
+
+Process spawn is a third candidate and is the least likely of the three — it is
+common to all three `cc_*` arms, and the wall-minus-API gap is ~3.5s for Haiku
+against ~1.4s for Opus, so spawn does not explain the ordering either.
+
+**Why this matters beyond curiosity, and what it does NOT show.** JEV-23 makes
+**net wall-clock a CO-PRIMARY outcome** of the routing A/B, and the whole
+economic argument for routing down a tier rests on cheaper models also being
+faster. This is direct evidence that **"smaller = faster" is not automatic in
+this harness**.
+
+It does **not** refute the routing thesis, and must not be quoted as if it did.
+These are single classification calls — one short question, tiny state,
+structured output — not delegated tasks. A delegated task is a long multi-turn
+agentic loop where the tier's throughput dominates and a fixed per-call overhead
+amortises away. What it does mean is that **the A/B has to MEASURE speed rather
+than assume it**, which is exactly why wall-clock was made co-primary, and that
+the configuration under test must be checked for this defect first — otherwise
+the A/B measures a thinking-token misconfiguration and reports it as a property
+of the tier.
+
+- [ ] Confirm the effort/thinking behaviour against a controlled pair of calls, Haiku vs Opus, same state, same effort, thinking tokens recorded
+- [ ] Establish whether `--effort low` is ignored on Haiku 4.5, or whether Haiku's floor genuinely sits at ~740 thinking tokens; check the claude-api skill's docs before concluding
+- [ ] Establish why Haiku's cache read is zero on every call while Opus's is not
+- [ ] Re-time `cc_haiku45` once either is fixed. If it drops below `cc_opus5`, the arm's `arm_config_id` MUST change and that is a **fourth** era boundary in the window — weigh that against leaving it alone until the window closes
+- [ ] Correct `src/arms/claude_cli.py`'s docstring: its "317 tokens despite `--effort low`" was measured on Haiku and does not hold for Opus or Sonnet, both of which emit zero
+- [ ] Report the finding in the writeup whatever the cause: "the cheap tier was the slow tier, and the reason was configuration, not capability" is a useful result about hook-gate deployment and is directly relevant to JEV-23's co-primary
 
 ---
 

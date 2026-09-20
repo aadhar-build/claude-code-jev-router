@@ -57,6 +57,28 @@ READY="$ROOT/spool/ready"
 # the disk. Counted with a glob rather than `ls | wc -l` to avoid a subshell.
 set -- "$READY"/*.json
 if [ "$#" -gt 500 ]; then
+  # JEV-33. A refusal here used to be SILENT: no capture row, no run row, and
+  # therefore no entry in the attrition count the pre-registration commits to
+  # reporting -- a loss invisible to the measurement built to catch it. So
+  # record it. Durably, under data/ rather than logs/, because attrition has to
+  # outlive a log rotation.
+  #
+  # Cost is paid ONLY on this path, which is the rare one: two forks (mkdir,
+  # date). The happy path below is untouched and still fork-free. bash 3.2 has
+  # no EPOCHREALTIME and no printf %()T, so `date` is the only clock there is;
+  # whole seconds are plenty for counting drops.
+  #
+  # Concurrency: several hooks can fire at once. One short line appended with
+  # >> is a single O_APPEND write well under PIPE_BUF, so parallel writers
+  # interleave cleanly rather than corrupting each other -- the same property
+  # store.py relies on. Nothing is read, locked or rewritten.
+  DROPS="$ROOT/data/drops"
+  # `[ -d ]` is a builtin; the mkdir fork is paid once, on the first drop of a
+  # fresh checkout, and never again.
+  [ -d "$DROPS" ] || mkdir -p "$DROPS" 2>/dev/null || exit 0
+  TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) || exit 0
+  printf '{"at":"%s","surface":"%s","reason":"spool_backpressure","ready_files":%s,"cap":500,"pid":%s}\n' \
+    "$TS" "$SURFACE" "$#" "$$" >> "$DROPS/${TS%%T*}.jsonl" 2>/dev/null
   exit 0
 fi
 

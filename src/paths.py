@@ -25,6 +25,8 @@ DOCS = ROOT / "docs"
 SPOOL = ROOT / "spool"
 SPOOL_TMP = SPOOL / "tmp"
 SPOOL_READY = SPOOL / "ready"
+SPOOL_CLAIMED = SPOOL / "claimed"
+SPOOL_DEAD = SPOOL / "dead"
 
 DATA = ROOT / "data"
 CAPTURES = DATA / "captures"
@@ -32,6 +34,15 @@ STATES = DATA / "states"
 RUNS = DATA / "runs"
 LABELS = DATA / "labels"
 FIXTURES = DATA / "fixtures"
+
+# JEV-33. The backpressure-drop stream, written by hooks/capture.sh (NOT by
+# store.py) when the spool is too deep to accept another capture, and the
+# monotonic spool high-water mark, written by the worker. Both live under
+# data/ rather than logs/ because a dropped capture is attrition the
+# pre-registration commits to reporting, and attrition must outlive a log
+# rotation.
+DROPS = DATA / "drops"
+SPOOL_WATERMARK = DATA / "spool_watermark.json"
 
 # The one path outside ROOT, and it is READ-ONLY. Claude Code owns it; we never
 # write there. Fixtures used by tests are copied into FIXTURES.
@@ -45,6 +56,7 @@ WRITABLE_DIRS = [
     RUNS,
     LABELS,
     FIXTURES,
+    DROPS,
     LOGS,
     REPORTS,
 ]

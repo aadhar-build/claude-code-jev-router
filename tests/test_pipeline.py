@@ -30,6 +30,7 @@ import config_loader as cl  # noqa: E402
 import paths  # noqa: E402
 import state_builders as sb  # noqa: E402
 import stats  # noqa: E402
+import spool_watch  # noqa: E402
 import store  # noqa: E402
 import worker  # noqa: E402
 from arms.base import ArmConfig, Run, classify_exception  # noqa: E402
@@ -42,11 +43,16 @@ class TempStorage(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         base = Path(self._tmp.name)
         self._saved = {}
-        for name in ("CAPTURES", "STATES", "RUNS", "LABELS", "SPOOL", "SPOOL_READY", "SPOOL_TMP"):
+        for name in ("CAPTURES", "STATES", "RUNS", "LABELS", "SPOOL", "SPOOL_READY",
+                     "SPOOL_TMP", "SPOOL_CLAIMED", "SPOOL_DEAD", "DROPS"):
             self._saved[name] = getattr(paths, name)
             target = base / name.lower()
             target.mkdir(parents=True, exist_ok=True)
             setattr(paths, name, target)
+        # A file, not a directory: the spool high-water mark must not be
+        # advanced by a test run against the real collection window.
+        self._saved["SPOOL_WATERMARK"] = paths.SPOOL_WATERMARK
+        paths.SPOOL_WATERMARK = base / "spool_watermark.json"
 
     def tearDown(self):
         for name, value in self._saved.items():
@@ -318,6 +324,68 @@ class TestWorkerOrchestration(TempStorage):
         for row in store.runs():
             seen.add(tuple(row["arm_order"]))
         self.assertGreater(len(seen), 1, "arm order never varied; the confound survives")
+
+    def test_arm_order_position_indexes_arm_order(self):
+        """The one invariant that must hold in BOTH dispatch eras.
+
+        Concurrent dispatch maps futures back onto submission positions by
+        index. Getting that mapping wrong would mislabel which arm ran where
+        silently -- the row would still look perfectly well-formed.
+        """
+        for i in range(10):
+            worker.process_capture(payload(f"c {i}"), "pre_bash", self.arms())
+        rows = list(store.runs())
+        self.assertEqual(len(rows), 30)
+        for row in rows:
+            self.assertEqual(row["arm"], row["arm_order"][row["arm_order_position"]])
+
+    def test_rows_record_the_dispatch_era_and_its_measurements(self):
+        """JEV-33. `arm_order` changed meaning, so the change is on the row.
+
+        Absence of `arm_dispatch` means the sequential era; the worker must
+        therefore never write a row without it, or pre- and post-boundary rows
+        become indistinguishable and the latency comparison is unconditionable.
+        """
+        worker.process_capture(payload("ls"), "pre_bash", self.arms())
+        rows = list(store.runs())
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertEqual(row["arm_dispatch"], "concurrent")
+            self.assertEqual(row["concurrent_arms"], 3)
+            self.assertIsInstance(row["dispatch_offset_ms"], float)
+            self.assertIsInstance(row["dispatch_wall_ms"], float)
+        # One decision, one dispatch window: every arm shares it.
+        self.assertEqual(len({r["dispatch_wall_ms"] for r in rows}), 1)
+
+    def test_arms_are_dispatched_concurrently_not_serially(self):
+        """The fix itself. Three arms that each block for 0.4s must finish in
+        well under the 1.2s a serial loop would take."""
+        import time as _time
+        from arms.base import Run as _Run
+
+        slow = [ArmConfig(name=f"slow{i}", arm_config_id=f"slow{i}-v1", kind="fake")
+                for i in range(3)]
+
+        def fake_evaluate(state, questions, config):
+            _time.sleep(0.4)
+            return _Run(arm=config.name, arm_config_id=config.arm_config_id, ok=True)
+
+        original = worker.evaluate_one
+        worker.evaluate_one = fake_evaluate
+        try:
+            start = _time.perf_counter()
+            worker.process_capture(payload("ls"), "pre_bash", slow)
+            elapsed = _time.perf_counter() - start
+        finally:
+            worker.evaluate_one = original
+        self.assertLess(elapsed, 0.9, f"arms still serialised: {elapsed:.2f}s for 3x0.4s")
+
+    def test_no_arms_configured_is_not_an_error(self):
+        """capture_only mode passes an empty arm list; the pool must not be
+        constructed with max_workers=0, which raises."""
+        decision_id, results = worker.process_capture(payload("ls"), "pre_bash", [])
+        self.assertEqual(results, [])
+        self.assertEqual(len(list(store.captures())), 1)
 
     def test_every_row_carries_the_join_keys(self):
         worker.process_capture(payload("ls"), "pre_bash", self.arms())
@@ -741,6 +809,49 @@ class TestReport(TempStorage):
 
     def test_report_survives_an_empty_dataset(self):
         self.assertIn("JEV SHADOW-MODE REPORT", analyze.report(reference="fake"))
+
+
+class TestSpoolWatch(TempStorage):
+    """JEV-33: the backlog has to be visible before it reaches the cap."""
+
+    def test_depth_counts_claimed_as_well_as_ready(self):
+        (paths.SPOOL_READY / "pre_bash__1.json").write_text("{}")
+        (paths.SPOOL_CLAIMED / "pre_bash__2.json").write_text("{}")
+        self.assertEqual(spool_watch.depth(), (1, 1))
+
+    def test_high_water_mark_is_monotonic(self):
+        (paths.SPOOL_READY / "a__1.json").write_text("{}")
+        (paths.SPOOL_READY / "a__2.json").write_text("{}")
+        (paths.SPOOL_READY / "a__3.json").write_text("{}")
+        spool_watch.sample()
+        for f in paths.SPOOL_READY.glob("*.json"):
+            f.unlink()
+        mark = spool_watch.sample()
+        self.assertEqual(mark["last_total"], 0)
+        self.assertEqual(mark["max_total"], 3, "the peak was forgotten when the spool drained")
+
+    def test_drops_are_counted_from_the_hook_written_stream(self):
+        self.assertEqual(spool_watch.drops()[0], 0)
+        (paths.DROPS / "2026-09-20.jsonl").write_text(
+            '{"at":"2026-09-20T12:00:00Z","surface":"pre_bash","reason":"spool_backpressure"}\n'
+            '{"at":"2026-09-20T12:00:01Z","surface":"pre_bash","reason":"spool_backpressure"}\n'
+        )
+        count, last = spool_watch.drops()
+        self.assertEqual(count, 2)
+        self.assertEqual(last, "2026-09-20T12:00:01Z")
+
+    def test_a_truncated_hook_line_is_still_counted_as_a_drop(self):
+        """The hook writes without locking. A torn line is still evidence that
+        a capture was lost, and undercounting attrition is the failure this
+        whole ticket exists to stop."""
+        (paths.DROPS / "2026-09-20.jsonl").write_text('{"at":"2026-09-20T12:0\n')
+        self.assertEqual(spool_watch.drops()[0], 1)
+
+    def test_report_mentions_the_cap_and_the_peak(self):
+        spool_watch.sample()
+        text = spool_watch.report()
+        self.assertIn("spool peak", text)
+        self.assertIn(str(spool_watch.cap()), text)
 
 
 if __name__ == "__main__":

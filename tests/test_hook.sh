@@ -74,13 +74,36 @@ big=$(python3 -c "import json;print(json.dumps({'session_id':'test','cwd':'$ROOT
 [ "$(count)" = "1" ] && ok "200KB payload: spooled whole" || bad "large payload not spooled"
 
 # --- backpressure -----------------------------------------------------------
+# A drop is ATTRITION, and this test would otherwise append a fabricated drop
+# row to the live attrition stream. Snapshot the stream and restore it after.
+DROPFILE="$ROOT/data/drops/$(date -u '+%Y-%m-%d').jsonl"
+dropcount(){ cat "$ROOT"/data/drops/*.jsonl 2>/dev/null | wc -l | tr -d ' '; }
+mkdir -p "$ROOT/data/drops"
+cp "$DROPFILE" "$ROOT/data/drops/.snapshot" 2>/dev/null || : > "$ROOT/data/drops/.snapshot"
+
 reset
 i=0; while [ $i -lt 501 ]; do echo '{}' > "$ROOT/spool/ready/filler__$i.json"; i=$((i+1)); done
 before=$(count)
+dropped_before=$(dropcount)
 (cd "$ROOT" && echo "$PAYLOAD" | CLAUDE_PROJECT_DIR="$ROOT" "$HOOK" pre_bash); rc=$?
 after=$(count)
+dropped_after=$(dropcount)
 [ "$rc" -eq 0 ]            && ok "backpressure: exits 0" || bad "backpressure exit $rc"
 [ "$before" = "$after" ]   && ok "backpressure: stops writing past the cap" || bad "wrote past cap ($before -> $after)"
+# JEV-33: a refusal used to be silent, so the lost capture never reached the
+# attrition count the pre-registration commits to reporting.
+[ "$dropped_after" -eq $((dropped_before + 1)) ] \
+  && ok "backpressure: the drop is recorded durably" \
+  || bad "drop not recorded ($dropped_before -> $dropped_after)"
+if tail -1 "$DROPFILE" 2>/dev/null | grep -q '"reason":"spool_backpressure"'; then
+  ok "backpressure: drop row names its reason and surface"
+else
+  bad "drop row malformed: $(tail -1 "$DROPFILE" 2>/dev/null)"
+fi
+# Restore: this test's own drops are synthetic and must not enter the window.
+cp "$ROOT/data/drops/.snapshot" "$DROPFILE" 2>/dev/null
+[ -s "$DROPFILE" ] || rm -f "$DROPFILE"
+rm -f "$ROOT/data/drops/.snapshot"
 reset
 
 # --- recursion guard --------------------------------------------------------

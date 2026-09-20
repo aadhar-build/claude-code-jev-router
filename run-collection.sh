@@ -24,7 +24,9 @@ case "${1:-status}" in
       echo "already running (pid $(cat "$PIDFILE"))"; exit 0
     fi
     mkdir -p "$ROOT/logs"
-    nohup python3 "$ROOT/src/worker.py" --interval 30 \
+    # -u: unbuffered. Without it Python block-buffers stdout under nohup and
+    # an operator tailing worker.log sees nothing for hours (JEV-33).
+    nohup python3 -u "$ROOT/src/worker.py" --interval 30 \
       >> "$ROOT/logs/worker.log" 2>&1 &
     echo $! > "$PIDFILE"
     echo "worker started (pid $!), polling every 30s"
@@ -45,7 +47,12 @@ case "${1:-status}" in
     else
       echo "worker: not running"
     fi
-    echo "spool pending : $(ls "$ROOT"/spool/ready/*.json 2>/dev/null | wc -l | tr -d ' ')"
+    # Spool depth, its high-water mark for the window, and the count of
+    # captures dropped on backpressure -- so a backlog is visible while it is
+    # forming rather than after it has hit the cap (JEV-33). Sampling here
+    # means an operator running `status` also advances the mark.
+    python3 "$ROOT/src/spool_watch.py" --sample 2>/dev/null \
+      || echo "spool ready   : $(ls "$ROOT"/spool/ready/*.json 2>/dev/null | wc -l | tr -d ' ')"
     echo "captures      : $(cat "$ROOT"/data/captures/*.jsonl 2>/dev/null | wc -l | tr -d ' ')"
     echo "runs          : $(cat "$ROOT"/data/runs/*.jsonl 2>/dev/null | wc -l | tr -d ' ')"
     if [ -f "$ROOT/.jev-disabled" ]; then

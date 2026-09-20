@@ -811,6 +811,14 @@ With per-surface arm lists, all four sit at **60–75 min/day** of worker time i
 bursts — drainable, but only just. Without them, ~2.5 hours/day and backpressure
 loss during any heavy session.
 
+**JEV-33, 2026-09-20.** That estimate assumed serial arm evaluation. It was also
+optimistic: on `pre_bash` alone, four arms serially took a median 20.1s of arm
+time per capture, and captures arrived faster during active work. Backpressure
+loss stopped being hypothetical. The arms now run concurrently, which bounds a
+capture at its slowest arm rather than the sum of all of them, and a refusal on
+backpressure is now RECORDED (`data/drops/`) rather than silent, so it lands in
+attrition instead of vanishing.
+
 ---
 
 ### 5. Definition of done, per surface
@@ -890,8 +898,13 @@ entirely in one folder. Claude Code hooks capture real decision points as they
 occur and write them to a spool in under 10ms, never blocking and never changing
 session behaviour. An offline worker replays each captured state against **five
 arms** — `jev`, `cc_opus5`, `cc_sonnet5`, `cc_haiku45`, `cc_fable51` (Q8; the
-original three-arm text is superseded) — interleaved with randomised arm order so
-no arm pays a latency cost the others don't. Everything is stored append-only and
+original three-arm text is superseded) — dispatched **concurrently** per decision
+point, in a randomised submission order, so no arm pays a latency cost the others
+don't. *(Amended by JEV-33, 2026-09-20: the arms were evaluated serially in a
+randomised order until that date. Concurrency removes the hazard the
+randomisation guarded against rather than relaxing it — there are no late slots
+to be unlucky in — but it changes what `arm_order` records, and the boundary is
+marked on every row by `arm_dispatch`. See `src/worker.py`'s module docstring.)* Everything is stored append-only and
 content-addressed, so a single human labelling pass in Phase 2 applies to every
 question phrasing ever replayed, with zero re-running.
 
@@ -926,8 +939,13 @@ first task runs.
    deduplicate and every run is traceable to exact bytes.
 8. As a researcher, I want all arms to receive byte-identical state, so that no difference
    between them can be blamed on input drift. *(Amended by Q8: five arms, not three.)*
-9. As a researcher, I want arm order randomised per decision point, so that time-of-day network
-   drift doesn't systematically favour one arm.
+9. As a researcher, I want no arm to systematically pay a latency cost the others don't, so that
+   time-of-day network drift doesn't favour one arm. *(Satisfied by randomised serial order until
+   JEV-33, and by concurrent dispatch with a randomised submission order after it. The second is
+   the stronger guarantee; `arm_dispatch` on every row says which one produced it. The cost is
+   that concurrent `claude -p` spawns contend for CPU, so per-arm wall-clock is not poolable
+   across the boundary — `concurrent_arms` and `raw.duration_api_ms` are recorded so an analysis
+   can condition on it.)*
 10. As a researcher, I want per-call timings decomposed into DNS, TCP, TLS and TTFB, so that I can
     tell a slow model from a slow network.
 11. As a researcher, I want failed and timed-out calls recorded as rows rather than dropped, so that

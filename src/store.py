@@ -7,9 +7,20 @@ Streams this module writes:
     data/runs/YYYY-MM-DD.jsonl       one row per (decision_id, arm, question_set_id, attempt)
     data/labels/*.jsonl              Phase 2, appended by a human
 
-A fifth stream exists that this module deliberately does NOT write:
+Two further streams exist that this module deliberately does NOT write:
 
     data/inline/YYYY-MM-DD.jsonl     written directly by hooks/inline_shadow_bash.sh
+    data/drops/YYYY-MM-DD.jsonl      written directly by hooks/capture.sh (JEV-33)
+
+`data/drops/` is the backpressure-drop stream: one line per capture the hook
+REFUSED to write because `spool/ready/` was already at the cap. It is written by
+the hook, in bash, with printf -- not through this module -- for the same reason
+`data/inline/` is: the hook has a 10ms budget and a Python interpreter start is
+30-60ms. It is the only record that a decision point existed at all, since a
+dropped capture has no capture row and no run row. It therefore belongs in the
+attrition count and must never be read as "nothing happened". Its rows are
+{at, surface, reason, ready_files, cap, pid}; there is no decision_id, because
+no decision_id was ever minted. `src/spool_watch.py` reads it.
 
 `data/inline/` bypasses this module on purpose, and the bypass is the point of
 the measurement rather than a violation of the module boundary. That hook exists
