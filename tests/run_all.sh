@@ -98,6 +98,9 @@ echo
 echo "=== seam 2 + 3: pipeline, statistics, report ==="
 guarded "test_pipeline.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_pipeline.py' 2>&1 | tail -4" || exit 1
 echo
+echo "=== JEV-34: the agent_route surface -- payload-only state, and NOT armed ==="
+guarded "test_agent_route.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_agent_route.py' 2>&1 | tail -4" || exit 1
+echo
 echo "=== JEV-32: analysis joins rows to the config THEY ran under, and never pools ==="
 guarded "test_analyze_config_join.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_analyze_config_join.py' 2>&1 | tail -4" || exit 1
 echo

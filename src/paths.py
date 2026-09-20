@@ -79,7 +79,7 @@ WRITABLE_DIRS = [
     REPORTS,
 ]
 
-SURFACES = ("pre_bash", "stop", "user_prompt", "post_edit")
+SURFACES = ("pre_bash", "stop", "user_prompt", "post_edit", "agent_route")
 
 
 def ensure_dirs() -> None:

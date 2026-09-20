@@ -77,6 +77,13 @@ payload_for() { # surface [transcript_path] [byte_offset]
       echo "$head,\"prompt\":\"refactor the worker\",\"is_continuation\":false$extra}" ;;
     post_edit)
       echo "$head,\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$GATEROOT/x.py\",\"content\":\"print(1)\"},\"tool_response\":\"written\"$extra}" ;;
+    agent_route)
+      # JEV-34. A delegation, in the shape `state_builders.build_agent_route`
+      # consumes: the envelope carries the INVOKING context and `tool_input`
+      # carries the task about to be spawned. `agent_id`/`agent_type` are left
+      # out here so the payload is the top-level case; the nested case is
+      # covered as a unit in tests/test_agent_route.py.
+      echo "$head,\"tool_name\":\"Agent\",\"tool_input\":{\"description\":\"audit the drain path\",\"prompt\":\"Find every call site of drain_once and report which ones swallow exceptions.\",\"subagent_type\":\"Explore\"}$extra}" ;;
     *)
       echo "$head,\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}$extra}" ;;
   esac

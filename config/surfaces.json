@@ -23,6 +23,14 @@
       "question_set": "v1",
       "state_source": "payload"
     },
+    "agent_route": {
+      "_comment": "JEV-34. SHADOW SURFACE, not registered and not armed. `mode: off` means no hook entry exists in .claude/settings.local.json at all. The matcher is `Agent`, the tool name observed on 202/202 real delegations -- not `Task`. Turning this on is JEV-52; rewriting `model` on the way through is JEV-35.",
+      "mode": "off",
+      "hook_event": "PreToolUse",
+      "matcher": "Agent",
+      "question_set": "v1",
+      "state_source": "payload"
+    },
     "post_edit": {
       "mode": "off",
       "hook_event": "PostToolUse",

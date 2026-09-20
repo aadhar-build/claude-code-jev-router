@@ -88,6 +88,109 @@ def build_post_edit(payload: dict[str, Any]) -> str:
     return _truncate("\n\n".join(parts))
 
 
+def build_agent_route(payload: dict[str, Any]) -> str:
+    """JEV-34. One delegated task, about to be spawned, described richly.
+
+    WHY THIS IS NOT DESCRIPTION-ONLY (JEV-54)
+    -----------------------------------------
+    The ticket originally specified `prompt` + `subagent_type` and nothing else.
+    SWE-Router (arXiv:2607.00053) measures a Bayes-error floor for exactly that
+    input -- "a similar issue can hide either a localized typo or a multi-module
+    refactor, and the prompt does not separate the two" -- and gains +15.3pp
+    Route-AUC from a partial trajectory instead. Our own baseline says the same
+    thing from the other side: 78 of 120 delegated tasks (65%) are
+    `general-purpose`, the one agent type that carries no routing signal.
+
+    We cannot give this surface a trajectory (see the leakage note below), but
+    everything the payload already carries is free, and `agent_route` has no
+    legacy corpus to fork -- so it is built rich from the first row rather than
+    enriched later at the cost of an era boundary.
+
+    EVERY FIELD, AND WHY IT CANNOT LEAK (plan decision #7, per field)
+    ----------------------------------------------------------------
+    * `tool_input.description` -- written by the delegating agent BEFORE the
+      spawn; present in 202/202 observed `Agent` tool calls.
+    * `tool_input.prompt` -- the task text, likewise written before the spawn.
+      It is the closest thing to a trajectory this surface can have: the parent
+      composed it out of its own accumulated context. It is NOT a trajectory,
+      and it must not be described as one -- it is the parent's summary of one.
+    * `tool_input.subagent_type` -- the type being spawned; 190/202. Absent in
+      12/202, rendered `unspecified` rather than raising, because refusing 6% of
+      traffic would silently drop exactly the unusual spawns.
+    * `tool_input.run_in_background` -- whether the parent blocks on this task.
+      Decision-time intent, set by the caller; 8/202.
+    * envelope `agent_type` / `agent_id` -- the INVOKER's identity, i.e. who is
+      delegating. Documented common hook input fields, added when the session is
+      itself a subagent. `agent_id`'s presence is the only payload-visible proxy
+      for spawn depth, and it is labelled as a proxy: true `spawnDepth` lives in
+      transcript metadata (`src/baseline.py:266` reads it there) and reading it
+      at worker time is forbidden.
+    * `permission_mode`, `effort.level`, `cwd` -- documented common input
+      fields, describing the session the spawn is issued from. All fixed at the
+      moment the hook fires.
+
+    None of these is read from the filesystem or the transcript at build time.
+    The builder is a pure function of the payload dict, so a worker running an
+    hour late produces the same bytes as the hook would have -- which is the
+    property GATE 4 exists to assert and `tests/test_agent_route.py` asserts at
+    unit level.
+
+    THE ONE FIELD DELIBERATELY WITHHELD
+    -----------------------------------
+    `tool_input.model`, present in 39/202 observed spawns (37 `sonnet`, 2
+    `opus`). It is payload-only and leaks nothing -- it is excluded on
+    measurement grounds, not safety grounds. It names the answer: a classifier
+    asked "how hard is this work" while shown the model the parent already
+    picked can copy rather than judge, and at JEV-35 it is the very field the
+    actuator overwrites. The anchors refuse to name a model for the same reason
+    the state does. It stays recoverable for analysis through `tool_use_id`.
+    """
+    tool_input = payload.get("tool_input") or {}
+    prompt = tool_input.get("prompt")
+    if not prompt:
+        raise StateBuildError("agent_route payload has no tool_input.prompt")
+
+    subagent_type = tool_input.get("subagent_type") or "unspecified (harness default)"
+    invoker = payload.get("agent_type")
+    nested = bool(payload.get("agent_id"))
+    effort = payload.get("effort")
+    effort_level = effort.get("level") if isinstance(effort, dict) else effort
+    background = tool_input.get("run_in_background")
+
+    parts = [
+        f"Task summary: {tool_input.get('description') or 'none given'}",
+        f"Requested agent type (the subagent about to be spawned): {subagent_type}",
+        (
+            "Delegating agent (who is issuing this delegation): "
+            + (f"{invoker} subagent" if invoker else "the main session")
+        ),
+        (
+            "Delegation nesting: nested -- issued from inside a subagent"
+            if nested
+            else "Delegation nesting: top level -- issued from the main session"
+        ),
+        f"Runs in the background (the delegating agent does not block): {bool(background)}",
+        f"Session permission mode: {payload.get('permission_mode') or 'unknown'}",
+        f"Session effort level: {effort_level or 'unspecified'}",
+        f"Working directory: {payload.get('cwd', 'unknown')}",
+        f"Task given to the subagent:\n{prompt}",
+    ]
+    # Truncated from the BACK, unlike every other builder. A transcript's value
+    # is in its tail; a delegation prompt states the task first and elaborates
+    # afterwards, so the head is what must survive. Real traffic never reaches
+    # the cap -- the longest observed delegation prompt is 13.8k chars against a
+    # 60k budget -- but the direction is wrong or right regardless of whether it
+    # has fired yet.
+    return _truncate_tail("\n\n".join(parts))
+
+
+def _truncate_tail(text: str, limit: int = MAX_STATE_CHARS) -> str:
+    """Truncate from the BACK, keeping the beginning. See `build_agent_route`."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n[... later content truncated ...]"
+
+
 def build_stop(payload: dict[str, Any]) -> str:
     """The one surface that reads the transcript -- truncated at capture length.
 
@@ -156,6 +259,7 @@ def _flatten_content(content: Any) -> str:
 
 BUILDERS = {
     "pre_bash": build_pre_bash,
+    "agent_route": build_agent_route,
     "stop": build_stop,
     "user_prompt": build_user_prompt,
     "post_edit": build_post_edit,
@@ -163,6 +267,9 @@ BUILDERS = {
 
 STATE_SOURCE = {
     "pre_bash": "payload",
+    # JEV-34. Payload-only, like `pre_bash` -- the richness comes from using
+    # MORE of the payload, not from reaching outside it.
+    "agent_route": "payload",
     "stop": "transcript@byte_offset",
     "user_prompt": "payload",
     "post_edit": "payload",
