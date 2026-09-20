@@ -7,6 +7,7 @@ echo "=== seam 1: hook process boundary ==="
 echo
 echo "=== seam 2 + 3: pipeline, statistics, report ==="
 python3 "$ROOT/tests/test_pipeline.py" 2>&1 | tail -4 || exit 1
-echo
+echo "=== baseline: known answers from a real transcript ==="
+python3 "$ROOT/tests/test_session_metrics.py" 2>&1 | tail -4 || exit 1
 echo "=== doctor ==="
 python3 "$ROOT/src/doctor.py" | tail -3

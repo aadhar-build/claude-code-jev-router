@@ -108,7 +108,7 @@ against known answers before any real data exists.
 
 ## JEV-06: The "before" baseline
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** metrics, test
 **Blocked by:** JEV-01
 
@@ -116,13 +116,15 @@ against known answers before any real data exists.
 Claude Code's own transcripts. This is the only thing a later enforce phase can
 ever be differenced against, so it starts collecting on day 0.
 
-- [ ] Transcript lines deduplicated by `requestId`; `usage.iterations[]` ignored
-- [ ] Tokens reported by class -- input, cache-write, cache-read, output, thinking -- never as one sum
-- [ ] Cost computed with cache multipliers per exact model string including any context suffix
-- [ ] Cost reconciled against the session's own `cost-state.totalCostUSD`, with the delta reported
-- [ ] Wall-clock, assistant turns, tool calls by name, and `is_error` tool results counted
-- [ ] Friction proxies counted: user interruptions and permission denials
-- [ ] Runs against a frozen completed transcript copied into `data/fixtures/` with expected counts recorded beside it
+- [x] Transcript lines deduplicated by `requestId`; `usage.iterations[]` ignored
+- [x] Tokens reported by class -- input, cache-write, cache-read, output, thinking -- never as one sum
+- [x] Cost computed with cache multipliers per exact model string including any context suffix
+- [x] Cost reconciled against the session's own `cost-state.totalCostUSD`, with the delta reported
+- [x] Wall-clock, assistant turns, tool calls by name, and `is_error` tool results counted
+- [x] Friction proxies counted: user interruptions and permission denials
+- [x] Runs against a real completed transcript read in place; only DERIVED numbers are frozen into `data/fixtures/` — no third-party transcript content is copied into this folder
+- [x] Subagent transcripts under `<session>/subagents/` are included (found via the reconciliation check; worth 4.4 points of delta)
+- [x] Findings written up in `docs/COST-RECONCILIATION.md`
 
 ---
 
