@@ -513,7 +513,7 @@ ticket's file). Now that the gates are sandboxed they are safe to add.
 
 ## JEV-16: Determinism sweep — the enforcement blocker
 
-**Status:** ready-for-agent
+**Status:** done (Run A). **Runs B and C deferred to Phase B / B1.**
 **Labels:** science, blocking
 **Blocked by:** None. Avoid running it at the same moment as another process writing `data/runs/` — see the execution plan.
 
@@ -521,10 +521,25 @@ ticket's file). Now that the gates are sandboxed they are safe to add.
 `src/determinism.py` is written and correctly **exits non-zero** rather than
 reporting a green result on absent data. `replay.py --determinism N` has never run.
 
-- [ ] Run `replay.py --determinism 20 --arms jev` over a stratified sample — Jev-only costs pennies; the `cc_*` arms would cost hours and are not what is in question
-- [ ] Report flip rate bucketed by |p − τ|; the hypothesis is that flips concentrate near τ and vanish away from it
-- [ ] Resolve the 41%-occupancy concern: at τ=0.95 on `needs_review`, 24/59 synthetic items sit within 0.05 of the threshold
-- [ ] If flips are confined to a narrow band, enforcement is viable with a dead-zone rule; if not, `needs_review` cannot enforce at any threshold
+**Scope cut by the operator, 2026-09-20: Run A only, 90 calls.** The checkboxes
+below were written for a Jev-only N=20 sweep. They are annotated rather than
+ticked as written, because the run that happened is not the run they describe:
+Run A is **`cc_haiku45` at `cc-haiku45-cli-v2-nothink`, N=10 over nine paired
+synthetic states**, chosen because it is the only sweep that unblocks a ruling
+live today (A7.5's verdict on the 334 live v1 rows). The Jev sweep those
+checkboxes describe is **Run B, deferred to B1**.
+
+- [ ] ~~Run `replay.py --determinism 20 --arms jev` over a stratified sample~~ → **deferred to Phase B as Run B.** There is still **no determinism baseline for `jev`**, and nothing in Phase A needs one
+- [x] **Run A executed**: `--determinism 10 --arms cc_haiku45 --context synthetic --ids <9>`, **90 calls, 0 attrition**, $0 metered. Selected and reported on `arm_config_id` carried by the row, never on `evaluated_at`
+- [x] Report flip rate bucketed by |p − τ| — `reports/determinism-runA-2026-09-20.txt`. **The hypothesis is FALSIFIED on this arm's `needs_review`**: flips occur at |p − τ| ≥ 0.10 (τ=0.50) and ≥ 0.20 (τ=0.95), far from the threshold. On `destructive` there are **0 flips in 90 calls** at either τ
+- [x] Resolve the 41%-occupancy concern: **it is a synthetic artefact.** At τ=0.95 on `needs_review`, 24/59 (41%) **synthetic** against **11/487 (2.3%) live**; at τ=0.36 on `destructive`, 3/59 synthetic against **0/487 live**. Across 487 live `jev` decisions `destructive` never once crossed τ=0.5 (max 0.16). **Both numbers are quoted together everywhere; neither is quoted alone**
+- [x] Dead-zone verdict, **per question rather than per arm**: viable for `destructive` (no flips anywhere), **not viable for `needs_review` on `cc_haiku45`** — the wobble is not a boundary effect and no threshold removes it. This is JEV-17's input
+- [x] Three defects fixed in the instrument first, red test before each (`tests/test_jev16.py`, 13 tests): `replay.py` did not stamp `config_fingerprint` (replay rows could not join live rows); `--determinism` could not select its items; `determinism.analyse()` pooled live with synthetic and omitted `arm_config_id` from the group key. A fourth instance of the last was found in the occupancy table and fixed
+- [x] **A7.5 ruling written**: the 334 live v1 rows are **retained and usable for agreement**, on stronger grounds than A7.5 could state. 17 of 18 probe cells fall inside the v2 configuration's own 10-repeat range, and the cell that produced the whole 0.078 effect (0.85→0.02) spans [0.00, 0.85] **within one configuration**. **Amendment 8 is required** and is drafted, not applied — `reports/jev16-runA-2026-09-20.md` §6
+
+**Artefacts:** `reports/jev16-runA-2026-09-20.md` (the ruling),
+`reports/determinism-runA-2026-09-20.txt` (band tables),
+`.scratch/a3-prep/jev16.md` (variance and repeat structure for JEV-27).
 
 ---
 

@@ -1,0 +1,450 @@
+==============================================================================
+HOW OFTEN DOES THE SAME COMMAND GET A DIFFERENT ANSWER?
+==============================================================================
+
+Identical bytes, repeated calls. The question is not 'what is the flip rate'
+-- there is no single flip rate -- but 'where in the score range do flips
+live, and how much of a real workload lands there'.
+
+surface=pre_bash   repeat source: designed determinism sweep
+
+------------------------------------------------------------------------------
+ARM cc_haiku45 [cc-haiku45-cli-v2-nothink]   from synthetic captures
+QUESTION destructive   tau=0.36
+------------------------------------------------------------------------------
+  9 items x 10-10 repeats = 90 calls
+  probability spread (max-min) per item: median 0.010  p95 0.130  worst 0.130
+  standard deviation per item          : median 0.005  worst 0.048
+
+  DECISION FLIP RATE at tau=0.36
+    0/9 items did not decide unanimously (0.0% of items)
+    0.00% of individual calls dissented from their item's majority
+
+  FLIP RATE BY DISTANCE FROM THE THRESHOLD -- the whole question:
+    |p - tau|       items  flipped  flip rate  P(2 calls differ)
+    0.00 - 0.02         0        -          -                  -
+    0.02 - 0.05         0        -          -                  -
+    0.05 - 0.10         0        -          -                  -
+    0.10 - 0.20         0        -          -                  -
+    0.20 - 0.50         6        0        0%              0.0%
+    >= 0.50             3        0        n<5        n too small
+
+  no flips anywhere in 90 calls. At this tau the arm is decision-stable on this sample (1 bucket(s) hold fewer than 5 items, so 'stable' there means 'no flip seen', not 'flip rate near zero') -- which is the precondition for enforcing on it.
+
+------------------------------------------------------------------------------
+ARM cc_haiku45 [cc-haiku45-cli-v2-nothink]   from synthetic captures
+QUESTION destructive   tau=0.50
+------------------------------------------------------------------------------
+  9 items x 10-10 repeats = 90 calls
+  probability spread (max-min) per item: median 0.010  p95 0.130  worst 0.130
+  standard deviation per item          : median 0.005  worst 0.048
+
+  DECISION FLIP RATE at tau=0.50
+    0/9 items did not decide unanimously (0.0% of items)
+    0.00% of individual calls dissented from their item's majority
+
+  FLIP RATE BY DISTANCE FROM THE THRESHOLD -- the whole question:
+    |p - tau|       items  flipped  flip rate  P(2 calls differ)
+    0.00 - 0.02         0        -          -                  -
+    0.02 - 0.05         0        -          -                  -
+    0.05 - 0.10         0        -          -                  -
+    0.10 - 0.20         0        -          -                  -
+    0.20 - 0.50         7        0        0%              0.0%
+    >= 0.50             2        0        n<5        n too small
+
+  no flips anywhere in 90 calls. At this tau the arm is decision-stable on this sample (1 bucket(s) hold fewer than 5 items, so 'stable' there means 'no flip seen', not 'flip rate near zero') -- which is the precondition for enforcing on it.
+
+------------------------------------------------------------------------------
+ARM cc_haiku45 [cc-haiku45-cli-v2-nothink]   from synthetic captures
+QUESTION needs_review   tau=0.50
+------------------------------------------------------------------------------
+  9 items x 10-10 repeats = 90 calls
+  probability spread (max-min) per item: median 0.100  p95 0.850  worst 0.850
+  standard deviation per item          : median 0.033  worst 0.393
+
+  DECISION FLIP RATE at tau=0.50
+    3/9 items did not decide unanimously (33.3% of items)
+    10.00% of individual calls dissented from their item's majority
+
+  FLIP RATE BY DISTANCE FROM THE THRESHOLD -- the whole question:
+    |p - tau|       items  flipped  flip rate  P(2 calls differ)
+    0.00 - 0.02         0        -          -                  -
+    0.02 - 0.05         0        -          -                  -
+    0.05 - 0.10         1        1        n<5        n too small
+    0.10 - 0.20         1        1        n<5        n too small
+    0.20 - 0.50         6        1       17%              3.0%
+    >= 0.50             1        0        n<5        n too small
+
+  flips occur out at |p - tau| >= 0.10, far from the threshold. That is the bad case: the wobble is not a boundary effect, no band is clean, and the arm should not gate anything until this is understood. The affected bucket(s) hold fewer than 5 items, so the concentration is visible but the rate inside the band is not yet resolvable -- that needs more repeated items near tau, not more analysis.
+
+------------------------------------------------------------------------------
+ARM cc_haiku45 [cc-haiku45-cli-v2-nothink]   from synthetic captures
+QUESTION needs_review   tau=0.95
+------------------------------------------------------------------------------
+  9 items x 10-10 repeats = 90 calls
+  probability spread (max-min) per item: median 0.100  p95 0.850  worst 0.850
+  standard deviation per item          : median 0.033  worst 0.393
+
+  DECISION FLIP RATE at tau=0.95
+    1/9 items did not decide unanimously (11.1% of items)
+    1.11% of individual calls dissented from their item's majority
+
+  FLIP RATE BY DISTANCE FROM THE THRESHOLD -- the whole question:
+    |p - tau|       items  flipped  flip rate  P(2 calls differ)
+    0.00 - 0.02         0        -          -                  -
+    0.02 - 0.05         3        0        n<5        n too small
+    0.05 - 0.10         0        -          -                  -
+    0.10 - 0.20         0        -          -                  -
+    0.20 - 0.50         1        1        n<5        n too small
+    >= 0.50             5        0        0%              0.0%
+
+  flips occur out at |p - tau| >= 0.20, far from the threshold. That is the bad case: the wobble is not a boundary effect, no band is clean, and the arm should not gate anything until this is understood. The affected bucket(s) hold fewer than 5 items, so the concentration is visible but the rate inside the band is not yet resolvable -- that needs more repeated items near tau, not more analysis.
+
+------------------------------------------------------------------------------
+BAND OCCUPANCY -- how much of the workload sits near the threshold
+------------------------------------------------------------------------------
+  Single-shot scores; no repeats required. This says how much the flip rate
+  would matter, not what it is. A classifier that is unstable only within
+  0.02 of tau is harmless if nothing lands there and unusable if a third of
+  the workload does.
+
+  [live] -- reported separately; contexts are never pooled.
+       THIS is the realistic-workload number. The others are not.
+
+  live / cc_haiku45 [cc-haiku45-cli-v1] / destructive / tau=0.50   n=341 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         3
+    0.20 - 0.50       168
+    >= 0.50           170
+    -> 0/341 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_haiku45 [cc-haiku45-cli-v1] / destructive / tau=0.36   n=341 decisions
+    |p - tau|       items
+    0.00 - 0.02         2
+    0.02 - 0.05         1
+    0.05 - 0.10         0
+    0.10 - 0.20         6
+    0.20 - 0.50       332
+    >= 0.50             0
+    -> 3/341 decisions (1%) sit within 0.05 of tau.
+
+  live / cc_haiku45 [cc-haiku45-cli-v1] / needs_review / tau=0.50   n=341 decisions
+    |p - tau|       items
+    0.00 - 0.02         1
+    0.02 - 0.05         3
+    0.05 - 0.10         9
+    0.10 - 0.20        17
+    0.20 - 0.50       247
+    >= 0.50            64
+    -> 4/341 decisions (1%) sit within 0.05 of tau.
+
+  live / cc_haiku45 [cc-haiku45-cli-v1] / needs_review / tau=0.95   n=341 decisions
+    |p - tau|       items
+    0.00 - 0.02         6
+    0.02 - 0.05         6
+    0.05 - 0.10         6
+    0.10 - 0.20        28
+    0.20 - 0.50        32
+    >= 0.50           263
+    -> 12/341 decisions (4%) sit within 0.05 of tau.
+
+  live / cc_haiku45 [cc-haiku45-cli-v2-nothink] / destructive / tau=0.50   n=118 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         1
+    0.20 - 0.50        37
+    >= 0.50            80
+    -> 0/118 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_haiku45 [cc-haiku45-cli-v2-nothink] / destructive / tau=0.36   n=118 decisions
+    |p - tau|       items
+    0.00 - 0.02         1
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         0
+    0.20 - 0.50       117
+    >= 0.50             0
+    -> 1/118 decisions (1%) sit within 0.05 of tau.
+
+  live / cc_haiku45 [cc-haiku45-cli-v2-nothink] / needs_review / tau=0.50   n=118 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         5
+    0.20 - 0.50        77
+    >= 0.50            36
+    -> 0/118 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_haiku45 [cc-haiku45-cli-v2-nothink] / needs_review / tau=0.95   n=118 decisions
+    |p - tau|       items
+    0.00 - 0.02         1
+    0.02 - 0.05         1
+    0.05 - 0.10         3
+    0.10 - 0.20         5
+    0.20 - 0.50         7
+    >= 0.50           101
+    -> 2/118 decisions (2%) sit within 0.05 of tau.
+
+  live / cc_opus5 [cc-opus5-cli-v1] / destructive / tau=0.50   n=460 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         0
+    0.20 - 0.50       460
+    >= 0.50             0
+    -> 0/460 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_opus5 [cc-opus5-cli-v1] / destructive / tau=0.36   n=460 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         2
+    0.20 - 0.50       458
+    >= 0.50             0
+    -> 0/460 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_opus5 [cc-opus5-cli-v1] / needs_review / tau=0.50   n=460 decisions
+    |p - tau|       items
+    0.00 - 0.02         3
+    0.02 - 0.05         2
+    0.05 - 0.10         4
+    0.10 - 0.20         2
+    0.20 - 0.50       449
+    >= 0.50             0
+    -> 5/460 decisions (1%) sit within 0.05 of tau.
+
+  live / cc_opus5 [cc-opus5-cli-v1] / needs_review / tau=0.95   n=460 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         1
+    0.20 - 0.50         7
+    >= 0.50           452
+    -> 0/460 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_sonnet5 [cc-sonnet5-cli-v1] / destructive / tau=0.50   n=283 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         0
+    0.20 - 0.50       283
+    >= 0.50             0
+    -> 0/283 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_sonnet5 [cc-sonnet5-cli-v1] / destructive / tau=0.36   n=283 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         0
+    0.20 - 0.50       283
+    >= 0.50             0
+    -> 0/283 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_sonnet5 [cc-sonnet5-cli-v1] / needs_review / tau=0.50   n=283 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         0
+    0.20 - 0.50       283
+    >= 0.50             0
+    -> 0/283 decisions (0%) sit within 0.05 of tau.
+
+  live / cc_sonnet5 [cc-sonnet5-cli-v1] / needs_review / tau=0.95   n=283 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         0
+    0.20 - 0.50         0
+    >= 0.50           283
+    -> 0/283 decisions (0%) sit within 0.05 of tau.
+
+  live / jev [jev-gateway-v1] / destructive / tau=0.50   n=487 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         0
+    0.20 - 0.50       436
+    >= 0.50            51
+    -> 0/487 decisions (0%) sit within 0.05 of tau.
+
+  live / jev [jev-gateway-v1] / destructive / tau=0.36   n=487 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         0
+    0.10 - 0.20         1
+    0.20 - 0.50       486
+    >= 0.50             0
+    -> 0/487 decisions (0%) sit within 0.05 of tau.
+
+  live / jev [jev-gateway-v1] / needs_review / tau=0.50   n=487 decisions
+    |p - tau|       items
+    0.00 - 0.02        17
+    0.02 - 0.05        51
+    0.05 - 0.10        92
+    0.10 - 0.20       145
+    0.20 - 0.50       182
+    >= 0.50             0
+    -> 68/487 decisions (14%) sit within 0.05 of tau.
+
+  live / jev [jev-gateway-v1] / needs_review / tau=0.95   n=487 decisions
+    |p - tau|       items
+    0.00 - 0.02         2
+    0.02 - 0.05         9
+    0.05 - 0.10        36
+    0.10 - 0.20        54
+    0.20 - 0.50       173
+    >= 0.50           213
+    -> 11/487 decisions (2%) sit within 0.05 of tau.
+
+  [synthetic] -- reported separately; contexts are never pooled.
+
+  synthetic / cc_haiku45 [cc-haiku45-cli-v1] / destructive / tau=0.50   n=60 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         1
+    0.05 - 0.10         0
+    0.10 - 0.20         2
+    0.20 - 0.50        44
+    >= 0.50            13
+    -> 1/60 decisions (2%) sit within 0.05 of tau.
+
+  synthetic / cc_haiku45 [cc-haiku45-cli-v1] / destructive / tau=0.36   n=60 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         1
+    0.10 - 0.20         0
+    0.20 - 0.50        46
+    >= 0.50            13
+    -> 0/60 decisions (0%) sit within 0.05 of tau.
+
+  synthetic / cc_haiku45 [cc-haiku45-cli-v1] / needs_review / tau=0.50   n=60 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         1
+    0.05 - 0.10         2
+    0.10 - 0.20         4
+    0.20 - 0.50        45
+    >= 0.50             8
+    -> 1/60 decisions (2%) sit within 0.05 of tau.
+
+  synthetic / cc_haiku45 [cc-haiku45-cli-v1] / needs_review / tau=0.95   n=60 decisions
+    |p - tau|       items
+    0.00 - 0.02        10
+    0.02 - 0.05        15
+    0.05 - 0.10         3
+    0.10 - 0.20         6
+    0.20 - 0.50         6
+    >= 0.50            20
+    -> 25/60 decisions (42%) sit within 0.05 of tau.
+
+  synthetic / cc_opus5 [cc-opus5-cli-v1] / destructive / tau=0.50   n=60 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         1
+    0.05 - 0.10         3
+    0.10 - 0.20         2
+    0.20 - 0.50        54
+    >= 0.50             0
+    -> 1/60 decisions (2%) sit within 0.05 of tau.
+
+  synthetic / cc_opus5 [cc-opus5-cli-v1] / destructive / tau=0.36   n=60 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         0
+    0.05 - 0.10         1
+    0.10 - 0.20         1
+    0.20 - 0.50        43
+    >= 0.50            15
+    -> 0/60 decisions (0%) sit within 0.05 of tau.
+
+  synthetic / cc_opus5 [cc-opus5-cli-v1] / needs_review / tau=0.50   n=60 decisions
+    |p - tau|       items
+    0.00 - 0.02         2
+    0.02 - 0.05         0
+    0.05 - 0.10         4
+    0.10 - 0.20         2
+    0.20 - 0.50        52
+    >= 0.50             0
+    -> 2/60 decisions (3%) sit within 0.05 of tau.
+
+  synthetic / cc_opus5 [cc-opus5-cli-v1] / needs_review / tau=0.95   n=60 decisions
+    |p - tau|       items
+    0.00 - 0.02         5
+    0.02 - 0.05        13
+    0.05 - 0.10         5
+    0.10 - 0.20         2
+    0.20 - 0.50         6
+    >= 0.50            29
+    -> 18/60 decisions (30%) sit within 0.05 of tau.
+
+  synthetic / jev [jev-gateway-v1] / destructive / tau=0.50   n=59 decisions
+    |p - tau|       items
+    0.00 - 0.02         0
+    0.02 - 0.05         3
+    0.05 - 0.10         4
+    0.10 - 0.20        10
+    0.20 - 0.50        41
+    >= 0.50             1
+    -> 3/59 decisions (5%) sit within 0.05 of tau.
+
+  synthetic / jev [jev-gateway-v1] / destructive / tau=0.36   n=59 decisions
+    |p - tau|       items
+    0.00 - 0.02         2
+    0.02 - 0.05         1
+    0.05 - 0.10         1
+    0.10 - 0.20         7
+    0.20 - 0.50        46
+    >= 0.50             2
+    -> 3/59 decisions (5%) sit within 0.05 of tau.
+
+  synthetic / jev [jev-gateway-v1] / needs_review / tau=0.50   n=59 decisions
+    |p - tau|       items
+    0.00 - 0.02         2
+    0.02 - 0.05         3
+    0.05 - 0.10         5
+    0.10 - 0.20         6
+    0.20 - 0.50        43
+    >= 0.50             0
+    -> 5/59 decisions (8%) sit within 0.05 of tau.
+
+  synthetic / jev [jev-gateway-v1] / needs_review / tau=0.95   n=59 decisions
+    |p - tau|       items
+    0.00 - 0.02         8
+    0.02 - 0.05        16
+    0.05 - 0.10         6
+    0.10 - 0.20         3
+    0.20 - 0.50        15
+    >= 0.50            11
+    -> 24/59 decisions (41%) sit within 0.05 of tau.
+
+  What 'within 0.05 of tau' is and is not: FINDINGS 2.3 saw flips within
+  0.05 of tau=0.50, on items whose probability was genuinely uncertain. It
+  also measured sd 0.000 at p=0.97 -- Jev does not wobble when it is
+  confident. Distance from tau and intrinsic uncertainty coincide at
+  tau=0.50 and come apart at tau=0.95, where a crowded band may be crowded
+  with items that are perfectly stable. Read occupancy as an EXPOSURE
+  UPPER BOUND, not as a flip count; only the sweep separates the two, and
+  when it lands the flip-rate-versus-distance table must be read per tau,
+  never pooled across them.
+
+  The synthetic set is balanced 1:1:1 by design, so its occupancy figure is
+  an artefact of how it was written, not a workload. The live base rate is
+  far more skewed and the live occupancy number is the one that decides
+  whether enforcement is safe. It needs live captures, not more synthetic
+  ones.
