@@ -69,6 +69,61 @@ class Joined:
         return [r for r in self.runs if self.captures[r["decision_id"]]["surface"] == surface]
 
 
+def _spec_for(surface: str, question_set_id: str | None) -> dict[str, Any] | None:
+    """The spec a ROW ran under -- not the one config happens to point at now.
+
+    JEV-32. `pre_bash/v1#a` names version v1 of pre_bash. Returns None when the
+    row names a question set that is not on disk, or names none at all: that is
+    a defect to report loudly rather than an exception to raise, because one
+    unreadable row must not suppress the whole report.
+    """
+    if not question_set_id or "#" not in question_set_id:
+        return None
+    base = question_set_id.split("#", 1)[0]
+    if "/" not in base:
+        return None
+    named_surface, version = base.rsplit("/", 1)
+    if named_surface != surface:
+        return None
+    try:
+        return cl.question_set(surface, version)
+    except cl.QuestionSetError:
+        return None
+
+
+def _provenance(rows: list[dict[str, Any]], lines: list[str]) -> None:
+    """Disclose the config eras present in a group, WITHOUT partitioning on them.
+
+    The arm set has no row-level version; `arm_order` is its only trace, and it
+    is intrinsic to the row -- unlike a bisect of the data on a wall clock
+    against a restart timestamp, which is the contamination JEV-43 exists to
+    remove. Disclosed rather than partitioned on purpose: splitting the live
+    report into a three-arm and a four-arm era would move every n and every
+    interval, which is a far bigger event than this defect fix.
+
+    `config_fingerprint` is a content hash of the config that produced the row.
+    Absent means the pre-fingerprint era (the same convention `arm_dispatch`
+    uses) and is silent; two DIFFERENT values within one question set mean the
+    config changed without its version string changing, which is the one hole a
+    hand-maintained pin cannot catch.
+    """
+    arm_sets: dict[tuple[str, ...], int] = defaultdict(int)
+    for r in rows:
+        arm_sets[tuple(sorted(set(r.get("arm_order") or [])))] += 1
+    for arms, n in sorted(arm_sets.items(), key=lambda kv: (-kv[1], kv[0])):
+        label = "+".join(arms) if arms else "(none recorded)"
+        lines.append(f"    arm set {label}   rows={n}")
+    if len(arm_sets) > 1:
+        lines.append("    (more than one arm set contributed; rows are NOT partitioned on it"
+                     " -- see ISSUES.md JEV-30)")
+    fingerprints = sorted({r.get("config_fingerprint") for r in rows
+                           if r.get("config_fingerprint")})
+    if len(fingerprints) > 1:
+        lines.append(f"!!  CONFIG FINGERPRINT DISAGREEMENT: {', '.join(fingerprints)}")
+        lines.append("!!  these rows were produced under byte-different config while naming")
+        lines.append("!!  the same question set; every comparison in this group is suspect.")
+
+
 def _paired(rows: list[dict[str, Any]], arm: str, reference: str, question: str):
     """Rows where both arms answered the same question for the same decision."""
     index: dict[tuple[str, str], dict[str, Any]] = {}
@@ -251,6 +306,20 @@ def synthetic_report(surface: str = "pre_bash") -> str:
              "It measures separation between strata we wrote, not performance in the",
              "world. It is reported separately and is never pooled with live data.", ""]
 
+    # JEV-32: name the pin, then keep only the rows that were run under it.
+    # The stress set is a designed sweep, so an off-pin row here is a mistake
+    # rather than a second era: it is counted and excluded, not re-sectioned.
+    primary_qsid = cl.question_set_id(surface)
+    lines.append(f"question set : {primary_qsid}   (the configured pin)")
+    off_pin = [r for r in rows if r.get("question_set_id") != primary_qsid]
+    if off_pin:
+        lines.append(f"!! QUESTION SET mismatch: {len(off_pin)} row(s) were run under"
+                     " another pin and are EXCLUDED, not pooled:")
+        for other in sorted({str(r.get("question_set_id")) for r in off_pin}):
+            lines.append(f"!!   {other}")
+        rows = [r for r in rows if r.get("question_set_id") == primary_qsid]
+    lines.append("")
+
     if not rows:
         lines.append("no synthetic runs yet: src/make_synthetic.py then src/replay.py --synthetic")
         return "\n".join(lines)
@@ -322,7 +391,14 @@ def report(run_context: str | None = "live", reference: str = REFERENCE_ARM) -> 
     lines.append("")
     lines.append(f"reference arm : {reference}")
     lines.append(f"run context   : {run_context or 'all'}")
-    lines.append(f"pricing       : {cl.pricing()['version']}")
+    # JEV-32: what the ROWS were priced under, not what config says today.
+    # `cost_usd` is stamped at write time and is never recomputed here, so this
+    # line is the only place the two could silently diverge.
+    stamped_pricing = sorted({r.get("pricing_version") for r in data.runs
+                              if r.get("pricing_version")})
+    current_pricing = cl.pricing()["version"]
+    lines.append(f"pricing       : {', '.join(stamped_pricing) or 'none stamped'}"
+                 f"   (as stamped on rows; config now: {current_pricing})")
     lines.append(f"decisions     : {len(data.captures)}   runs: {len(data.runs)}")
 
     if data.sha_mismatches:
@@ -335,28 +411,54 @@ def report(run_context: str | None = "live", reference: str = REFERENCE_ARM) -> 
         lines.append("state identity: OK (all arms saw byte-identical state)")
 
     for surface in data.surfaces():
-        rows = data.by_surface(surface)
-        spec = cl.question_set(surface)
+        surface_rows = data.by_surface(surface)
         lines.append("")
         lines.append("-" * 78)
         lines.append(f"SURFACE: {surface}")
         lines.append("-" * 78)
-        lines.append("  operational")
-        _operational_table(rows, lines)
-        _attribution_table(rows, lines)
 
-        arms = sorted({r["arm"] for r in rows if r["arm"] != reference})
-        for arm in arms:
-            lines.append(f"  {arm} vs {reference}")
-            for question, q in spec["questions"].items():
-                if q["type"] == "boolean":
-                    _boolean_section(rows, arm, reference, question, lines)
-                elif q["type"] == "choice":
-                    _choice_section(rows, arm, reference, question, lines)
-                elif q["type"] == "score":
-                    _score_section(rows, arm, reference, question, lines, len(q["anchors"]))
-        if not arms:
-            lines.append(f"  (only {reference} present; nothing to compare)")
+        # JEV-32. Every row carries the question set it was actually run under.
+        # Group on it; never pool. `validate_threshold.py` and `determinism.py`
+        # already key on the row's own `question_set_id` -- this is the same
+        # shape, and it is what the pre-registration's question-set freeze
+        # exists to make checkable.
+        groups: dict[str | None, list[dict[str, Any]]] = defaultdict(list)
+        for r in surface_rows:
+            groups[r.get("question_set_id")].append(r)
+        primary_qsid = cl.question_set_id(surface)
+        ordered = ([primary_qsid] if primary_qsid in groups else []) + sorted(
+            (k for k in groups if k != primary_qsid), key=str)
+
+        for qsid in ordered:
+            rows = groups[qsid]
+            spec = _spec_for(surface, qsid)
+            if spec is None:
+                lines.append(f"!! QUESTION SET {qsid!r} named by {len(rows)} row(s) cannot be")
+                lines.append("!! resolved against questions/ on disk. Those rows are EXCLUDED,")
+                lines.append("!! not counted under another spec.")
+                continue
+            if qsid == primary_qsid:
+                lines.append(f"  question set: {qsid}   (the configured pin)")
+            else:
+                lines.append(f"  question set: {qsid}   (NOT the configured pin"
+                             f" {primary_qsid}; reported separately, never pooled)")
+            _provenance(rows, lines)
+            lines.append("  operational")
+            _operational_table(rows, lines)
+            _attribution_table(rows, lines)
+
+            arms = sorted({r["arm"] for r in rows if r["arm"] != reference})
+            for arm in arms:
+                lines.append(f"  {arm} vs {reference}")
+                for question, q in spec["questions"].items():
+                    if q["type"] == "boolean":
+                        _boolean_section(rows, arm, reference, question, lines)
+                    elif q["type"] == "choice":
+                        _choice_section(rows, arm, reference, question, lines)
+                    elif q["type"] == "score":
+                        _score_section(rows, arm, reference, question, lines, len(q["anchors"]))
+            if not arms:
+                lines.append(f"  (only {reference} present; nothing to compare)")
 
     lines.append("")
     return "\n".join(lines)
