@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import re
 import sys
 import tempfile
 import unittest
@@ -121,7 +123,7 @@ class TestStateBuilders(unittest.TestCase):
 
 class TestQuestionSets(unittest.TestCase):
     def test_every_surface_resolves_every_phrasing(self):
-        for surface in paths.SURFACES:
+        for surface in cl.surface_names():
             spec = cl.question_set(surface)
             phrasings = set()
             for q in spec["questions"].values():
@@ -134,7 +136,7 @@ class TestQuestionSets(unittest.TestCase):
 
     def test_phrasings_are_distinct(self):
         """Paraphrases would make the sensitivity sweep measure nothing."""
-        for surface in paths.SURFACES:
+        for surface in cl.surface_names():
             for name, q in cl.question_set(surface)["questions"].items():
                 texts = list(q["phrasings"].values())
                 self.assertEqual(len(texts), len(set(texts)), f"{surface}:{name}")
@@ -852,6 +854,282 @@ class TestSpoolWatch(TempStorage):
         text = spool_watch.report()
         self.assertIn("spool peak", text)
         self.assertIn(str(spool_watch.cap()), text)
+
+
+# ---------------------------------------------------------------------------
+# JEV-30 / JEV-31b: config staleness and inert config fields.
+# ---------------------------------------------------------------------------
+
+
+class ConfigFixture(unittest.TestCase):
+    """A throwaway copy of config/ that can be edited mid-test.
+
+    Identical bookkeeping to TestConfiguredQuestionSetVersion, hoisted so the
+    staleness tests can edit a config file AFTER the process has loaded it --
+    which is the whole of JEV-30.
+    """
+
+    CACHED = ("surfaces", "arms_config", "pricing", "question_set")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._config = Path(self._tmp.name) / "config"
+        self._config.mkdir()
+        for name in ("surfaces.json", "arms.json", "pricing.json"):
+            (self._config / name).write_text((paths.CONFIG / name).read_text())
+        self._saved_config = paths.CONFIG
+        self._clear_caches()
+        paths.CONFIG = self._config
+
+    def tearDown(self):
+        paths.CONFIG = self._saved_config
+        self._clear_caches()
+        self._tmp.cleanup()
+
+    def _clear_caches(self):
+        cl.reset_caches()
+
+    def _rewrite(self, name, mutate):
+        """Edit a config file in place, the way an operator would."""
+        path = self._config / name
+        blob = json.loads(path.read_text())
+        mutate(blob)
+        path.write_text(json.dumps(blob, indent=2))
+
+
+class TestConfigStaleness(ConfigFixture):
+    """JEV-30. The process reads config once; nothing said so.
+
+    The incident: the worker started at 15:49:55, `config/arms.json` gained
+    `cc_sonnet5` at 15:55:26, and every row collected afterwards silently
+    omitted the arm. The rows looked complete because `arm_order` recorded the
+    three arms the process knew about.
+
+    The fix is a LOUD REFUSAL, not a hot reload -- see the module docstring in
+    src/config_loader.py. These tests assert observable behaviour at the
+    config_loader boundary: edit a value after load, and the next call either
+    reflects it or refuses.
+    """
+
+    def test_editing_a_price_after_load_refuses_instead_of_returning_a_stale_number(self):
+        """The dangerous one: `pricing()["version"]` is stamped on every row.
+
+        An operator who edits a rate WITHOUT bumping `version` gets two
+        processes stamping the same `pricing-2026-09-20` on rows computed from
+        different numbers. Nothing in the data distinguishes them.
+        """
+        usage = {"input_tokens": 1_000_000}
+        before = cl.cost_usd("claude-opus-5", usage)
+        self.assertAlmostEqual(before, 5.0)
+        self._rewrite("pricing.json",
+                      lambda b: b["models"]["claude-opus-5"].update({"input": 9e-06}))
+        with self.assertRaises(cl.ConfigStaleError) as caught:
+            cl.cost_usd("claude-opus-5", usage)
+        self.assertIn("pricing.json", str(caught.exception))
+
+    def test_the_JEV_30_incident_is_caught_by_any_accessor_not_just_the_arms_one(self):
+        """The literal incident, and the reason the check is global.
+
+        `arms_config()` may never be called again after startup -- the worker
+        passes the arm list down. If each accessor only checked its own file, a
+        stale `arms.json` would never be detected at all. Every accessor checks
+        every watched file, so the refusal fires on the first config touch of
+        the next capture, BEFORE any arm is called and before any row is
+        written.
+        """
+        cl.enabled_arms()
+        self._rewrite("arms.json", lambda b: b["enabled"].append("cc_fable51"))
+        with self.assertRaises(cl.ConfigStaleError) as caught:
+            cl.surface_question_version("pre_bash")
+        self.assertIn("arms.json", str(caught.exception))
+
+    def test_a_touch_that_does_not_change_the_bytes_is_not_a_refusal(self):
+        """mtime is a liar. A re-save with identical content, a checkout, or a
+        bare `touch` must not stop collection -- only a real change may."""
+        text = (self._config / "pricing.json").read_text()
+        cl.pricing()
+        (self._config / "pricing.json").write_text(text)
+        os.utime(self._config / "pricing.json", (0, 0))
+        self.assertEqual(cl.pricing()["version"], "pricing-2026-09-20")
+        self.assertEqual(cl.stale_config_files(), {})
+
+    def test_stale_config_files_names_every_changed_file_at_once(self):
+        cl.surfaces(); cl.arms_config(); cl.pricing()
+        self._rewrite("arms.json", lambda b: b["enabled"].append("cc_fable51"))
+        self._rewrite("surfaces.json",
+                      lambda b: b.update({"spool_backpressure_max_files": 9}))
+        self.assertEqual(set(cl.stale_config_files()), {"arms.json", "surfaces.json"})
+        with self.assertRaises(cl.ConfigStaleError) as caught:
+            cl.assert_config_fresh()
+        message = str(caught.exception)
+        self.assertIn("arms.json", message)
+        self.assertIn("surfaces.json", message)
+        self.assertIn("restart", message.lower())
+
+    def test_a_file_edited_before_it_was_ever_loaded_is_still_caught(self):
+        """The worker holds an arm list from startup and may never call
+        arms_config() again. Watching starts at the first freshness check, not
+        at the first load, so an unread file is not an unwatched one."""
+        cl.assert_config_fresh()
+        self._rewrite("arms.json", lambda b: b["enabled"].append("cc_fable51"))
+        with self.assertRaises(cl.ConfigStaleError):
+            cl.assert_config_fresh()
+
+    def test_restarting_the_process_picks_the_new_config_up(self):
+        """The refusal must be recoverable by the documented remedy, or it is
+        just a wedge. reset_caches() is what a fresh process does."""
+        cl.enabled_arms()
+        self._rewrite("arms.json", lambda b: b["enabled"].append("cc_fable51"))
+        cl.reset_caches()
+        self.assertIn("cc_fable51", [a.name for a in cl.enabled_arms()])
+
+    def test_the_fingerprint_moves_when_a_rate_moves_and_the_version_string_does_not(self):
+        """The argument for stamping a CONTENT HASH on every row rather than
+        trusting the hand-maintained `version` string. JEV-32 has to join rows
+        to the config that produced them; `pricing_version` alone cannot."""
+        first = cl.config_fingerprint()
+        self.assertEqual(first["pricing_version"], "pricing-2026-09-20")
+        self._rewrite("pricing.json",
+                      lambda b: b["models"]["claude-opus-5"].update({"input": 9e-06}))
+        cl.reset_caches()
+        second = cl.config_fingerprint()
+        self.assertEqual(second["pricing_version"], first["pricing_version"])
+        self.assertNotEqual(second["config_sha256"], first["config_sha256"])
+        self.assertNotEqual(second["files"]["pricing.json"], first["files"]["pricing.json"])
+
+    def test_the_fingerprint_covers_all_three_config_files_and_is_stable(self):
+        fp = cl.config_fingerprint()
+        self.assertEqual(set(fp["files"]), {"surfaces.json", "arms.json", "pricing.json"})
+        self.assertEqual(fp["arms_version"], "arms-v1")
+        self.assertEqual(fp["surfaces_version"], "surfaces-v1")
+        self.assertEqual(fp, cl.config_fingerprint())
+
+    def test_the_fingerprint_moves_when_the_enabled_arm_set_moves(self):
+        """What would have made the JEV-30 boundary visible in the data itself
+        instead of reconstructed by hand from two log timestamps."""
+        before = cl.config_fingerprint()["config_sha256"]
+        self._rewrite("arms.json", lambda b: b["enabled"].append("cc_fable51"))
+        cl.reset_caches()
+        self.assertNotEqual(cl.config_fingerprint()["config_sha256"], before)
+
+
+class TestInertConfigFields(ConfigFixture):
+    """JEV-31b. Fields that look live and do nothing.
+
+    A config field an operator can edit, observe no error from, and reasonably
+    believe took effect is not a cosmetic problem.
+    """
+
+    def test_state_source_must_agree_with_the_state_builders_table(self):
+        """`state_source` is written onto EVERY capture row, and it is the
+        provenance half of the leakage-safety argument. Two representations of
+        one fact with nothing forcing them to agree -- so assert the agreement,
+        the same way the question_set_id agreement is asserted."""
+        self._rewrite(
+            "surfaces.json",
+            lambda b: b["surfaces"]["pre_bash"].update({"state_source": "transcript"}))
+        cl.reset_caches()
+        with self.assertRaises(cl.QuestionSetError) as caught:
+            cl.surfaces()
+        message = str(caught.exception)
+        self.assertIn("state_source", message)
+        self.assertIn("pre_bash", message)
+
+    def test_the_shipped_config_agrees_with_the_state_builders_table(self):
+        for surface, entry in cl.surfaces()["surfaces"].items():
+            self.assertEqual(entry["state_source"], sb.STATE_SOURCE[surface], surface)
+
+    def test_the_surface_list_has_exactly_one_source(self):
+        """`paths.SURFACES` and `state_builders.STATE_SOURCE` were two more
+        independent copies of the surface list. `cl.surface_names()` resolves
+        it from config; until `paths.SURFACES` is deleted (it cannot be derived
+        there -- paths.py is imported BY config_loader), a divergence is loud
+        here instead of silent."""
+        self.assertEqual(set(cl.surface_names()), set(paths.SURFACES))
+        self.assertEqual(set(cl.surface_names()), set(sb.STATE_SOURCE))
+
+    def test_every_key_in_every_config_file_is_read_somewhere(self):
+        """The sweep. A key with no consumer is inert by definition.
+
+        Scope: top-level keys of each config file plus the per-surface keys,
+        which is where every field in the JEV-31b table lives. Keys whose name
+        starts with `_` are documentation by this project's convention.
+
+        `tests/` counts as a consumer: a key a test asserts against cannot
+        diverge silently, which is the property the ticket asks for. Anything
+        genuinely inert must be listed below WITH A REASON, so the next inert
+        key added to a config file fails this test instead of going unnoticed.
+        """
+        inert_by_decision = {
+            ("pricing.json", "as_of"): "human provenance for the rate table; "
+                                       "the machine-readable pin is `version`",
+        }
+        roots = [ROOT / "src", ROOT / "hooks", ROOT / "tests"]
+        haystack = "\n".join(
+            p.read_text(encoding="utf-8", errors="replace")
+            for root in roots for p in sorted(root.rglob("*"))
+            if p.is_file() and p.suffix in (".py", ".sh") and "__pycache__" not in p.parts
+        )
+        unread = []
+        for name in ("surfaces.json", "arms.json", "pricing.json"):
+            blob = json.loads((paths.CONFIG / name).read_text())
+            keys = set(blob)
+            if name == "surfaces.json":
+                for entry in blob["surfaces"].values():
+                    keys |= set(entry)
+            for key in sorted(keys):
+                if key.startswith("_") or (name, key) in inert_by_decision:
+                    continue
+                if f'"{key}"' not in haystack and f"'{key}'" not in haystack:
+                    unread.append(f"{name}:{key}")
+        self.assertEqual(unread, [], f"config keys with no consumer: {unread}")
+
+
+class TestConfigAgreesWithTheThingsItDescribes(unittest.TestCase):
+    """JEV-31b, the two fields config cannot itself make live.
+
+    `hooks/capture.sh` is a fork-free hot path on bash 3.2 and cannot parse
+    JSON; `.claude/settings.local.json` is hand-written and gitignored. Neither
+    can read config at runtime without giving up the property that makes it
+    what it is. So the duplication stays and the DIVERGENCE is made loud here,
+    against the real config rather than a fixture.
+    """
+
+    def test_capture_sh_backpressure_literals_match_the_configured_cap(self):
+        """`spool_backpressure_max_files` was inert: capture.sh used a bare
+        literal. There are two of them -- the threshold test and the `cap`
+        recorded on every drop row, which would misreport attrition."""
+        cap = json.loads((paths.CONFIG / "surfaces.json").read_text())[
+            "spool_backpressure_max_files"]
+        text = (ROOT / "hooks" / "capture.sh").read_text()
+        literals = re.findall(r'\[ "\$#" -gt (\d+) \]', text) + \
+            re.findall(r'"cap":(\d+)', text)
+        self.assertEqual(len(literals), 2, "capture.sh no longer has both literals")
+        self.assertEqual(
+            literals, [str(cap), str(cap)],
+            f"hooks/capture.sh hardcodes {literals} but config/surfaces.json says "
+            f"spool_backpressure_max_files={cap}. capture.sh is a fork-free bash 3.2 "
+            "hot path and cannot read JSON, so the literal stays -- but it must match.")
+
+    def test_hook_registration_matches_the_surface_modes_in_config(self):
+        """`hook_event` and `matcher` were inert: settings.local.json
+        duplicates them by hand. A surface that is `off` in config must not be
+        registered, and one that is not `off` must be."""
+        settings_path = ROOT / ".claude" / "settings.local.json"
+        if not settings_path.is_file():
+            self.skipTest("settings.local.json is gitignored and machine-local")
+        registered = set()
+        hooks = json.loads(settings_path.read_text()).get("hooks", {})
+        for event, groups in hooks.items():
+            for group in groups:
+                registered.add((event, group.get("matcher")))
+        for surface, entry in cl.surfaces()["surfaces"].items():
+            key = (entry["hook_event"], entry["matcher"])
+            if entry["mode"] == "off":
+                self.assertNotIn(key, registered, f"{surface} is off but registered")
+            else:
+                self.assertIn(key, registered, f"{surface} is {entry['mode']} but not registered")
+
 
 
 if __name__ == "__main__":

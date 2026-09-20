@@ -932,11 +932,23 @@ chosen after results are visible are not evidence.
 
 ## JEV-30: The worker reads config once, and nothing says so
 
-**Status:** blocked
+**Status:** in-review — config side done 2026-09-20, one box is the worker agent's
 **Labels:** defect, science, blocking
-**Blocked by:** JEV-33
+**Blocked by:** None (JEV-33 is done)
 
-*Both rewrite the worker's startup and drain path. Serialised to avoid two agents editing the same file, not because the problems interact.*
+*Originally serialised behind JEV-33 to avoid two agents editing the worker's
+startup and drain path. The fix landed in `src/config_loader.py` instead and
+touches no worker file; the one remaining box is a line for whoever owns
+`src/worker.py`.*
+
+**Scope was wider than the ticket said.** The ticket is written as if only
+`arms.json` goes stale. `surfaces()`, `pricing()` and `question_set()` are all
+`@functools.cache`d too, so a mid-window edit to a surface mode, the
+backpressure cap or a price is equally stale until restart. Worse:
+`pricing()["version"]` is stamped on every row, so an operator who edits a
+**rate** without bumping the version string produces two processes stamping the
+same `pricing-2026-09-20` over different numbers — and nothing in the data
+distinguishes them.
 
 **What happened, on live data.** The running worker started at **15:49:55**.
 `config/arms.json` gained `cc_sonnet5` to its `enabled` list at **15:55:26** —
@@ -954,11 +966,11 @@ window now contains a configuration boundary. Rows before a restart carry a
 different arm set from rows after it, and the analysis must condition on that or
 report it.
 
-- [ ] Log the resolved arm set, config version and config file mtime at worker startup — the operator should be able to see what the process actually loaded
-- [ ] Fail loudly, or at minimum warn on every drain cycle, if a config file's mtime is newer than the process start time
+- [ ] Log the resolved arm set, config version and config file mtime at worker startup — the operator should be able to see what the process actually loaded. **Handed to the worker-owning agent**: `src/config_loader.config_fingerprint()` supplies the value; the exact lines are in `.scratch/a2-prep/jev30-31b.md` §6
+- [x] Fail loudly, or at minimum warn on every drain cycle, if a config file's mtime is newer than the process start time. **Done, and stronger than asked.** `cl.assert_config_fresh()` raises `ConfigStaleError` and is called by **every** config accessor, so the refusal fires on the first config touch of the next capture — before any arm is called and before any row is written. mtime is only the cheap pre-filter: the decision is on a content hash, so a `touch`, a checkout or a no-op re-save does not stop collection
 - [x] **Boundary recorded.** The worker was restarted at **2026-09-20T12:07:24Z**. Rows before that timestamp carry a three-arm `arm_order` (`cc_opus5`, `cc_haiku45`, `jev`) and **no `cc_sonnet5`**; rows after carry four. Verified on the first post-restart row at 12:07:43Z. The analysis must condition on this or report it — the `pre_bash` primary metric is `jev` vs `cc_opus5`, both present on both sides, so the headline is unaffected
 - [x] One stranded capture reaped from `spool/claimed/` before the restart (JEV-31), so the restart did not lose it
-- [ ] Decide and document whether a mid-window config change requires a restart, a new `arms_config_version` on every row, or is forbidden outright during a collection window
+- [x] Decide and document whether a mid-window config change requires a restart, a new `arms_config_version` on every row, or is forbidden outright during a collection window. **Decided: it requires a restart, and the process refuses to continue until it gets one.** Reasoning is in the `src/config_loader.py` module docstring. Hot-reloading was rejected: config is the definition of what is being measured, so reloading mid-window would let rows either side of an unremarkable text edit come from different definitions while looking identical — a silent, unreconstructable confounder in place of a loud operator error. JEV-30's boundary was recoverable at all only because a restart left a process-start timestamp to bisect on. A per-cycle *warning* was also rejected: a warning that repeats every 30 seconds for hours is one nobody reads, and the rows keep being written wrong throughout. **And `config_fingerprint()` does both**: a content hash of all three config files, meant to be stamped on every row so the boundary is intrinsic to the data rather than reconstructed from two log timestamps — see the handoff
 
 ---
 
@@ -997,7 +1009,7 @@ is invisible to the very number designed to catch it.
 
 ## JEV-31b: Five more config fields that look live and are inert
 
-**Status:** ready-for-agent
+**Status:** done 2026-09-20 (one follow-up line handed to the worker agent)
 **Labels:** defect, science
 **Blocked by:** None.
 
@@ -1017,11 +1029,12 @@ observe no error, and reasonably believe took effect.
 `state_source` is the one that matters most and it needs its own decision,
 because making it live changes what gets written to the row schema.
 
-- [ ] Make `state_source` live, or delete it from config and let `STATE_SOURCE` be the single source — either is defensible; having both is not
-- [ ] Resolve `paths.SURFACES` against `surfaces.json` so the surface list has one source
-- [ ] Either generate the hook registration from config or delete `hook_event`/`matcher` from it
-- [ ] Record `surfaces_version` on rows as `pricing_version` already is, or drop the field
-- [ ] Sweep for any remaining config key with no consumer, and add a test asserting every key in `config/*.json` is read somewhere
+- [x] Make `state_source` live, or delete it from config and let `STATE_SOURCE` be the single source — either is defensible; having both is not. **Both kept, and the divergence made impossible**: `config_loader._validate_state_sources()` asserts config against `state_builders.STATE_SOURCE` at load, the same shape as the existing `question_set_id` agreement check. Making config authoritative was rejected — a builder that reads the payload does not become a transcript reader because a JSON file says so, and `STATE_SOURCE` lives next to the builders that decide the answer
+- [x] Resolve `paths.SURFACES` against `surfaces.json` so the surface list has one source. `cl.surface_names()` added and the test callers moved onto it. `paths.SURFACES` cannot be derived *in* `paths.py` (config_loader imports paths), so deleting it is a one-line handoff; until then a test asserts the two agree
+- [x] Either generate the hook registration from config or delete `hook_event`/`matcher` from it. **Neither**: `.claude/settings.local.json` is gitignored and machine-local, and generating it would mean this repo writes its own hook registration — a capability the reversibility argument (JEV-40) depends on *not* existing. Instead a test asserts every non-`off` surface is registered with a matching event and matcher, and every `off` surface is not. Verified to fail on divergence before it was made to pass
+- [x] Record `surfaces_version` on rows as `pricing_version` already is, or drop the field. Kept and made live: it is a field of `config_fingerprint()`, alongside a **content hash** that does not depend on anyone remembering to bump a version string. Stamping it on the row is the worker-side handoff
+- [x] Sweep for any remaining config key with no consumer, and add a test asserting every key in `config/*.json` is read somewhere. Scope: top-level keys plus per-surface keys. One genuine survivor, `pricing.json:as_of`, allow-listed **with a reason** in the test, so the next inert key fails the suite instead of going unnoticed
+- [x] `spool_backpressure_max_files` — `hooks/capture.sh` hardcodes the cap in **two** places (the threshold at `:72` and the `"cap":500` written onto every drop row at `:93`, which would misreport attrition). The literal stays: capture.sh is a fork-free bash 3.2 hot path with a 10ms budget and cannot parse JSON. A test asserts both literals equal the configured cap, and was verified to fail when they diverge
 
 ---
 
