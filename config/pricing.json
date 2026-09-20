@@ -34,6 +34,14 @@
     "claude-haiku-4-5-20251001": {
       "input": 1e-06,
       "output": 5e-06
+    },
+    "claude-fable-5-1": {
+      "input": 1e-05,
+      "output": 5e-05,
+      "cache_read_multiplier": 0.025,
+      "context_window": 1000000,
+      "note": "UNVERIFIED against cost-state. More expensive than Opus on input and output, but cache reads are half Opus's in absolute terms ($0.25 vs $0.50/MTok). Fable is not a cheaper tier -- it is a DIFFERENTLY SHAPED one, cheaper only on cache-heavy terse turns."
     }
-  }
+  },
+  "_cache_read_multiplier_note": "cache_read_multiplier is a GLOBAL 0.10, verified empirically against Claude Code's own cost-state for Haiku 4.5 and Sonnet 5 (exact to the cent). Fable 5.1 is reported to break this: $0.25/MTok cache read against a $10/MTok input rate is 2.5%, not 10%. That is UNVERIFIED -- it comes from documentation, not from reconciliation against cost-state as the others were. Until a real Fable session can be reconciled, treat Fable cost figures as provisional. Per-model cache_read override below takes precedence over the global when present."
 }

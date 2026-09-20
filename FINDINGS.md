@@ -843,6 +843,86 @@ pattern is consistent and is now the study's most reliable claim about Jev:
 off seven points — exactly the overfit Part 4d quantified at +0.10 for a set
 eight times larger. It is a starting value for a rule, not a threshold.
 
+## Part 5c — Claude Code cannot route a turn. This constrains the thesis. [SOLID]
+
+Before designing a routing experiment we established what Claude Code actually
+permits. The answer narrows the options sharply.
+
+### Hooks cannot select a model
+
+Checked across every hook event's output schema. Hooks can return
+`permissionDecision`, `updatedInput`, `updatedPrompt`, `additionalContext`,
+`systemMessage`, `terminalSequence` and `retry`. **No hook event accepts a
+`model`, `effort` or `fast` field.** There is a `PreModelSwitch` hook, but its
+output accepts only `permissionDecision` — it can **veto** a model change Claude
+initiates, never **initiate** one.
+
+> **Hook-based routing is not viable.** This matters because the hook is the
+> only place a classifier can sit in the loop for free, and it is precisely the
+> place that cannot act on the classification.
+
+### There is no per-request model override anywhere
+
+Not in the Agent SDK, not in headless `claude -p`. Every mechanism is
+session-scoped or session-resumption-scoped. `resume()` with a new model starts
+a fresh context and **breaks the cache**, which for a cache-dominated workload
+costs more than the routing saves.
+
+### What IS viable
+
+| mechanism | granularity | context | notes |
+|---|---|---|---|
+| **Subagent delegation** (`model:` frontmatter, `--agents` JSON, `CLAUDE_CODE_SUBAGENT_MODEL`) | per delegated task | **fresh, ~15K tokens** | Empirically confirmed: a subagent's first request shows ~14.6K cache-creation and **zero cache-read**, while the parent reuses ~22K. Genuinely isolated. |
+| **`/model <alias>` inside a `-p` prompt** | per turn, within one headless session | preserved | v2.1.205+. Works only in headless mode, not in an interactive session. |
+| **External loop**: spawn `claude -p --model X` per request | per request | fresh per spawn | You own the session lifecycle. |
+
+### The consequence for this study
+
+**Per-turn routing inside a normal interactive session is impossible.** A
+routing experiment must be one of:
+
+1. **Subagent-level** — classify each delegated task and pick the subagent's
+   model. Native, already supported, and the parent keeps its cache. The unit of
+   routing becomes the *delegation*, not the turn.
+2. **Headless** — drive `claude -p` with `/model` per turn. Fully controllable,
+   but it is not the user's real working session, so external validity drops.
+
+This is a real constraint on the article's thesis. "Route each turn to the right
+model" is not a thing Claude Code can currently do; **"route each delegated task
+to the right model" is.** The honest framing of the finding is that the
+mechanism, not the classifier, is the binding limitation today.
+
+## Part 5d — Fable 5.1 is not a cheaper tier, it is a differently shaped one [PRELIMINARY, pricing UNVERIFIED]
+
+Reported at **$10/$50 per MTok — twice Opus** on input and output. But its cache
+reads are **$0.25/MTok against Opus's $0.50**, i.e. half in absolute terms, and
+2.5% of its own input rate rather than the 10% every other model charges.
+
+That single difference makes the routing ladder two-dimensional. Against Opus:
+
+| turn shape | Opus | Fable | cheaper |
+|---|---|---|---|
+| 30k read, 2k write, 1.5k out (our representative turn) | $0.0650 | $0.1075 | Opus |
+| 100k read, 0 write, 300 out (cache-heavy, terse) | $0.0575 | **$0.0400** | **Fable** |
+| 100k read, 0 write, 3k out (cache-heavy, verbose) | $0.1250 | $0.1750 | Opus |
+| 300k read, 5k write, 2k out (deep agentic) | $0.2313 | $0.2375 | Opus |
+
+The crossover is governed by output volume at a given cache depth: Fable is
+cheaper below **~300 output tokens at 30k cache read, ~1,000 at 100k, ~3,000 at
+300k.**
+
+> **A one-dimensional complexity score cannot express this.** Routing to Fable
+> requires predicting the *shape* of the turn — how much output it will produce
+> relative to context read — not just how hard it is. That is a second question,
+> and `questions/user_prompt/v2.json` does not ask it.
+
+**Pricing is UNVERIFIED.** Every other rate in `config/pricing.json` was
+reconciled against Claude Code's own `cost-state` to the cent. Fable's comes
+from documentation only, and its 2.5% cache multiplier contradicts the uniform
+10% we verified empirically for three other models. `cost_usd` now honours a
+per-model override, but Fable figures stay provisional until a real Fable
+session can be reconciled.
+
 ## Part 6 — Methodological notes worth publishing on their own
 
 - **Pre-registration before collection.** `PREREGISTRATION.md`, committed at

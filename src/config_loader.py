@@ -82,8 +82,11 @@ def cost_usd(model: str, usage: dict[str, Any]) -> float | None:
     rate = table.get(model)
     if rate is None:
         return None
-    cw = pricing()["cache_write_multiplier"]
-    cr = pricing()["cache_read_multiplier"]
+    cw = rate.get("cache_write_multiplier", pricing()["cache_write_multiplier"])
+    # Per-model override: Fable 5.1 reportedly reads cache at 2.5% of its input
+    # rate rather than the 10% every other model uses. A single global constant
+    # would misprice it by 4x on exactly the cache-heavy turns where it competes.
+    cr = rate.get("cache_read_multiplier", pricing()["cache_read_multiplier"])
     return (
         usage.get("input_tokens", 0) * rate["input"]
         + usage.get("cache_creation_input_tokens", 0) * rate["input"] * cw

@@ -84,6 +84,15 @@
       "timeout_s": 60.0,
       "role": "metered_api_baseline (DISABLED)",
       "_comment": "Metered-API twin of cc_sonnet5. Disabled with the other metered arms; needs ANTHROPIC_API_KEY."
+    },
+    "cc_fable51": {
+      "arm_config_id": "cc-fable51-cli-v1",
+      "kind": "claude_cli",
+      "model": "claude-fable-5-1",
+      "effort": "low",
+      "timeout_s": 240.0,
+      "role": "high_tier_baseline",
+      "_comment": "Fable 5.1. NOT a cheap tier -- at $10/$50 it is twice Opus on input and output. It earns a place because its cache reads are half Opus's in absolute terms, so on cache-heavy terse turns it is cheaper. That makes the routing ladder two-dimensional rather than a single cost axis."
     }
   },
   "enabled": [
