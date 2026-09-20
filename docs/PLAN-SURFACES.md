@@ -6,7 +6,9 @@ Companion to `docs/PLAN.md` (design decisions) and `ISSUES.md` (JEV-13).
 `pre_bash` is live with 62+ captures. The other three have question sets and
 state builders that have **never executed against a real payload**. Everything
 below treats that as the primary fact: these are not "register and go", they are
-three unvalidated code paths.
+three unvalidated code paths. A fourth surface, `agent_route`, is **sequenced**
+in §0.1 because it comes first — but it is **specified** in `SPEC.md` *The
+routing state* and built under JEV-23, outside this plan's scope.
 
 > **Verification note.** The defects in §6 were independently confirmed against
 > the source before this plan was accepted — except §6.1, which is *contested*;
@@ -18,13 +20,35 @@ three unvalidated code paths.
 
 ### 0.1 Sequencing
 
-**Order: mechanism → `user_prompt` → `stop` → `post_edit`. Staged, never simultaneous.**
+**Order: `agent_route` → `user_prompt` → `stop` → `post_edit`. Staged, never simultaneous.**
+
+**The mechanism is named and resolved — it is not a pending thing this plan
+waits on.** An earlier version of this section sequenced an undefined "mechanism"
+first, on the belief that no hook could carry a routing decision. That belief is
+**refuted**: a `PreToolUse` hook matched on the **`Agent`** tool returns
+`permissionDecision: "allow"` plus `updatedInput`, which replaces the tool input
+— including its `model` field — before the subagent spawns. Per-**turn** routing
+inside an interactive session is still impossible (every switch is
+session-scoped; `PreModelSwitch` accepts only allow/deny/ask and explicitly not
+`updatedInput`), but per-**task** routing is available today.
+`code.claude.com/docs/en/hooks.md`, Claude Code v2.1.278, verified 2026-09-20;
+see `FINDINGS.md` Part 5c and `SPEC.md` *The routing state*.
+
+**So the two routing surfaces make different claims, and the order follows from
+that.** `agent_route` (JEV-23) is a **live intervention** with a control arm —
+*"here is what routing delegated tasks did save"* — and it is the headline.
+`user_prompt` (JEV-18) is a **shadow counterfactual** — *"if per-turn routing
+existed, here is what it would have saved"* — a potential-savings estimate
+against a mechanism that does not exist, **unfalsifiable by design**, and no
+amount of data makes it more than that. If only one gets done in the budget, it
+is `agent_route`.
 
 | # | Surface | Why here |
 |---|---|---|
-| 1 | `user_prompt` | `FINDINGS.md` Part 4c is an explicit course correction: **gating is additive on every axis; routing is the only surface that can make Claude Code faster or cheaper.** Strongest economics (one correct downgrade in ~4,000 pays for itself), thinnest evidence (8 prompts, outside the harness, confidently wrong on the hardest item). Payload-only, so it ships the day the mechanism lands. |
-| 2 | `stop` | Riskiest mechanism; do it while the hook change is fresh. Lowest volume, so all three arms on 100% is affordable. Its Step 0 unknowns are cheap to learn and could kill the surface — learn that early, not last. |
-| 3 | `post_edit` | Payload-only and low-risk, but the only `score` question, and it needs a synthetic set before live data means anything. The build cost is in the stress set, not the registration. |
+| 1 | `agent_route` | The only surface where Jev's decision **changes what the harness does**, so the only one that can produce a measured routing result rather than an estimate. Its state is the hook payload and nothing else (`tool_input.prompt`, `tool_input.subagent_type`), so GATE 4 is satisfied by construction. Specified in `SPEC.md` *The routing state* — do not redesign it here. Its question set `questions/agent_route/v1.json` **does not exist yet** and is the build cost (JEV-25). |
+| 2 | `user_prompt` | `FINDINGS.md` Part 4c is an explicit course correction: **gating is additive on every axis; routing is the only surface that can make Claude Code faster or cheaper.** Strongest economics (one correct downgrade in ~4,000 pays for itself), thinnest evidence (8 prompts, outside the harness, confidently wrong on the hardest item). Payload-only and shadow-only — it depends on no mechanism and never will, because the mechanism it would need is the per-turn one that does not exist. |
+| 3 | `stop` | Riskiest mechanism; do it while the hook change is fresh. Lowest volume, so all three arms on 100% is affordable. Its Step 0 unknowns are cheap to learn and could kill the surface — learn that early, not last. |
+| 4 | `post_edit` | Payload-only and low-risk, but the only `score` question, and it needs a synthetic set before live data means anything. The build cost is in the stress set, not the registration. |
 
 **Why not simultaneously.** `worker.py` drains serially. At `cc_opus5` 4.2s p50 /
 32s p99 and `cc_haiku45` 12.7s p50, one decision costs **20–40s of worker
@@ -36,6 +60,12 @@ Stage them, and watch `ls spool/ready | wc -l` during the first session of each.
 ### 0.2 Per-surface arms (the `cc_*` arms are too slow to *drain*, not too slow to *observe*)
 
 Nothing is on the critical path in shadow mode; the problem is drain throughput.
+**`agent_route` is the exception and is not covered by this table.** It is a live
+intervention, synchronous on the critical path of every subagent spawn, so it
+must fail open and its added latency must be *measured* in the A/B rather than
+assumed free. Its arms are an A/B treatment and control over delegated tasks,
+not this table's jev-plus-subsampled-baseline shadow structure — stated here
+rather than given an invented row.
 
 1. **Add a per-surface `arms` list to `config/surfaces.json`**, defaulting to
    `arms.json:enabled`:
@@ -221,7 +251,16 @@ analysis, never in state. Gives `stop` a semi-gold label with no human pass.
 
 ---
 
-## 2. `user_prompt` — routing
+## 2. `user_prompt` — routing, in shadow only
+
+**Everything in this section is a counterfactual.** Per-turn routing is not a
+thing Claude Code can do (§0.1), so these captures can never move a turn to a
+different model; they can only estimate what it would have saved if they could.
+That is JEV-18's claim, it is weaker than `agent_route`'s, and it must be
+labelled as such wherever it appears — a potential-savings estimate against a
+mechanism that does not exist. The surface is still worth running: it is the
+highest-volume, cheapest question in the study, and §2.4's realised-cost
+correlation tests the economics the whole routing story rests on.
 
 ### 2.1 Which question: both, as `v2`, and no model-choice question
 
@@ -280,8 +319,10 @@ enforced): a 50%-modal router agreeing 55% of the time is doing almost nothing.
 count, `is_error` count, wall-clock. Correlate Jev's `complexity` against realised
 cost.
 
-This is **the only Phase-1-feasible test of the economics**, and it needs zero
-human labels. If complexity does not predict realised cost, the $0.0520-per-
+This is the **strongest test of the economics that needs zero human labels**, and
+until `agent_route` is live it is the only one — `agent_route` supersedes it as
+evidence, because that surface measures realised cost against a control arm
+instead of correlating a score against a turn nobody rerouted. If complexity does not predict realised cost, the $0.0520-per-
 downgrade story never materialises regardless of how well Jev agrees with Opus.
 Make it the surface's pre-registered secondary metric (Spearman ρ between
 `complexity` and realised output tokens, clustered on session).
@@ -385,7 +426,9 @@ and the 60k char cap.
 
 Session latency impact is **0ms in shadow mode** for all three — the hook is a
 spooler. The only session-visible cost is the hook itself: 6.5ms today, +1–2ms on
-`stop`.
+`stop`. **`agent_route` is not in this table and does not share its premise**
+(§0.2): it blocks each subagent spawn on a Jev call, so its session impact is a
+full decision latency, not a spool write, and measuring it is part of the A/B.
 
 | surface | est. rate | arms | worker load | session impact |
 |---|---|---|---|---|

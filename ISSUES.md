@@ -696,7 +696,7 @@ The derivation is specified in A2.4 so it cannot be tuned after the fact.
 
 ## JEV-26: Correct the refuted mechanism claim in FINDINGS.md
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** science, publication, blocking
 **Blocked by:** None
 
@@ -710,10 +710,19 @@ This is publication raw material with a false claim in it, and the claim is
 load-bearing — it is the reason the thesis was narrowed. Correcting it is
 blocking on any writeup.
 
-- [ ] Rewrite Part 5c: per-**turn** routing is impossible (session-scoped switches only; `PreModelSwitch` cannot redirect); per-**task** routing is available via `PreToolUse` on `Agent`
-- [ ] Record the correction as a dated finding rather than a silent edit — being wrong about the mechanism, and finding out by checking, is itself the most useful thing in the section
-- [ ] Re-check every other document that repeats the claim (`SPEC.md` is done; `docs/PLAN-SURFACES.md` §0 is not)
-- [ ] Cite the source: `code.claude.com/docs/en/hooks.md`, Claude Code v2.1.278, verified 2026-09-20
+- [x] Rewrite Part 5c: per-**turn** routing is impossible (session-scoped switches only; `PreModelSwitch` cannot redirect); per-**task** routing is available via `PreToolUse` on `Agent`
+- [x] Record the correction as a dated finding rather than a silent edit — being wrong about the mechanism, and finding out by checking, is itself the most useful thing in the section
+- [x] Re-check every other document that repeats the claim — `SPEC.md`, `docs/PLAN-SURFACES.md` §0/§2/§4 all corrected; a paraphrase sweep over every `.md` found no further hits
+- [x] Cite the source: `code.claude.com/docs/en/hooks.md`, Claude Code v2.1.278, verified 2026-09-20
+
+**Done 2026-09-20.** The correction is recorded as a dated finding rather than a
+silent edit, and the superseded text is kept verbatim beside it. The finding
+worth publishing is *how* the error happened: it was a category error, not a
+misreading. `model` is not a hook output key — that reading was correct — it is
+an `Agent` tool *input* key, and `updatedInput`, which the superseded text
+itself lists among the available outputs a few lines above its own conclusion,
+replaces the entire tool input. The evidence sat inside the section that drew
+the wrong conclusion from it.
 
 ---
 

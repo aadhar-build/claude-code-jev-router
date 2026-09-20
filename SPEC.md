@@ -158,7 +158,15 @@ produced an A/B whose primary outcome was silently missing on most tasks.
 **Verified 2026-09-20 against `code.claude.com/docs/en/hooks.md`** (the `Agent`
 tool input table, the `PreToolUse` decision-control table, and the
 `PreModelSwitch` section), on Claude Code v2.1.278. `FINDINGS.md` Part 5c states
-the superseded version and must be corrected before publication.
+the superseded version. **Corrected 2026-09-20** — Part 5c now carries the
+surviving half precisely, keeps the refuted text verbatim as superseded, and
+records the correction as a dated finding. The error is worth reading: it was a
+category error, not a misreading. `model` genuinely is not a hook *output* key —
+it is an `Agent` tool *input* key, and `updatedInput`, which the superseded text
+itself listed among the available outputs a few lines above its own conclusion,
+replaces the entire tool input. **The evidence that refuted the section was
+inside the section**, and it took re-reading primary source rather than
+reasoning harder about what was already written down.
 
 **2. The "delegate where possible" rule is a confound, and must be disclosed.**
 Adopting it changes how the work is done in order to make more of it routable.
@@ -234,7 +242,8 @@ That separation is correct and `agent_route` must preserve it.
 | state | `tool_input.prompt` + `tool_input.subagent_type`, and nothing else |
 | questions | `questions/agent_route/v1.json` — `complexity` (**score**, 1–5, anchors describing the work and never naming a model) and `verbosity` (**score**, predicted output length). Tier selection stays a policy in `_tier_mapping`, applied in analysis |
 | output | `updatedInput` with `model` rewritten, everything else echoed unchanged |
-| outcome | `PostToolUse` on `Agent`: `resolvedModel`, `usage`, `totalDurationMs` |
+| verification | `PostToolUse` on `Agent`: `resolvedModel` — the only field present on a background launch |
+| outcome | the subagent's own transcript under `<session>/subagents/`, or a `SubagentStop` hook. **Not `PostToolUse`** — since v2.1.198 subagents run in the background by default, and an `async_launched` response carries no usage, token or timing fields at all |
 
 **GATE 4 is satisfied by construction here, and that is worth stating rather
 than assuming.** The state is the hook payload and only the hook payload. There

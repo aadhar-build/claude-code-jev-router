@@ -843,12 +843,13 @@ pattern is consistent and is now the study's most reliable claim about Jev:
 off seven points — exactly the overfit Part 4d quantified at +0.10 for a set
 eight times larger. It is a starting value for a rule, not a threshold.
 
-## Part 5c — Claude Code cannot route a turn. This constrains the thesis. [SOLID]
+## Part 5c — Claude Code cannot route a *turn*. It can route a *task*. [per-turn constraint: SOLID; "hooks cannot route": REFUTED 2026-09-20 — see the correction below]
 
 Before designing a routing experiment we established what Claude Code actually
-permits. The answer narrows the options sharply.
+permits. The answer narrows the options — but by half as much as this section
+originally claimed, and the half we got wrong is the more useful finding.
 
-### Hooks cannot select a model
+### Hooks cannot select a model [SUPERSEDED — the conclusion is refuted; text kept verbatim, see the Correction]
 
 Checked across every hook event's output schema. Hooks can return
 `permissionDecision`, `updatedInput`, `updatedPrompt`, `additionalContext`,
@@ -861,36 +862,114 @@ initiates, never **initiate** one.
 > only place a classifier can sit in the loop for free, and it is precisely the
 > place that cannot act on the classification.
 
-### There is no per-request model override anywhere
+> **Correction, 2026-09-20 — the conclusion above is refuted against primary
+> source.** Re-checked against `code.claude.com/docs/en/hooks.md` on Claude Code
+> v2.1.278: the `Agent` tool input table, the `PreToolUse` decision-control
+> table, and the `PreModelSwitch` section.
+>
+> *What was claimed.* That no hook accepts a `model` field, therefore the
+> harness has nowhere to put a routing decision, therefore hook-based routing is
+> not viable at all.
+>
+> *What was checked.* Every hook event's **output** schema — and that reading is
+> still accurate. The sentence "no hook event accepts a `model`, `effort` or
+> `fast` field" is literally true today.
+>
+> *What it turned out to be — a category error, not a misreading.* We looked for
+> `model` as a hook **output** key. It is not one. But `model` is an **input**
+> key of the **`Agent`** tool, and `updatedInput` — which the superseded text
+> names in its own list of hook outputs, a few lines above the conclusion it
+> drew — **replaces the entire tool input
+> before the tool runs.** A `PreToolUse` hook matched on `Agent` returning
+> `hookSpecificOutput.permissionDecision: "allow"` together with `updatedInput`
+> can read `tool_input.prompt`, classify it, and rewrite `model` (a string:
+> `"sonnet"`, documented as *"Optional model alias to override the default"*) on
+> the way through. The routing decision does not need a field of its own; it
+> borrows the field the tool already has. **The evidence to refute this section
+> was inside this section.** That is worth recording: the failure was not
+> insufficient reading, it was asking the schema the wrong question — and it was
+> caught by re-reading primary source, not by reasoning harder about what we had
+> already written down.
+>
+> *What still stands, unchanged.* **Per-turn routing inside a running
+> interactive session remains impossible.** Every model switch is
+> session-scoped — `/model`, `--model`, `ANTHROPIC_MODEL`, the SDK's
+> `set_model` all change the model from that point forward, never for one turn.
+> `PreModelSwitch` fires only on a switch someone else initiates and accepts
+> only `"allow"`, `"deny"` or `"ask"`; the documentation states explicitly that
+> it does **not** accept `updatedInput`, so it cannot redirect a switch to a
+> different model, let alone start one.
+>
+> *What it changes about the thesis.* Not the narrowing — the unit of routing is
+> still the delegated task, not the turn. What changes is **what the experiment
+> can claim**. Under the old reading Jev's routing contribution was permanently
+> counterfactual: a shadow classification that never touched anything, and a
+> potential-savings estimate against a mechanism that does not exist. Under the
+> corrected one the treatment arm is **actually Jev-routed on live traffic**,
+> with a control arm, which is the experiment the thesis says it is running.
+> `user_prompt` routing (JEV-18) stays a shadow counterfactual and is
+> unfalsifiable by design; `agent_route` (JEV-23) is the measurable claim and is
+> the headline.
+>
+> *What does not come free with it.* The matching `PostToolUse` on `Agent`
+> returns `resolvedModel`, which is the verification field the routing assertion
+> needs — but **the outcome fields are absent on the default path.** Since
+> v2.1.198 subagents launch in the **background by default**, and a background
+> launch returns `tool_response.status: "async_launched"` carrying
+> `resolvedModel` and **no usage, token or timing fields at all**. Cost and
+> latency per delegated task must come from the subagent's own transcript under
+> `<session>/subagents/`, or from `SubagentStop`. Two further caveats:
+> `updatedInput` replaces the **entire** input object, so `prompt`,
+> `description` and `subagent_type` must be echoed back unchanged or the
+> delegation is silently corrupted in a way that would read as a routing effect;
+> and `resolvedModel` can differ from the model requested, because an
+> `availableModels` allowlist or a `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` session
+> setting overrides the hook — which is exactly why the assertion is written
+> against `resolvedModel` rather than against what we asked for.
 
-Not in the Agent SDK, not in headless `claude -p`. Every mechanism is
-session-scoped or session-resumption-scoped. `resume()` with a new model starts
-a fresh context and **breaks the cache**, which for a cache-dominated workload
-costs more than the routing saves.
+### There is no per-request model override for the main session's own turns
+
+Not in the Agent SDK, not in headless `claude -p`. Every mechanism that switches
+the model a *session* is running is session-scoped or
+session-resumption-scoped. `resume()` with a new model starts a fresh context
+and **breaks the cache**, which for a cache-dominated workload costs more than
+the routing saves. (This is about the session's own turns; the model of a
+*delegated* task is a separate, and settable, thing — above.)
 
 ### What IS viable
 
 | mechanism | granularity | context | notes |
 |---|---|---|---|
-| **Subagent delegation** (`model:` frontmatter, `--agents` JSON, `CLAUDE_CODE_SUBAGENT_MODEL`) | per delegated task | **fresh, ~15K tokens** | Empirically confirmed: a subagent's first request shows ~14.6K cache-creation and **zero cache-read**, while the parent reuses ~22K. Genuinely isolated. |
+| **`PreToolUse` on `Agent` + `updatedInput`** | **per delegated task, decided live** | fresh subagent context | **The routing mechanism.** The only one that lets a classifier decide per task rather than per session. Synchronous on the critical path of every subagent spawn — the one place in this study where a Jev call is not free — so it must fail open and its overhead must be *measured* in the A/B, not assumed. |
+| **Static subagent model settings** (`model:` frontmatter, `--agents` JSON, `CLAUDE_CODE_SUBAGENT_MODEL`) | per *agent type* or per session, fixed in advance | **fresh, ~15K tokens** | Empirically confirmed: a subagent's first request shows ~14.6K cache-creation and **zero cache-read**, while the parent reuses ~22K. Genuinely isolated — but all three are static, so **none of them lets Jev decide anything per task.** They set the baseline arms, not the treatment. |
 | **`/model <alias>` inside a `-p` prompt** | per turn, within one headless session | preserved | v2.1.205+. Works only in headless mode, not in an interactive session. |
 | **External loop**: spawn `claude -p --model X` per request | per request | fresh per spawn | You own the session lifecycle. |
 
 ### The consequence for this study
 
-**Per-turn routing inside a normal interactive session is impossible.** A
-routing experiment must be one of:
+**Per-turn routing inside a normal interactive session is impossible; per-task
+routing is not.** A routing experiment must be one of:
 
-1. **Subagent-level** — classify each delegated task and pick the subagent's
-   model. Native, already supported, and the parent keeps its cache. The unit of
-   routing becomes the *delegation*, not the turn.
+1. **Subagent-level, live** — a `PreToolUse` hook on `Agent` classifies each
+   delegated task and rewrites `tool_input.model` before the subagent spawns.
+   The unit of routing is the *delegation*, not the turn, and the parent keeps
+   its cache. Verification comes from `PostToolUse`'s `resolvedModel`; the cost
+   and latency outcome does **not**, and must be read from the subagent
+   transcript under `<session>/subagents/` or from `SubagentStop`, because the
+   default background launch returns no usage fields.
 2. **Headless** — drive `claude -p` with `/model` per turn. Fully controllable,
    but it is not the user's real working session, so external validity drops.
 
-This is a real constraint on the article's thesis. "Route each turn to the right
-model" is not a thing Claude Code can currently do; **"route each delegated task
-to the right model" is.** The honest framing of the finding is that the
-mechanism, not the classifier, is the binding limitation today.
+This is still a real constraint on the article's thesis: "route each turn to the
+right model" is not a thing Claude Code can currently do. But the honest framing
+has moved. It is no longer *the mechanism, not the classifier, is the binding
+limitation* — **the mechanism exists at the task level, so the classifier is
+back on trial.** What the experiment can no longer hide behind is the absence of
+a place to put the answer.
+
+**Source:** `code.claude.com/docs/en/hooks.md`, Claude Code v2.1.278, verified
+2026-09-20. Tracked as JEV-26; the corrected write-up lives in `SPEC.md`,
+*Four things a reader should be told plainly* §1 and *The routing state*.
 
 ## Part 5d — Fable 5.1 is not a cheaper tier, it is a differently shaped one [PRELIMINARY, pricing UNVERIFIED]
 
