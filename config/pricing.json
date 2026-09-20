@@ -1,8 +1,10 @@
 {
   "_comment": "Rates in USD per token, keyed by EXACT model string including any context suffix such as [1m] -- long-context pricing differs and must not be normalised away. Jev bills input only; output is free.",
-  "version": "pricing-2026-09-20",
+  "version": "pricing-2026-09-20b",
   "as_of": "2026-09-20",
   "cache_write_multiplier": 1.25,
+  "cache_write_multiplier_1h": 2.0,
+  "_cache_write_multiplier_1h_note": "A cache write with a 1-HOUR TTL bills at 2x the input rate; the 1.25x above is the 5-MINUTE rate. Which TTL a row used is recorded per row in usage.cache_creation {ephemeral_5m_input_tokens, ephemeral_1h_input_tokens} and must be READ, not inferred from the auth path -- both TTLs occur in this project's own corpus (12,334,854 tokens of 5m writes across 27 sessions; 5,161,696 tokens of 1h writes in one). Source: ccusage#899, $479 / 19% under-reported across ~40,000 records before PR #1221. NOT independently reconciled here: no session in this corpus that used 1h writes has written a cost-state line, so 2.0 is taken from the published rate card and the 1.25x figure is the only one verified against first-party accounting (see _verification).",
   "cache_read_multiplier": 0.1,
   "web_search_usd_per_request": 0.01,
   "_verification": "Haiku 4.5 and Sonnet 5 rates reproduce Claude Code's own cost-state.costUSD exactly on a real transcript, once web search is billed at $0.01/request -- see FINDINGS.md Appendix B. The Jev rate is confirmed against the gateway's own /v1/models metadata: pricing.input 4.2e-8, pricing.output 0 -- see FINDINGS.md Appendix A.",
@@ -16,6 +18,11 @@
     "claude-opus-5": {
       "input": 5e-06,
       "output": 2.5e-05
+    },
+    "claude-opus-4-7": {
+      "input": 5e-06,
+      "output": 2.5e-05,
+      "_derivation": "NOT guessed and NOT substring-matched from 'opus' -- that is claude-spend#31's 437% over-report. Solved from first-party accounting: 5e-06/2.5e-05 is the unique rate pair that reproduces cost-state.modelUsage['claude-opus-4-7'].costUSD to the cent in all 28 sessions of this project that report one, with cache writes at 1.25x and cache reads at 0.10x. Worked example, session 0982af7b: in 9, out 4969, cache write 49379, cache read 126594 -> 0.49618575, against a reported 0.49618575. JEV-49."
     },
     "claude-opus-5[1m]": {
       "input": 5e-06,

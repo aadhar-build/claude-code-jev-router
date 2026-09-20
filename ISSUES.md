@@ -2389,7 +2389,7 @@ and if it is small the study's ceiling is low regardless of how good Jev is.
 
 ## JEV-49: three known cost-pipeline bugs, and the reconciliation nobody has published
 
-Status: ready-for-agent
+Status: done
 Labels: cost, correctness, prior-art
 Blocked by: JEV-38
 
@@ -2431,14 +2431,79 @@ residual inoculates our headline cost number and is a contribution on its own.
 
 **Acceptance criteria**
 
-- [ ] `iterations[]` handled asymmetrically, with a fixture proving both halves
-- [ ] Dedupe by `requestId` + `message.id`; unknown model ID is a hard failure
-- [ ] Cache-write multiplier correct for our auth path; auth path declared in
-      `PREREGISTRATION.md`
-- [ ] Pre-/post-fix cost numbers reported for every row already collected
-- [ ] Transcript-derived total reconciled against the Console usage page for a
-      bounded window; residual published with its sign and its method
-- [ ] `docs/PLAN.md`'s "ignore `iterations[]`" line corrected
+- [x] `iterations[]` handled asymmetrically, with a fixture proving both halves
+      — `session_metrics.normalise_usage`, `TestUsageNormalisation`. The rule is
+      **three-way, not two-way**: the `cache_creation` TTL sub-object follows
+      the token rule, not the scalar rule. That third case is in no third-party
+      report and is tested separately.
+- [x] Dedupe by `requestId` + `message.id`; unknown model ID is a hard failure
+      — `dedupe_key`, `UnpricedModelError`, `analyse(strict=True)`, and
+      `render()` prints `LOWER BOUND` on the cost line itself. On this corpus
+      the pair is equivalent to `requestId` alone (728 keys, 728 pairs); the
+      659-vs-660 gap in the prep is `<synthetic>` rows, not retries.
+- [x] Cache-write multiplier correct for our auth path; auth path declared in
+      `PREREGISTRATION.md` — Amendment 8. **Claude Max 5× subscription** for the
+      baseline and the `cc_*` arms (which `claude_cli.py` forces), Vercel AI
+      Gateway for `jev`, and **no Anthropic API-key spend at all**. The
+      multiplier is read per row from `usage.cache_creation`, not inferred from
+      the path: both TTLs occur here.
+- [x] Pre-/post-fix cost numbers reported for every row already collected —
+      table below. **`data/runs/`'s 2,005 rows are NOT re-costed and cannot be**:
+      they persist only the four scalar usage fields, with no `iterations[]` and
+      no TTL split, so the corrections are inapplicable retroactively. The line
+      that would persist them is handed to `claude_cli.py`'s owner in
+      `.scratch/a3-prep/jev49.md`.
+- [ ] **OPEN — Console.** Transcript-derived total reconciled against the
+      Console usage page for a bounded window; residual published with its sign
+      and its method. **What was done:** the bounded window is
+      2026-09-19T19:58:56Z → 2026-09-20T14:50:13Z and the residual against
+      **Claude Code's own `cost-state`** is **−$0.2234, −2.56%, negative by
+      construction** (a transcript-derived figure is a lower bound: Claude Code
+      bills background models it never transcribes). **What was not:** that is a
+      reconciliation against a first-party *estimate*, not a billing record.
+      There is no browser in this environment, and the spend is on a
+      subscription, so it may not appear on the Console usage page at all.
+      PREREGISTRATION A8.4 lists the four things the operator must supply. **No
+      Console figure is asserted or estimated.**
+- [x] `docs/PLAN.md`'s "ignore `iterations[]`" line corrected — all three sites,
+      plus the stale 3.1× duplication factor (this corpus is 1.97×; 3.19× was a
+      different corpus) and the `input_tokens: 2` overclaim.
+
+**A fourth defect, found while measuring the other three and larger than any of
+them.** Dedupe was keeping the **first** copy of a duplicated row. Claude Code
+writes the same `(requestId, message.id)` repeatedly as a turn streams, and the
+early copies are **placeholders** — `input_tokens: 2`, no `iterations[]`. Only
+the last carries the completed breakdown. 48 keys here grow across their copies,
+all 48 monotonically, **all 48 inside subagent transcripts**. See A8.2b.
+
+**And one defect checked for and NOT found.** `anthropics/claude-code#95555`
+(every top-level counter zeroed while `usage.cache_creation` stays populated)
+occurs on **0 of 3,790 assistant rows**. The `input_tokens: 2` shape on 81% of
+rows is normal cache-read behaviour and is **not** evidence for it.
+
+**Pre-/post-fix cost, bounded window 2026-09-19T19:58:56Z → 2026-09-20T14:50:13Z
+(15 sessions, 1,161 billable requests — the window `data/baseline/manifest.json`
+snapshots):**
+
+| figure | was | became | Δ |
+|---|---|---|---|
+| **baseline total** | **$125.582946** | **$175.354996** | **+$49.77 (+39.6%)** |
+| — of which `iterations[]` summed | | | +$4.6857 |
+| — of which completed-copy dedupe | | | +$29.8401 |
+| — of which 1-hour cache writes at 2× | | | +$6.7505 |
+| — of which `claude-opus-4-7` priced | | | +$8.4958 |
+| sessions contributing $0.00 to the total | 14 of 15 | 0 of 15 | — |
+| delegated-task total (n=20) | $42.5699 | $72.4099 | +$29.84 (+70.1%) |
+| mean per delegated task | $2.1285 | $3.6205 | +$1.49 |
+| SD per delegated task | $1.8119 | $2.7503 | — |
+| fixture session (Redline `f0539211`) | $70.075211 | $75.756397 | +$5.68 (+8.1%) |
+| — its residual vs Claude Code's own total | −27.55% | −21.68% | still negative |
+| residual vs `cost-state`, 14 sessions | — | −$0.2234 (−2.56%) | — |
+| `data/runs/` 2,005 run rows | $unchanged | $unchanged | not re-costable |
+| web search | $0.00 | $0.00 | none in window |
+
+**The +$29.84 lands almost entirely on delegated work**, which is why JEV-27 is
+blocked on this ticket and not the other way round.
 
 ## JEV-50: retract the novelty claim — eleven independent Jev evaluations already exist
 

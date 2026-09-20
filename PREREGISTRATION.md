@@ -1029,3 +1029,185 @@ at v2, and it is named as such rather than left implicit.
 
 It is PABAK between `jev` and `cc_opus5` on `pre_bash.destructive`. Neither arm
 is involved in this defect and neither changed configuration at this boundary.
+
+# Amendment 8 — the auth path, the cache-write multiplier it implies, and the reconciliation we cannot close alone
+
+JEV-49. Every number in this amendment was measured from this machine's own
+files; nothing is inferred from habit or assumption. Identifiers (account and
+organisation UUIDs, email, organisation name) were never read into the record —
+only billing *type* fields.
+
+## A8.1 — The auth path, declared
+
+A reader cannot reproduce a cost figure without it, because **cache-write
+pricing depends on TTL and TTL availability depends on the auth path**: 1-hour
+writes bill at 2× the input rate and 5-minute writes at 1.25×.
+
+There are **three** auth paths in this study, not one, and they must not be
+conflated:
+
+| what | auth | evidence | billing surface |
+|---|---|---|---|
+| The Claude Code sessions that ARE the baseline (`data/baseline/`, `session_metrics.py`) | **Claude Max 5× subscription**, OAuth | `~/.claude.json` → `oauthAccount.billingType: stripe_subscription`, `organizationType: claude_max`, `organizationRateLimitTier: default_claude_max_5x`, subscription opened 2025-10-26; `hasExtraUsageEnabled: true` with `cachedExtraUsageDisabledReason: out_of_credits` | plan, not per-token invoice |
+| The `cc_opus5` / `cc_sonnet5` / `cc_haiku45` arms | **the same subscription, deliberately** | `src/arms/claude_cli.py` pops `ANTHROPIC_API_KEY` from the subprocess environment with the comment "force subscription auth, not a key" | plan |
+| The `jev` arm | **Vercel AI Gateway key** (`AI_GATEWAY_API_KEY`, the only key in `.env`) | `.env`, `src/arms/jev.py` | Vercel invoice, not Anthropic |
+
+`src/arms/claude.py` (direct Anthropic API, `x-api-key`) exists but **has
+produced no rows**: all 2,005 run rows are `jev`, `cc_opus5`, `cc_haiku45`,
+`cc_sonnet5`, and no `ANTHROPIC_API_KEY` is present in `.env` or the
+environment. **This study has made no Anthropic API-key spend at all.**
+
+## A8.2 — The multiplier is read per row, not inferred from the path
+
+Declaring the auth path explains *which TTLs can occur*; it does not license
+assuming one. Every assistant row carries `usage.cache_creation`
+`{ephemeral_5m_input_tokens, ephemeral_1h_input_tokens}`, and this corpus
+contains **both**, concentrated rather than mixed: across the whole project
+corpus (unbounded), 12,334,854 tokens of 5-minute writes spread over 27
+sessions against **5,161,696 tokens of 1-hour writes in exactly one**
+(`4ba49645`, the sustained collection session — every one of its rows is
+1-hour, every other session is 5-minute). **Inside the bounded baseline window
+of A8.4 the 1-hour figure is 1,800,137 tokens**; the two numbers differ only in
+scope. A flat multiplier cannot be right for a corpus shaped like that, and an
+auth-level declaration would have hidden the split. No row in this corpus mixes
+the two TTLs.
+
+So: **`config/pricing.json` now carries both multipliers (1.25 and 2.0) and
+`session_metrics.call_cost` selects per row from the transcript's own split.**
+
+**Not independently verified:** the 2.0 figure is the published rate card
+(`ccusage#899`). No session in this corpus that used 1-hour writes has written a
+`cost-state` line, so we could not reconcile 2.0 against first-party accounting
+the way 1.25 was reconciled. It moves the baseline total by **+$6.75**
+and that sensitivity is published rather than buried: if 1-hour writes in fact
+bill at 1.25×, subtract exactly that.
+
+## A8.2b — Deduplication must keep the COMPLETED copy, not the first one
+
+Found while measuring the other two, and it is larger than either. Claude Code
+writes the same `(requestId, message.id)` **several times** as a turn streams —
+up to 9 copies here. The early copies are placeholders: `input_tokens: 2`, no
+`iterations[]`. Only the final copy carries the completed breakdown. A dedupe
+that keeps the **first** copy — which is what every implementation we have seen,
+including ours, did — keeps the placeholder and throws the turn away.
+
+**48 keys in this corpus grow across their copies, all 48 monotonically, all 48
+inside subagent transcripts**, for 4,889,713 input tokens in one session.
+Inside the baseline window it recovers **2,586,255 input tokens, worth
++$29.84** — the single largest correction in this ticket, and the one that
+lands hardest on *delegated* work, because that is where it occurs.
+
+`session_metrics.merge_copies` therefore folds every copy of a key together by
+per-field maximum (equivalent to "last wins" on all 48 observed keys, and
+immune to a non-monotonic sequence).
+
+**Partial first-party support.** Across 67 sessions with a `cost-state` line,
+the rule changes nothing in 57. Of the 10 where it bites it moves our totals
+**closer** to Claude Code's own figures in **7** and further in **3** — and in
+all 3 the `cost-state` is itself truncated (it reports 0, 12,079 and 25,981
+output tokens against 105k–2.2M in the transcript, i.e. it was written before
+most of the session's work). On the fixture session the residual against
+first-party accounting improves from **−27.55% to −21.68%** and stays negative,
+which is the direction a lower bound must move in.
+
+## A8.3 — `claude-opus-4-7` is priced by measurement, not by guessing
+
+It was absent from `config/pricing.json`, so **14 of the 15 baseline sessions
+contributed exactly $0.00 to the published $125.58** — they are 100%
+`claude-opus-4-7`. "Excluded and noted in the manifest" is **not** acceptable
+for a published headline when the exclusion is that large.
+
+The rate was not guessed and not substring-matched from "opus" — that is
+`claude-spend#31`'s 437% over-report. It was **solved**: `$5/MTok` input and
+`$25/MTok` output is the unique pair that reproduces
+`cost-state.modelUsage['claude-opus-4-7'].costUSD` **to the cent in all 28
+sessions that report one**, with cache writes at 1.25× and reads at 0.10× — the
+same method `pricing.json:_verification` already used for Haiku 4.5 and Sonnet
+5. Worked example (session `0982af7b`): in 9, out 4,969, cache write 49,379,
+cache read 126,594 → $0.49618575 computed against $0.49618575 reported.
+
+**Unknown model IDs remain a hard failure**, now literally:
+`session_metrics.analyse(..., strict=True)` raises `UnpricedModelError` rather
+than returning a partial total, and `render()` prints `LOWER BOUND` on the cost
+line itself whenever anything is excluded. A model with a rate is priced; a
+model without one stops the report. Neither is a footnote.
+
+## A8.4 — The reconciliation: what we did, and the criterion that stays OPEN
+
+**What we could do.** Over the bounded window
+**2026-09-19T19:58:56Z → 2026-09-20T14:50:13Z** (15 sessions, 1,161 billable
+requests, the same window `data/baseline/manifest.json` snapshots), the
+transcript-derived total is **$175.36** post-fix against **$125.58** pre-fix —
+**+$49.77, +39.6%** — decomposing as iterations **+$4.69**, completed-copy
+dedupe **+$29.84**, 1-hour cache writes **+$6.75**, `claude-opus-4-7` priced
+**+$8.50**.
+
+For the 14 sessions that carry a `cost-state` line, our post-fix figure is
+**$8.4958 against Claude Code's own $8.7191 — a residual of −$0.2234, −2.56%.**
+
+**What that residual does and does not validate — stated plainly, because it is
+easy to read it as more than it is.** Those 14 sessions are 100%
+`claude-opus-4-7` and carry no iteration under-count, no multi-copy key and no
+1-hour cache write. **The residual therefore validates the derived rate and the
+1.25× multiplier, and nothing else.** Every dollar of the iterations, copy and
+1-hour corrections falls in `4ba49645`, the one session with no `cost-state`
+line at all. The copy rule has partial independent support (A8.2b, 7 sessions
+of 10); the iteration rule and the 2.0 multiplier have **none in this corpus**,
+and are adopted on mechanism and on the published rate card respectively.
+**The sign is negative and it is expected to be**: Claude Code bills for
+background models it never writes into a transcript, so a transcript-derived
+figure is a **lower bound**, and a positive residual would indicate
+double-counting. Method: dedupe on `(requestId, message.id)`; token fields
+summed from `iterations[]`, cache scalars from the top level; every copy of a
+key folded together rather than the first kept; 1-hour writes at
+2×; web search added from `cost-state.modelUsage[*].webSearchRequests` at
+$0.01 (it is **$0.00 in this window** — no web search occurred).
+
+**What we could not do, and will not fake.** This is a reconciliation against
+*Claude Code's own estimate*, which Anthropic's documentation describes as
+computed "from token counts at list price" — an estimate, not a billing record —
+and whose cache-statistics line "covers the main conversation only, not
+subagents", i.e. first-party instrumentation goes silent exactly where this
+study lives. **It is not the Console reconciliation the ticket asks for, and it
+cannot be run from this process: there is no browser here, and the spend is on a
+subscription rather than per-token API billing, so it may not appear on the
+Console usage page at all.**
+
+**The criterion therefore stays OPEN.** What the operator must supply, exactly:
+
+1. Console → Usage, UTC range **2026-09-19T19:58Z to 2026-09-20T14:50Z**,
+   grouped by model, showing input / cache-write (5m and 1h separately if
+   offered) / cache-read / output tokens and USD.
+2. A statement of **whether Claude Max subscription usage from Claude Code
+   appears on that page at all**, or whether it is billed to the plan and
+   therefore invisible there. If invisible, say so in the writeup: the honest
+   finding is then "a transcript-derived figure for subscription-authenticated
+   Claude Code cannot be reconciled against the Console by construction", which
+   is itself the contribution and is stronger than a number.
+3. If any **extra-usage credits** were consumed in the window
+   (`hasExtraUsageEnabled: true` on this account), the credit-consumption figure
+   for it — that portion *is* per-token billed and *is* reconcilable.
+4. The **Vercel AI Gateway** invoice line for the same window, which is the only
+   independent check available on the `jev` arm's spend.
+
+Until (1)–(4) arrive, the published number is the transcript-derived total with
+its method and its **−2.56% residual against first-party accounting**, labelled
+a lower bound, with the scope of that residual stated as in A8.4. No Console
+figure is asserted, estimated, or implied.
+
+## A8.5 — The pricing table changed, so its version string changed
+
+`config/pricing.json` gained `cache_write_multiplier_1h` and a
+`claude-opus-4-7` rate. Under the old version string `pricing-2026-09-20` the
+same name would have covered two different tables — exactly the hole the
+JEV-30/31b prep names ("an operator can edit a rate without bumping
+`version`"). The table is now **`pricing-2026-09-20b`**.
+
+**Consequence, stated rather than left to be discovered:** all 2,005 existing
+run rows and `data/baseline/manifest.json` carry `pricing-2026-09-20`, and
+their `cost_usd` values were computed under it. They are not re-costed by this
+ticket and **must not be pooled with anything stamped `-b` without saying so**.
+Run rows are unaffected in substance — they carry only the four scalar usage
+fields, with no `iterations[]` and no TTL split, so none of A8.2/A8.2b can be
+applied to them retroactively at all (see the JEV-49 prep for the one-line
+change to `src/arms/claude_cli.py` that would persist both going forward).

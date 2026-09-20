@@ -125,10 +125,25 @@ Checked against a real 2,684-line transcript, not assumed:
 
 - **`input_tokens` is a trap.** A real line reads `"input_tokens": 2` alongside
   `"cache_creation_input_tokens": 17315, "cache_read_input_tokens": 30419`. Summing `input_tokens`
-  yields a cost figure wrong by four orders of magnitude. *This is itself worth publishing.*
-- **Transcript lines duplicate ~3.1×** (893 assistant lines / 290 unique `requestId`). Dedupe by
-  `requestId` is mandatory, and `usage.iterations[]` restates the same numbers — a second,
-  independent double-counting hazard.
+  yields a cost figure wrong by four orders of magnitude. *This is itself worth publishing* — but
+  publish it as what it is: **normal cache-read behaviour on 81% of rows, not a defect.** It is not
+  evidence for `anthropics/claude-code#95555` (every top-level counter zeroed while
+  `usage.cache_creation` stays populated), which is a different thing and which **does not occur
+  here**: 0 of 3,790 assistant rows, checked under JEV-49.
+- **Transcript lines duplicate.** The factor is corpus-dependent and both numbers are ours:
+  **3.19× on the Redline session** (1,047 assistant lines / 328 unique `requestId`) and **1.97× on
+  this project's own corpus** (1,301 / 659). The difference is the corpus, not a change in Claude
+  Code. Dedupe on the **pair `(requestId, message.id)`** per `claude-spend#31`. On this corpus the
+  pair is exactly equivalent to `requestId` alone — 728 unique ids over 728 unique pairs — and the
+  659-vs-660 gap between the two id counts is entirely `<synthetic>` rows, which carry a
+  `message.id`, no `requestId` and zero tokens. The pair is kept as the defensive key.
+- **`usage.iterations[]` is ASYMMETRIC, and the earlier instruction here to "ignore" it was half
+  wrong** (JEV-49). Token fields **MUST** be summed from it: 71 rows under-report `input_tokens`
+  and 74 under-report `output_tokens`, the worst by 237,380 input tokens in a single record whose
+  top level reads `4`. Cache scalars **MUST NOT** be summed: the top level already equals the
+  iteration sum on all 2,510 rows that carry iterations, to the token. And the `cache_creation`
+  TTL **sub-object** follows the token rule, not the scalar rule — the top level is short on those
+  same 71 rows. That third case appears in no third-party report.
 - **An undocumented `cost-state` line** carries `totalCostUSD` + per-model `modelUsage`. It has
   `timestamp: null` and appears only at session end, so it is useless for per-decision attribution
   — but it is Claude Code's own authoritative total, so we reconcile our cost formula against it and
@@ -259,7 +274,9 @@ Computed by `src/session_metrics.py` from `~/.claude/projects/*/…jsonl`, from 
 session in this repo. This is the *only* thing in the design that a future enforce phase can be
 differenced against, which is why it starts collecting immediately rather than when enforce ships.
 
-Per session, deduped by `requestId`, ignoring `usage.iterations[]`:
+Per session, deduped on `(requestId, message.id)`, with `usage.iterations[]` read
+**asymmetrically** — token fields summed from it, cache scalars taken from the top level
+(JEV-49; the rule is written down in `session_metrics.normalise_usage`):
 
 - **Cost** — full formula with cache multipliers, per model string including `[1m]`; reconciled
   against the session's `cost-state.totalCostUSD` with the delta % published.
@@ -396,7 +413,7 @@ it is your call, not a default.
 | Arms see different state | Byte-identical state; `state_sha256` per run; hard assertion in analysis |
 | Vendor model drift mid-collection | Record `response_model` every call; daily canary over ~20 fixed states; publish the collection window |
 | Attrition not at random | Log every attempt including failures; report attrition by state-size bucket |
-| Cost formula wrong | Dedupe by `requestId`, ignore `iterations[]`, apply cache multipliers, reconcile against `cost-state.totalCostUSD`, publish the delta |
+| Cost formula wrong | Dedupe on `(requestId, message.id)`; sum token fields from `iterations[]` and never cache scalars; bill 1-hour cache writes at 2× and 5-minute at 1.25× from the per-row `usage.cache_creation` split; unknown model ID is a hard failure, never a guessed rate; reconcile against `cost-state.totalCostUSD` and publish the delta |
 | Privacy — code and prompts go to a third-party gateway, then get published | Scrub at **export**, not capture (decision #9); `data/` gitignored and local; `states/` excluded from published artifacts by default; data path disclosed explicitly in the writeup |
 | Scope overclaim (n=1 user, 1 machine, 1 repo) | State the scope plainly in the abstract. An honest n=1 study is publishable; one dressed as a benchmark is not |
 
@@ -545,8 +562,9 @@ than chosen after seeing the numbers.
     that I can publish the delta instead of asserting correctness.
 14. As a researcher, I want session-level baseline metrics collected from day 0, so that a later
     enforce phase has a genuine "before" to be compared against.
-15. As a researcher, I want transcript lines deduplicated by `requestId`, so that a 3.1× duplication
-    factor doesn't triple every token count I publish.
+15. As a researcher, I want transcript lines deduplicated on `(requestId, message.id)`, so that a
+    duplication factor of 1.97× on this corpus (3.19× on another) doesn't inflate every token count
+    I publish.
 16. As a researcher, I want agreement reported separately per surface, so that a 99%-agreement gate
     doesn't launder a 60%-agreement router into a good headline number.
 17. As a researcher, I want the majority-class baseline printed beside every agreement number, so
