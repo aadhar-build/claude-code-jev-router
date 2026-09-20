@@ -1725,7 +1725,7 @@ and the writeup.
 
 Status: ready-for-agent
 Labels: latency, arms, threat-to-validity, prior-art
-Blocked by: none — pure measurement, no live-behaviour change
+Blocked by: none — but the decisive test is BLOCKED EXTERNALLY: `api.typesafe.ai` is waitlisted and we have no access
 
 **Where this came from.** `clownware/bouncer` PR #33 (merged 2026-09-19) corrected
 its own published Jev latency from ~190ms to a measured **437ms median / 549ms
@@ -1779,31 +1779,58 @@ treatment arm carries a ~245ms avoidable tax per call, every latency figure we
 publish understates Jev and we will have made the classifier look worse than it
 is — the mirror image of the mistake bouncer made in its own favour.
 
-**What to do.** Measure, do not switch. A/B the two endpoints over the frozen
-canary set, N≥20 each, interleaved, same process, cold connection per call, and
-decompose both. Then decide, and record the decision either way:
+**We cannot test this. `api.typesafe.ai` is waitlisted and we do not have
+access.** That converts JEV-45 from an experiment into a declared limitation
+plus a finding, and the finding is arguably the more useful of the two.
 
-- If the gap is the hop, this is an **arm-config** question, not a bug. Changing
-  the endpoint mid-window is a new `arm_config_id` and a **third era boundary**
-  after `cc-haiku45-cli-v1/v2` — do not do it silently, and do not pool across it.
-- The gateway is also what the pre-registration's data-path disclosure describes.
-  Switching to the vendor directly **changes who sees our unredacted command
-  text**, so §"Privacy" needs re-stating, not just the latency table.
-- Report the result regardless of direction. "The convenient endpoint costs 43%
-  of the classifier's latency budget" is a publishable finding about deploying
-  Jev in a hook, and nobody has written it down.
+**State it as a limitation, precisely.** The gateway hop is *consistent with*
+the decomposition and is the only surviving hypothesis after concurrency and
+payload size were eliminated — but it is **unproven**, because the one test that
+would prove it requires an endpoint we cannot reach. The writeup says exactly
+that: two causes excluded against 568 rows, one candidate remaining, untestable
+from here. It does not assert the gateway as the cause.
+
+**And state it as a finding, because it is one nobody has written down.** Every
+Jev latency number in circulation — the vendor's 70-500ms, bouncer's measured
+437ms — is against `api.typesafe.ai`. That endpoint is **not generally
+available**. The path a member of the public can actually use today is the
+Vercel AI Gateway, and on our machine it runs **563ms p50 / 817ms p95, ~29%
+slower** than the number the ecosystem quotes. "The published latency figures
+are for an endpoint most people cannot get" is a real deployment fact about
+Jev-in-a-hook, and it is the kind of thing this study exists to surface.
+
+**One cheap partial test we CAN run.** Jev is also served by Cloudflare Workers
+AI. That is a second intermediary, not the direct path, so it cannot isolate the
+vendor's own service time — but two intermediaries with different network
+positions would show whether the ~490ms server-side term moves with the
+intermediary at all. If it is identical on both, the gateway hypothesis weakens
+considerably and the gap is more likely regional or contract-related. Worth one
+canary-set sweep before the window closes, and worth nothing if access there is
+also gated — check first, spend second.
+
+**If access is granted mid-study, do not just switch.** Any endpoint change is a
+new `arm_config_id` and a **third era boundary** after `cc-haiku45-cli-v1/v2`;
+the paths differ (`/v1/evaluate` vs `/v1/systemone`) so JEV-02's four vendor
+questions must be re-asked before a single row is trusted; and the gateway is
+what `PREREGISTRATION.md`'s data-path disclosure describes, so who sees our
+unredacted command text changes too.
 
 **Acceptance criteria**
 
-- [ ] A/B over the canary set, both endpoints, interleaved, cold per call,
-      decomposed DNS/TCP/TLS/TTFB, with a paired CI on the difference
-- [ ] The response contract checked, not assumed: the two endpoints have
-      different paths (`/v1/evaluate` vs `/v1/systemone`) and may differ in
-      `usage` shape and in whether `providerMetadata.typesafe.confidence`
-      survives — JEV-02's four open vendor questions re-asked against the direct
-      path before any switch is contemplated
-- [ ] A written decision: switch (with a new `arm_config_id` and a declared era
-      boundary), or stay (with the tax quantified and disclosed as a limitation)
-- [ ] Privacy/data-path section updated if and only if the endpoint changes
-- [ ] The eliminated hypotheses above written into the report — the null result
-      on concurrency is itself the evidence A5.3 asks for
+- [ ] The limitation written into `PREREGISTRATION.md`: two causes excluded, one
+      candidate remaining, untestable because the endpoint is waitlisted. The
+      gateway is **not** asserted as the cause.
+- [ ] The finding written into the report: published Jev latency figures are
+      against an endpoint that is not generally available; the publicly
+      reachable path measures 563ms p50 / 817ms p95 here, ~29% above the best
+      independent measurement of the direct path.
+- [ ] Check whether Cloudflare Workers AI access is open to us. If yes, one
+      canary-set sweep against it, decomposed, reported as a second
+      intermediary and explicitly not as the direct path. If no, record that
+      both alternatives are gated and stop.
+- [ ] The eliminated hypotheses written into the report -- the null result on
+      concurrency (565.7ms sequential vs 564.6ms concurrent) is itself the
+      evidence A5.3 asks for, and the r = 0.046 on payload size bounds a
+      confound we would otherwise have had to argue about.
+- [ ] Waitlist status re-checked once before the writeup is frozen, so the
+      claim "not generally available" is true as of publication, not as of today.
