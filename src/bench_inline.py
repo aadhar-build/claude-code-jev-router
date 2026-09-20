@@ -9,7 +9,7 @@ Decision #3 in docs/PLAN.md makes this a separate experiment rather than a
 byproduct of the arm comparison, and the reason is the process spawn. The
 worker's latency numbers are what a long-lived Python process pays for an API
 call. An enforce hook pays something else entirely: fork and exec a bash script,
-three jq spawns, an openssl spawn, a cold TLS handshake, and only then the API.
+four jq spawns, an openssl spawn, a cold TLS handshake, and only then the API.
 Quoting API latency as "enforce overhead" would understate the thing a user
 would actually feel by whatever the scaffolding costs -- which is exactly the
 quantity this script exists to measure.
@@ -20,7 +20,8 @@ before the fork. Then it joins each external measurement to the row the hook
 logged for itself, which decomposes the total three ways:
 
     e2e            what the session would wait
-      - spawn      fork/exec of bash, before the hook's first line runs
+      - prelude    fork/exec of bash, plus the guards and date/mkdir calls
+                   that run before the hook can time itself
       - hook       jq, openssl, and everything else the script does
       - api        curl's own time_total
 
@@ -211,7 +212,7 @@ def report(e2e_ms: list[float], rows: list[dict[str, Any]], problems: list[str],
     print("  component                       p50      p90      p99      max   (ms)")
     print("  " + "-" * 64)
     print(f"  end-to-end (what a session waits){summarise(e2e_ms)}")
-    print(f"  |- process spawn (fork/exec)    {summarise(spawn)}")
+    print(f"  |- spawn + prelude (fork, date) {summarise(spawn)}")
     print(f"  |- hook internals (jq, openssl) {summarise(internal)}")
     print(f"  '- API (curl time_total)        {summarise(api)}")
 

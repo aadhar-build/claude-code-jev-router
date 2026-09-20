@@ -9,7 +9,7 @@
 # the fail-open path and the real p99 are measured under live conditions rather
 # than projected.
 #
-# It is deliberately more expensive than capture.sh -- three jq spawns, an
+# It is deliberately more expensive than capture.sh -- four jq spawns, an
 # openssl spawn and a network round trip on the critical path. That cost is not
 # an accident to be optimised away: it IS the projected enforce overhead, and
 # bench_inline.py reports it.
@@ -148,7 +148,10 @@ STATE_SHA="${SHA_LINE##* }"
 # path costs no extra process.
 API_KEY="$JEV_INLINE_API_KEY"
 if [ -z "$API_KEY" ] && [ -f "$ROOT/.env" ]; then
-  while IFS='=' read -r _k _v; do
+  # `|| [ -n "$_k" ]`: read returns 1 at EOF even when it filled the variables,
+  # so a .env whose last line has no trailing newline would otherwise lose its
+  # last key -- and the key we want is frequently the last line.
+  while IFS='=' read -r _k _v || [ -n "$_k" ]; do
     if [ "$_k" = "AI_GATEWAY_API_KEY" ]; then API_KEY="$_v"; break; fi
   done < "$ROOT/.env"
 fi
@@ -156,7 +159,9 @@ fi
 
 # The question set is read from questions/pre_bash/v1.json rather than inlined,
 # so the deployed script and the replay harness ask literally the same question.
-QSID=$(jq -r '.question_set_id + "#" + .primary_phrasing' "$QFILE" 2>/dev/null)
+# question_set_id is derived in the row-writing jq rather than here: a separate
+# jq just to read two strings would add a spawn to the number this script
+# exists to measure.
 jq -n --arg model "$MODEL" --arg state "$STATE" --slurpfile qs "$QFILE" '
   $qs[0] as $spec | $spec.primary_phrasing as $ph |
   {model: $model, state: $state,
@@ -233,7 +238,7 @@ jq -n -c \
   --arg session_id "$SESSION_ID" \
   --arg tool_use_id "$TOOL_USE_ID" \
   --arg state_sha256 "$STATE_SHA" \
-  --arg question_set_id "$QSID" \
+  --slurpfile qs "$QFILE" \
   --arg run_context "$RUN_CONTEXT" \
   --arg endpoint "$ENDPOINT" \
   --arg error_kind "$ERROR_KIND" \
@@ -261,7 +266,7 @@ jq -n -c \
       session_id: $session_id,
       tool_use_id: $tool_use_id,
       state_sha256: $state_sha256,
-      question_set_id: $question_set_id,
+      question_set_id: ($qs[0].question_set_id + "#" + $qs[0].primary_phrasing),
       run_context: $run_context,
       endpoint: $endpoint,
       # ok means "a decision was available", not "curl returned". A 200 with no

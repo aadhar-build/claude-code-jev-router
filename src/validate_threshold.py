@@ -443,7 +443,8 @@ def _dist(values: Sequence[float], fmt: str = "{:.2f}") -> str:
             f"90% [{fmt.format(q['p5'])}, {fmt.format(q['p95'])}]")
 
 
-def _rule_block(rule: RuleReport, L: list[str], target: float | None = None) -> None:
+def _rule_block(rule: RuleReport, L: list[str], target: float | None = None,
+                n_train_pos: int | None = None) -> None:
     L.append(f"  RULE: {rule.name}")
     if not rule.splits:
         L.append("    no usable splits -- too few items of one class.")
@@ -462,12 +463,62 @@ def _rule_block(rule: RuleReport, L: list[str], target: float | None = None) -> 
     frac_pos = sum(1 for g in gaps if g > 0) / len(gaps)
     L.append(f"       train beat test on {frac_pos:.0%} of splits")
     if target is not None:
-        hits = sum(1 for s in rule.splits if s.test_tpr >= target) / len(rule.splits)
-        L.append(f"       hits its own recall target out of sample: {hits:.0%} of splits")
+        # With few training positives a high target rounds up to 100% recall, at
+        # which point the rule stops being "hit this recall" and becomes "the
+        # lowest score any labelled positive received". Out of sample it then
+        # succeeds precisely when the single weakest positive item happened to
+        # land in the train half -- a fact about one decision_id and the split
+        # seed, not about the classifier. Printing it as a transfer rate would
+        # invite exactly the misreading this tool exists to prevent.
+        degenerate = (n_train_pos is not None and n_train_pos > 0
+                      and target > 1 - 1 / n_train_pos)
+        if degenerate:
+            L.append(f"       NOTE: with ~{n_train_pos} positives in the train half, a "
+                     f"{target:.0%} target rounds to 100% recall, so this rule reduces")
+            L.append(f"       to 'the lowest score any positive received'. One item "
+                     f"controls it -- its strength as a floor and its fragility.")
+            L.append(f"       Judge it on the TEST TPR and TEST FPR distributions above, "
+                     f"not on a hit rate.")
+        else:
+            hits = sum(1 for s in rule.splits if s.test_tpr >= target) / len(rule.splits)
+            L.append(f"       hits its own recall target out of sample: {hits:.0%} of splits")
     knife = sum(s.n_test_at_tau for s in rule.splits) / len(rule.splits)
     L.append(f"       test items sitting exactly ON tau: {knife:.2f} per split "
              f"(these are the knife-edge decisions)")
     del gq
+
+
+def paired_rule_comparison(v: Validation) -> tuple[int, int, int]:
+    """(recall rule better, tied, worse) across the SAME splits.
+
+    Both rules are fitted on identical train/test halves, so they can be
+    compared pair by pair. That matters because J moves in steps of 1/n_pos
+    here -- with ten positives a half, comparing two medians at 0.05 resolution
+    is comparing two numbers that can only differ by a whole quantum. The paired
+    count is the comparison that survives the coarseness.
+    """
+    better = tied = worse = 0
+    for y, rr in zip(v.youden.splits, v.recall_rule.splits):
+        if rr.gap < y.gap - 1e-9:
+            better += 1
+        elif rr.gap > y.gap + 1e-9:
+            worse += 1
+        else:
+            tied += 1
+    return better, tied, worse
+
+
+def _paired_block(v: Validation, L: list[str]) -> None:
+    if not (v.youden.splits and v.recall_rule.splits):
+        return
+    better, tied, worse = paired_rule_comparison(v)
+    total = better + tied + worse
+    L.append("  WHICH RULE TRANSFERS BETTER (paired, same splits, same halves):")
+    L.append(f"    fixed-recall gap smaller on {better}/{total} splits "
+             f"({better / total:.0%}), tied on {tied} ({tied / total:.0%}), "
+             f"larger on {worse} ({worse / total:.0%})")
+    L.append(f"    J moves in steps of {1 / max(1, round(v.n_pos * (1 - v.train_frac))):.2f} "
+             f"on the test half, so a difference of medians below that is not a result.")
 
 
 def render(results: list[Validation], *, surface: str, n_splits: int,
@@ -497,16 +548,27 @@ def render(results: list[Validation], *, surface: str, n_splits: int,
             L.append(f"  context={context}: {d}")
         return "\n".join(L)
 
-    for context in sorted({r.context for r in results}):
+    for context in sorted(set(diagnostics) | {r.context for r in results}):
+        here = [x for x in results if x.context == context]
         L.append("#" * 78)
         L.append(f"# CONTEXT: {context}")
         L.append("#" * 78)
+        if not here:
+            d = diagnostics.get(context, {})
+            L.append(f"  {d.get('items', 0)} decisions, {d.get('labelled', 0)} of them "
+                     f"labelled -- nothing to validate.")
+            L.append("  Live captures carry no stratum; their labels arrive in Phase 2,")
+            L.append("  joined on (decision_id, question_name). Reported as absent rather")
+            L.append("  than filled in from the reference arm, which would validate the")
+            L.append("  threshold against a pseudo-label and call it truth.")
+            L.append("")
+            continue
         if context == "synthetic":
             L.append("  Designed strata, not gold labels -- a claim about a set we wrote.")
         L.append("  run_context is never pooled; each context is its own section.")
         L.append("")
 
-        for r in [x for x in results if x.context == context]:
+        for r in here:
             L.append("-" * 78)
             L.append(f"ARM {r.arm}   QUESTION {r.question}   [{r.context}]")
             L.append("-" * 78)
@@ -521,9 +583,13 @@ def render(results: list[Validation], *, surface: str, n_splits: int,
                      f"stratified, {r.n_splits_used} usable splits"
                      + (f" ({r.n_splits_skipped} skipped)" if r.n_splits_skipped else ""))
             L.append("")
+            n_train_pos = round(r.n_pos * r.train_frac)
             _rule_block(r.youden, L)
             L.append("")
-            _rule_block(r.recall_rule, L, target=r.target_recall)
+            _rule_block(r.recall_rule, L, target=r.target_recall,
+                        n_train_pos=n_train_pos)
+            L.append("")
+            _paired_block(r, L)
             L.append("")
 
             ok, checks = survives(r)
@@ -566,27 +632,54 @@ def _interpret(r: Validation, ok: bool) -> str:
     rec_gap = stats.quantiles(r.recall_rule.column("gap"), [0.5])["p50"] \
         if r.recall_rule.splits else float("nan")
 
-    if ok and spread <= 0.10:
+    # Two failure modes, and conflating them would be the whole point missed.
+    # An unstable CONSTANT means the published tau is arbitrary. An optimistic
+    # PERFORMANCE means the constant is fine and the number attached to it is
+    # not. They need different corrective actions.
+    stable = spread <= 0.10
+    if ok and stable:
         head = (f"tau={r.youden.insample_tau:.2f} SURVIVES validation. It is a typical "
                 f"choice across splits and it transfers (median gap {gap:+.3f}).")
     elif ok:
         head = (f"tau={r.youden.insample_tau:.2f} passes the transfer test but the rule "
                 f"is UNSTABLE: its IQR spans {spread:.2f}. Performance transfers; the "
                 f"particular constant does not.")
+    elif stable:
+        head = (f"tau={r.youden.insample_tau:.2f} is a STABLE CHOICE (IQR spans only "
+                f"{spread:.2f}) but the performance published with it is OPTIMISTIC by "
+                f"about {gap:+.3f} of J. Keep the constant; discount the headline: "
+                f"out of sample expect J between "
+                f"{stats.quantiles(r.youden.column('test_j'), [0.5])['p50']:.2f} and "
+                f"{r.youden.insample_j:.2f}, nearer the former, since fitting on half "
+                f"the items overstates the gap.")
     else:
-        head = (f"tau={r.youden.insample_tau:.2f} DOES NOT SURVIVE. Median optimism gap "
-                f"{gap:+.3f}, selected-tau IQR spans {spread:.2f}. Treat the published "
-                f"value as one draw from a wide distribution, not as a constant.")
+        head = (f"tau={r.youden.insample_tau:.2f} DOES NOT SURVIVE on either count. "
+                f"Median optimism gap {gap:+.3f} AND the selected-tau IQR spans "
+                f"{spread:.2f}. Treat the published value as one draw from a wide "
+                f"distribution, not as a constant.")
 
-    if rec_gap == rec_gap:
-        if rec_gap < gap - 0.005:
-            head += (f" The fixed-recall rule transfers BETTER (gap {rec_gap:+.3f} vs "
-                     f"{gap:+.3f}) and is the safer rule to deploy.")
-        elif rec_gap > gap + 0.005:
-            head += f" The fixed-recall rule transfers worse (gap {rec_gap:+.3f})."
+    if rec_gap == rec_gap and r.recall_rule.splits:
+        better, tied, worse = paired_rule_comparison(r)
+        total = better + tied + worse
+        if better > worse * 1.5 and better / total > 0.3:
+            head += (f" The fixed-recall rule transfers better on {better / total:.0%} of "
+                     f"paired splits against {worse / total:.0%} worse, and is the safer "
+                     f"rule for a gate where a miss and a false flag are not "
+                     f"symmetric costs.")
+        elif worse > better * 1.5 and worse / total > 0.3:
+            head += (f" The fixed-recall rule transfers worse on {worse / total:.0%} of "
+                     f"paired splits; Youden is the better rule here on this evidence.")
+        elif worse == 0 and better:
+            head += (f" The fixed-recall rule is WEAKLY DOMINANT: never worse on any of "
+                     f"{total} splits, strictly better on {better} ({better / total:.0%}), "
+                     f"identical on the rest. Weak dominance at this sample size is a "
+                     f"better argument than a difference of medians, which moves in "
+                     f"whole quanta here.")
         else:
-            head += (f" The fixed-recall rule transfers about as well (gap {rec_gap:+.3f}) "
-                     f"and is preferable for a safety gate on loss-function grounds.")
+            head += (f" The two rules are not separable at this sample size "
+                     f"({better}/{tied}/{worse} splits better/tied/worse). The "
+                     f"fixed-recall rule is still preferable for a safety gate, on "
+                     f"loss-function grounds rather than measured ones.")
     return head
 
 
@@ -620,6 +713,7 @@ def main() -> int:
         items, scores, diag = collect(args.surface, context)
         if not items:
             continue
+        diag["items"] = len(items)
         diagnostics[context] = diag
         clusters = {i["decision_id"]: i["session_id"] for i in items}
         by_id = {i["decision_id"]: i for i in items}
@@ -638,6 +732,8 @@ def main() -> int:
             }
             if not any(labels.values()) or all(labels.values()):
                 continue                       # one class only: no ROC exists
+            diag["labelled"] = max(diag.get("labelled", 0),
+                                   sum(1 for v in labels.values() if v is not None))
             for arm in arms:
                 per_arm = scores[arm].get(question)
                 if not per_arm:

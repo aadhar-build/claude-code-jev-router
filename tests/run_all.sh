@@ -5,8 +5,13 @@ set -o pipefail
 echo "=== seam 1: hook process boundary ==="
 "$ROOT/tests/test_hook.sh" || exit 1
 echo
+echo "=== seam 1: inline shadow hook (loopback fake, no spend) ==="
+"$ROOT/tests/test_inline_shadow.sh" || exit 1
+echo
 echo "=== seam 2 + 3: pipeline, statistics, report ==="
 python3 "$ROOT/tests/test_pipeline.py" 2>&1 | tail -4 || exit 1
+echo "=== seam 3b: threshold validation and determinism ==="
+python3 "$ROOT/tests/test_validation.py" 2>&1 | tail -4 || exit 1
 echo "=== baseline: known answers from a real transcript ==="
 python3 "$ROOT/tests/test_session_metrics.py" 2>&1 | tail -4 || exit 1
 echo "=== doctor ==="

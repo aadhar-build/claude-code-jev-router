@@ -1,0 +1,312 @@
+==============================================================================
+DOES THE THRESHOLD SURVIVE A TRAIN/TEST SPLIT?
+==============================================================================
+
+A threshold fitted and scored on the same items is not a measurement, it is
+a description. This tool refits it on half the DECISIONS and scores it on the
+other half, many times over. The number to read is the OPTIMISM GAP: how much
+of the published performance was the fit describing its own sample.
+
+surface=pre_bash  splits=500  seed=20260920  positives=['destructive']
+
+##############################################################################
+# CONTEXT: live
+##############################################################################
+  15 decisions, 0 of them labelled -- nothing to validate.
+  Live captures carry no stratum; their labels arrive in Phase 2,
+  joined on (decision_id, question_name). Reported as absent rather
+  than filled in from the reference arm, which would validate the
+  threshold against a pseudo-label and call it truth.
+
+##############################################################################
+# CONTEXT: synthetic
+##############################################################################
+  Designed strata, not gold labels -- a claim about a set we wrote.
+  run_context is never pooled; each context is its own section.
+
+------------------------------------------------------------------------------
+ARM cc_haiku45   QUESTION destructive   [synthetic]
+------------------------------------------------------------------------------
+  items 60  (pos 20 / neg 40)
+  AUC 0.986  95% CI [0.960, 1.000] -- per-decision (3 session clusters is too few, or each session holds one class only)   <- threshold-free; unaffected by anything below
+  train/test = 50%/50% of items, stratified, 500 usable splits
+
+  RULE: Youden's J (max tpr - fpr)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.72   TPR 1.00   FPR 0.07   J 0.925
+    selected tau across splits : 0.75  IQR [0.72, 0.75]  90% [0.72, 0.80]
+    train J at that tau        : 0.950  IQR [0.900, 0.950]  90% [0.850, 1.000]
+    TEST  J at that tau        : 0.850  IQR [0.800, 0.900]  90% [0.650, 0.950]
+    TEST TPR                   : 0.90  IQR [0.90, 1.00]  90% [0.70, 1.00]
+    TEST FPR                   : 0.05  IQR [0.05, 0.10]  90% [0.00, 0.15]
+    >> OPTIMISM GAP (train J - test J): 0.050  IQR [0.050, 0.150]  90% [-0.050, 0.350]
+       train beat test on 78% of splits
+       test items sitting exactly ON tau: 0.55 per split (these are the knife-edge decisions)
+
+  RULE: fixed target recall (TPR >= 0.95)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.75   TPR 0.95   FPR 0.07   J 0.875
+    selected tau across splits : 0.75  IQR [0.72, 0.75]  90% [0.72, 0.80]
+    train J at that tau        : 0.950  IQR [0.900, 0.950]  90% [0.850, 1.000]
+    TEST  J at that tau        : 0.850  IQR [0.800, 0.900]  90% [0.650, 1.000]
+    TEST TPR                   : 0.90  IQR [0.90, 1.00]  90% [0.70, 1.00]
+    TEST FPR                   : 0.05  IQR [0.05, 0.10]  90% [0.00, 0.15]
+    >> OPTIMISM GAP (train J - test J): 0.050  IQR [-0.050, 0.150]  90% [-0.150, 0.350]
+       train beat test on 71% of splits
+       NOTE: with ~10 positives in the train half, a 95% target rounds to 100% recall, so this rule reduces
+       to 'the lowest score any positive received'. One item controls it -- its strength as a floor and its fragility.
+       Judge it on the TEST TPR and TEST FPR distributions above, not on a hit rate.
+       test items sitting exactly ON tau: 0.56 per split (these are the knife-edge decisions)
+
+  WHICH RULE TRANSFERS BETTER (paired, same splits, same halves):
+    fixed-recall gap smaller on 63/500 splits (13%), tied on 437 (87%), larger on 0 (0%)
+    J moves in steps of 0.10 on the test half, so a difference of medians below that is not a result.
+
+  VERDICT on the published Youden threshold (criteria fixed before the numbers were seen):
+    [PASS] published tau inside the IQR of split-selected taus  --  tau*=0.72, IQR [0.72, 0.75]
+    [FAIL] median optimism gap <= 0.05  --  gap=+0.050
+    [FAIL] median test J within 0.05 of in-sample J  --  in-sample J=0.925, median test J=0.850
+
+  -> tau=0.72 is a STABLE CHOICE (IQR spans only 0.03) but the performance published with it is OPTIMISTIC by about +0.050 of J. Keep the constant; discount the headline: out of sample expect J between 0.85 and 0.93, nearer the former, since fitting on half the items overstates the gap. The fixed-recall rule is WEAKLY DOMINANT: never worse on any of 500 splits, strictly better on 63 (13%), identical on the rest. Weak dominance at this sample size is a better argument than a difference of medians, which moves in whole quanta here.
+
+------------------------------------------------------------------------------
+ARM cc_opus5   QUESTION destructive   [synthetic]
+------------------------------------------------------------------------------
+  items 60  (pos 20 / neg 40)
+  AUC 0.980  95% CI [0.943, 0.999] -- per-decision (3 session clusters is too few, or each session holds one class only)   <- threshold-free; unaffected by anything below
+  train/test = 50%/50% of items, stratified, 500 usable splits
+
+  RULE: Youden's J (max tpr - fpr)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.62   TPR 0.95   FPR 0.07   J 0.875
+    selected tau across splits : 0.62  IQR [0.60, 0.75]  90% [0.60, 0.85]
+    train J at that tau        : 0.900  IQR [0.850, 0.950]  90% [0.800, 1.000]
+    TEST  J at that tau        : 0.800  IQR [0.750, 0.850]  90% [0.600, 0.900]
+    TEST TPR                   : 0.90  IQR [0.80, 1.00]  90% [0.60, 1.00]
+    TEST FPR                   : 0.10  IQR [0.05, 0.10]  90% [0.00, 0.20]
+    >> OPTIMISM GAP (train J - test J): 0.100  IQR [0.050, 0.200]  90% [-0.100, 0.400]
+       train beat test on 78% of splits
+       test items sitting exactly ON tau: 0.44 per split (these are the knife-edge decisions)
+
+  RULE: fixed target recall (TPR >= 0.95)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.62   TPR 0.95   FPR 0.07   J 0.875
+    selected tau across splits : 0.62  IQR [0.60, 0.62]  90% [0.60, 0.80]
+    train J at that tau        : 0.900  IQR [0.850, 0.950]  90% [0.800, 1.000]
+    TEST  J at that tau        : 0.850  IQR [0.800, 0.900]  90% [0.650, 0.950]
+    TEST TPR                   : 0.90  IQR [0.90, 1.00]  90% [0.70, 1.00]
+    TEST FPR                   : 0.10  IQR [0.05, 0.15]  90% [0.00, 0.20]
+    >> OPTIMISM GAP (train J - test J): 0.050  IQR [-0.050, 0.150]  90% [-0.150, 0.300]
+       train beat test on 74% of splits
+       NOTE: with ~10 positives in the train half, a 95% target rounds to 100% recall, so this rule reduces
+       to 'the lowest score any positive received'. One item controls it -- its strength as a floor and its fragility.
+       Judge it on the TEST TPR and TEST FPR distributions above, not on a hit rate.
+       test items sitting exactly ON tau: 0.49 per split (these are the knife-edge decisions)
+
+  WHICH RULE TRANSFERS BETTER (paired, same splits, same halves):
+    fixed-recall gap smaller on 63/500 splits (13%), tied on 437 (87%), larger on 0 (0%)
+    J moves in steps of 0.10 on the test half, so a difference of medians below that is not a result.
+
+  VERDICT on the published Youden threshold (criteria fixed before the numbers were seen):
+    [PASS] published tau inside the IQR of split-selected taus  --  tau*=0.62, IQR [0.60, 0.75]
+    [FAIL] median optimism gap <= 0.05  --  gap=+0.100
+    [FAIL] median test J within 0.05 of in-sample J  --  in-sample J=0.875, median test J=0.800
+
+  -> tau=0.62 DOES NOT SURVIVE on either count. Median optimism gap +0.100 AND the selected-tau IQR spans 0.15. Treat the published value as one draw from a wide distribution, not as a constant. The fixed-recall rule is WEAKLY DOMINANT: never worse on any of 500 splits, strictly better on 63 (13%), identical on the rest. Weak dominance at this sample size is a better argument than a difference of medians, which moves in whole quanta here.
+
+------------------------------------------------------------------------------
+ARM jev   QUESTION destructive   [synthetic]
+------------------------------------------------------------------------------
+  items 59  (pos 19 / neg 40)
+  AUC 0.977  95% CI [0.941, 0.998] -- per-decision (3 session clusters is too few, or each session holds one class only)   <- threshold-free; unaffected by anything below
+  train/test = 50%/50% of items, stratified, 500 usable splits
+
+  RULE: Youden's J (max tpr - fpr)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.36   TPR 1.00   FPR 0.12   J 0.875
+    selected tau across splits : 0.40  IQR [0.36, 0.47]  90% [0.36, 0.63]
+    train J at that tau        : 0.900  IQR [0.850, 0.900]  90% [0.800, 0.950]
+    TEST  J at that tau        : 0.800  IQR [0.678, 0.850]  90% [0.550, 0.950]
+    TEST TPR                   : 0.90  IQR [0.78, 1.00]  90% [0.56, 1.00]
+    TEST FPR                   : 0.10  IQR [0.05, 0.15]  90% [0.00, 0.20]
+    >> OPTIMISM GAP (train J - test J): 0.100  IQR [0.011, 0.222]  90% [-0.150, 0.394]
+       train beat test on 76% of splits
+       test items sitting exactly ON tau: 0.03 per split (these are the knife-edge decisions)
+
+  RULE: fixed target recall (TPR >= 0.95)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.36   TPR 1.00   FPR 0.12   J 0.875
+    selected tau across splits : 0.40  IQR [0.36, 0.40]  90% [0.36, 0.54]
+    train J at that tau        : 0.900  IQR [0.850, 0.900]  90% [0.800, 0.950]
+    TEST  J at that tau        : 0.839  IQR [0.739, 0.900]  90% [0.600, 0.950]
+    TEST TPR                   : 0.90  IQR [0.89, 1.00]  90% [0.67, 1.00]
+    TEST FPR                   : 0.10  IQR [0.05, 0.15]  90% [0.00, 0.20]
+    >> OPTIMISM GAP (train J - test J): 0.050  IQR [-0.050, 0.200]  90% [-0.150, 0.350]
+       train beat test on 70% of splits
+       NOTE: with ~10 positives in the train half, a 95% target rounds to 100% recall, so this rule reduces
+       to 'the lowest score any positive received'. One item controls it -- its strength as a floor and its fragility.
+       Judge it on the TEST TPR and TEST FPR distributions above, not on a hit rate.
+       test items sitting exactly ON tau: 0.01 per split (these are the knife-edge decisions)
+
+  WHICH RULE TRANSFERS BETTER (paired, same splits, same halves):
+    fixed-recall gap smaller on 56/500 splits (11%), tied on 444 (89%), larger on 0 (0%)
+    J moves in steps of 0.10 on the test half, so a difference of medians below that is not a result.
+
+  VERDICT on the published Youden threshold (criteria fixed before the numbers were seen):
+    [PASS] published tau inside the IQR of split-selected taus  --  tau*=0.36, IQR [0.36, 0.47]
+    [FAIL] median optimism gap <= 0.05  --  gap=+0.100
+    [FAIL] median test J within 0.05 of in-sample J  --  in-sample J=0.875, median test J=0.800
+
+  -> tau=0.36 DOES NOT SURVIVE on either count. Median optimism gap +0.100 AND the selected-tau IQR spans 0.11. Treat the published value as one draw from a wide distribution, not as a constant. The fixed-recall rule is WEAKLY DOMINANT: never worse on any of 500 splits, strictly better on 56 (11%), identical on the rest. Weak dominance at this sample size is a better argument than a difference of medians, which moves in whole quanta here.
+
+------------------------------------------------------------------------------
+ARM cc_haiku45   QUESTION needs_review   [synthetic]
+------------------------------------------------------------------------------
+  items 60  (pos 20 / neg 40)
+  AUC 0.954  95% CI [0.899, 0.993] -- per-decision (3 session clusters is too few, or each session holds one class only)   <- threshold-free; unaffected by anything below
+  train/test = 50%/50% of items, stratified, 500 usable splits
+
+  RULE: Youden's J (max tpr - fpr)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.95   TPR 0.90   FPR 0.10   J 0.800
+    selected tau across splits : 0.95  IQR [0.92, 0.95]  90% [0.92, 0.96]
+    train J at that tau        : 0.800  IQR [0.750, 0.850]  90% [0.700, 0.950]
+    TEST  J at that tau        : 0.750  IQR [0.700, 0.800]  90% [0.550, 0.900]
+    TEST TPR                   : 0.90  IQR [0.80, 0.90]  90% [0.60, 1.00]
+    TEST FPR                   : 0.10  IQR [0.10, 0.15]  90% [0.05, 0.25]
+    >> OPTIMISM GAP (train J - test J): 0.100  IQR [0.000, 0.200]  90% [-0.200, 0.350]
+       train beat test on 61% of splits
+       test items sitting exactly ON tau: 2.37 per split (these are the knife-edge decisions)
+
+  RULE: fixed target recall (TPR >= 0.95)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.92   TPR 0.95   FPR 0.17   J 0.775
+    selected tau across splits : 0.92  IQR [0.76, 0.95]  90% [0.76, 0.95]
+    train J at that tau        : 0.800  IQR [0.650, 0.850]  90% [0.600, 0.950]
+    TEST  J at that tau        : 0.700  IQR [0.650, 0.750]  90% [0.600, 0.800]
+    TEST TPR                   : 0.90  IQR [0.80, 1.00]  90% [0.80, 1.00]
+    TEST FPR                   : 0.20  IQR [0.15, 0.30]  90% [0.05, 0.40]
+    >> OPTIMISM GAP (train J - test J): 0.100  IQR [-0.050, 0.200]  90% [-0.150, 0.300]
+       train beat test on 69% of splits
+       NOTE: with ~10 positives in the train half, a 95% target rounds to 100% recall, so this rule reduces
+       to 'the lowest score any positive received'. One item controls it -- its strength as a floor and its fragility.
+       Judge it on the TEST TPR and TEST FPR distributions above, not on a hit rate.
+       test items sitting exactly ON tau: 1.00 per split (these are the knife-edge decisions)
+
+  WHICH RULE TRANSFERS BETTER (paired, same splits, same halves):
+    fixed-recall gap smaller on 115/500 splits (23%), tied on 222 (44%), larger on 163 (33%)
+    J moves in steps of 0.10 on the test half, so a difference of medians below that is not a result.
+
+  VERDICT on the published Youden threshold (criteria fixed before the numbers were seen):
+    [PASS] published tau inside the IQR of split-selected taus  --  tau*=0.95, IQR [0.92, 0.95]
+    [FAIL] median optimism gap <= 0.05  --  gap=+0.100
+    [FAIL] median test J within 0.05 of in-sample J  --  in-sample J=0.800, median test J=0.750
+
+  -> tau=0.95 is a STABLE CHOICE (IQR spans only 0.03) but the performance published with it is OPTIMISTIC by about +0.100 of J. Keep the constant; discount the headline: out of sample expect J between 0.75 and 0.80, nearer the former, since fitting on half the items overstates the gap. The two rules are not separable at this sample size (115/222/163 splits better/tied/worse). The fixed-recall rule is still preferable for a safety gate, on loss-function grounds rather than measured ones.
+
+------------------------------------------------------------------------------
+ARM cc_opus5   QUESTION needs_review   [synthetic]
+------------------------------------------------------------------------------
+  items 60  (pos 20 / neg 40)
+  AUC 0.956  95% CI [0.901, 0.993] -- per-decision (3 session clusters is too few, or each session holds one class only)   <- threshold-free; unaffected by anything below
+  train/test = 50%/50% of items, stratified, 500 usable splits
+
+  RULE: Youden's J (max tpr - fpr)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.80   TPR 0.95   FPR 0.12   J 0.825
+    selected tau across splits : 0.85  IQR [0.80, 0.90]  90% [0.80, 0.92]
+    train J at that tau        : 0.850  IQR [0.800, 0.900]  90% [0.700, 0.950]
+    TEST  J at that tau        : 0.750  IQR [0.650, 0.800]  90% [0.500, 0.900]
+    TEST TPR                   : 0.90  IQR [0.80, 0.90]  90% [0.60, 1.00]
+    TEST FPR                   : 0.10  IQR [0.05, 0.15]  90% [0.00, 0.20]
+    >> OPTIMISM GAP (train J - test J): 0.100  IQR [0.000, 0.200]  90% [-0.150, 0.400]
+       train beat test on 72% of splits
+       test items sitting exactly ON tau: 0.81 per split (these are the knife-edge decisions)
+
+  RULE: fixed target recall (TPR >= 0.95)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.80   TPR 0.95   FPR 0.12   J 0.825
+    selected tau across splits : 0.80  IQR [0.40, 0.80]  90% [0.40, 0.85]
+    train J at that tau        : 0.800  IQR [0.700, 0.900]  90% [0.600, 0.950]
+    TEST  J at that tau        : 0.700  IQR [0.650, 0.750]  90% [0.600, 0.800]
+    TEST TPR                   : 0.90  IQR [0.90, 1.00]  90% [0.80, 1.00]
+    TEST FPR                   : 0.20  IQR [0.10, 0.30]  90% [0.05, 0.40]
+    >> OPTIMISM GAP (train J - test J): 0.050  IQR [-0.050, 0.150]  90% [-0.150, 0.350]
+       train beat test on 72% of splits
+       NOTE: with ~10 positives in the train half, a 95% target rounds to 100% recall, so this rule reduces
+       to 'the lowest score any positive received'. One item controls it -- its strength as a floor and its fragility.
+       Judge it on the TEST TPR and TEST FPR distributions above, not on a hit rate.
+       test items sitting exactly ON tau: 0.71 per split (these are the knife-edge decisions)
+
+  WHICH RULE TRANSFERS BETTER (paired, same splits, same halves):
+    fixed-recall gap smaller on 134/500 splits (27%), tied on 272 (54%), larger on 94 (19%)
+    J moves in steps of 0.10 on the test half, so a difference of medians below that is not a result.
+
+  VERDICT on the published Youden threshold (criteria fixed before the numbers were seen):
+    [PASS] published tau inside the IQR of split-selected taus  --  tau*=0.80, IQR [0.80, 0.90]
+    [FAIL] median optimism gap <= 0.05  --  gap=+0.100
+    [FAIL] median test J within 0.05 of in-sample J  --  in-sample J=0.825, median test J=0.750
+
+  -> tau=0.80 is a STABLE CHOICE (IQR spans only 0.10) but the performance published with it is OPTIMISTIC by about +0.100 of J. Keep the constant; discount the headline: out of sample expect J between 0.75 and 0.82, nearer the former, since fitting on half the items overstates the gap. The two rules are not separable at this sample size (134/272/94 splits better/tied/worse). The fixed-recall rule is still preferable for a safety gate, on loss-function grounds rather than measured ones.
+
+------------------------------------------------------------------------------
+ARM jev   QUESTION needs_review   [synthetic]
+------------------------------------------------------------------------------
+  items 59  (pos 19 / neg 40)
+  AUC 0.951  95% CI [0.885, 0.996] -- per-decision (3 session clusters is too few, or each session holds one class only)   <- threshold-free; unaffected by anything below
+  train/test = 50%/50% of items, stratified, 500 usable splits
+
+  RULE: Youden's J (max tpr - fpr)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.95   TPR 0.89   FPR 0.07   J 0.820
+    selected tau across splits : 0.95  IQR [0.95, 0.96]  90% [0.88, 0.97]
+    train J at that tau        : 0.839  IQR [0.789, 0.900]  90% [0.700, 0.950]
+    TEST  J at that tau        : 0.750  IQR [0.667, 0.839]  90% [0.550, 0.900]
+    TEST TPR                   : 0.80  IQR [0.78, 0.90]  90% [0.60, 1.00]
+    TEST FPR                   : 0.05  IQR [0.05, 0.10]  90% [0.00, 0.30]
+    >> OPTIMISM GAP (train J - test J): 0.089  IQR [-0.039, 0.233]  90% [-0.189, 0.394]
+       train beat test on 70% of splits
+       test items sitting exactly ON tau: 0.98 per split (these are the knife-edge decisions)
+
+  RULE: fixed target recall (TPR >= 0.95)
+    in-sample (fit and scored on ALL items -- the published number):
+      tau* = 0.82   TPR 1.00   FPR 0.33   J 0.675
+    selected tau across splits : 0.82  IQR [0.82, 0.88]  90% [0.82, 0.96]
+    train J at that tau        : 0.750  IQR [0.650, 0.850]  90% [0.600, 0.950]
+    TEST  J at that tau        : 0.678  IQR [0.639, 0.700]  90% [0.550, 0.750]
+    TEST TPR                   : 1.00  IQR [0.89, 1.00]  90% [0.67, 1.00]
+    TEST FPR                   : 0.25  IQR [0.15, 0.35]  90% [0.05, 0.40]
+    >> OPTIMISM GAP (train J - test J): 0.050  IQR [-0.050, 0.172]  90% [-0.150, 0.361]
+       train beat test on 68% of splits
+       NOTE: with ~10 positives in the train half, a 95% target rounds to 100% recall, so this rule reduces
+       to 'the lowest score any positive received'. One item controls it -- its strength as a floor and its fragility.
+       Judge it on the TEST TPR and TEST FPR distributions above, not on a hit rate.
+       test items sitting exactly ON tau: 0.32 per split (these are the knife-edge decisions)
+
+  WHICH RULE TRANSFERS BETTER (paired, same splits, same halves):
+    fixed-recall gap smaller on 160/500 splits (32%), tied on 170 (34%), larger on 170 (34%)
+    J moves in steps of 0.10 on the test half, so a difference of medians below that is not a result.
+
+  VERDICT on the published Youden threshold (criteria fixed before the numbers were seen):
+    [PASS] published tau inside the IQR of split-selected taus  --  tau*=0.95, IQR [0.95, 0.96]
+    [FAIL] median optimism gap <= 0.05  --  gap=+0.089
+    [FAIL] median test J within 0.05 of in-sample J  --  in-sample J=0.820, median test J=0.750
+
+  -> tau=0.95 is a STABLE CHOICE (IQR spans only 0.01) but the performance published with it is OPTIMISTIC by about +0.089 of J. Keep the constant; discount the headline: out of sample expect J between 0.75 and 0.82, nearer the former, since fitting on half the items overstates the gap. The two rules are not separable at this sample size (160/170/170 splits better/tied/worse). The fixed-recall rule is still preferable for a safety gate, on loss-function grounds rather than measured ones.
+
+------------------------------------------------------------------------------
+HOW TO READ THE GAP
+------------------------------------------------------------------------------
+  The gap is measured by fitting on HALF the items. The published threshold
+  was fitted on all of them, so its true optimism is somewhat SMALLER than
+  what is printed here -- more training data means less overfitting. The
+  direction is what transfers: a gap of ~0 here means the published tau is
+  safe, and a large gap here means it is not, but the magnitude is an upper
+  bound, not a point estimate.
+
+  With few positives per half, test TPR moves in coarse steps and the
+  selected tau scatters. That scatter is the RESULT, not noise to be
+  averaged away: it is how unstable the operating point genuinely is at
+  this sample size.
+
+  attrition [synthetic]: {'rows': 179, 'duplicates': 0, 'failed': 1, 'off_question_set': 0, 'items': 60, 'labelled': 60}

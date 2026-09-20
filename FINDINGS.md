@@ -82,10 +82,12 @@ which was **confidently wrong on the hardest item in the set**.
 1. **Jev ranks as well as a frontier model on the gate questions**, at ~1,400×
    lower cost and 7.6× lower latency (557ms vs 4,219ms p50; 2.7s vs 32s p99).
    (Part 4b)
-2. **τ=0.5 is wrong for Jev on both questions.** At the default it misses 16% of
-   destructive commands and flags 62% of benign ones. Optimal thresholds are
-   0.36 and 0.95 — but those are fitted on the data they were evaluated on and
-   are **not yet validated**. (4b)
+2. **τ=0.5 is wrong for Jev on both questions** — at the default it misses 16%
+   of destructive commands and flags 62% of benign ones. But the corrected
+   values 0.36 and 0.95 **do not survive validation** either: the optimism gap
+   is ≈ +0.10 in Youden's J, and τ=0.36 is an unstable constant selecting
+   anywhere in 0.36–0.63. Choose the operating point by a **rule**, not a
+   memorised constant. (4b, 4d)
 3. **The cost and latency advantage is partly an artefact of the baseline.** The
    `cc_*` arms are Claude Code as deployed — ~10K tokens of preamble plus a
    process spawn. The honest comparison is against *the deployed system*.
@@ -483,6 +485,12 @@ answerable.
 **Practical consequence: never deploy Jev at τ=0.5.** Both questions need their
 own calibrated threshold, and neither is 0.5.
 
+> **CORRECTION — the specific values 0.36 and 0.95 do not survive validation.**
+> See Part 4d. They were Youden-optimal *on the set they were evaluated on*, and
+> a 500-split train/test analysis puts the optimism gap at **≈ +0.10 in Youden's
+> J**. The *direction* of this section holds — 0.5 is wrong, and badly — but
+> these two constants should not be deployed as stated.
+
 ### The compression/instability interaction — partially reassuring
 
 §2.3 found Jev's non-determinism concentrates near the threshold, and §4.2 found
@@ -559,6 +567,78 @@ cannot demonstrate.
 The uncomfortable implication is that the surface we measured most carefully is
 the one least able to answer the question being asked, and the surface that
 could answer it has an 8-prompt probe behind it.
+
+## Part 4d — The corrected thresholds do not survive validation [SOLID]
+
+500 random train/test splits, split by `decision_id` and stratified, Youden's τ
+fitted on the train half and scored on the test half.
+Reproduce: `uv run src/validate_threshold.py --arm jev --context synthetic`.
+
+| arm / question | published τ | in-sample J | median test J | **optimism gap** | selected-τ IQR |
+|---|---|---|---|---|---|
+| jev / destructive | 0.36 | 0.875 | 0.800 | **+0.100** | 0.36–0.47 |
+| jev / needs_review | 0.95 | 0.820 | 0.750 | **+0.089** | 0.95–0.96 |
+| cc_opus5 / destructive | 0.62 | 0.875 | 0.800 | +0.100 | 0.60–0.75 |
+| cc_haiku45 / destructive | 0.72 | 0.925 | 0.850 | +0.050 | 0.72–0.75 |
+
+Train beat test on 70–76% of splits. **Neither Jev threshold survives** the
+criteria fixed before the numbers were seen — but **they fail in different ways,
+and the distinction is the useful result:**
+
+- **τ=0.36 (`destructive`) is an unstable constant.** Half-samples select
+  anywhere in **0.36–0.63**. It sits at the floor of the selectable range — the
+  lowest score any destructive item received — so its nominal "inside the IQR"
+  pass is degenerate, not evidence of stability. There is no good constant here
+  at this sample size.
+- **τ=0.95 (`needs_review`) is a stable constant with an inflated number
+  attached.** The selected-τ IQR spans 0.01. The threshold is fine; the
+  advertised J is ~0.09 too high. Out of sample, expect J ≈ 0.75.
+
+**A fixed-target-recall rule transfers better than Youden on `destructive`** —
+paired on identical splits it was *never worse* across 500 splits and strictly
+better on 11–13%. Weak dominance is a stronger argument than a difference of
+medians here, because with ~10 test positives J moves in quanta of 0.10.
+
+> **What to actually do:** pick the operating point by a *rule* (e.g. "lowest τ
+> achieving TPR ≥ 0.95 on training data"), not by a memorised constant. A rule
+> re-derives itself as data accumulates; a constant fitted to 59 synthetic items
+> does not transfer.
+
+**One number to watch.** At τ=0.95 on `needs_review`, **24 of 59 synthetic items
+(41%) sit within 0.05 of the threshold**. Jev piles `needs_review` scores against
+the ceiling, so the "correct" threshold lands inside the densest part of its own
+distribution — the opposite of the reassurance in 4b's compression discussion.
+This is an exposure *upper bound*, not a flip count. Whether it matters depends
+entirely on the determinism sweep, which has still not been run.
+
+## Part 4e — Measured enforce overhead [SOLID]
+
+`hooks/inline_shadow_bash.sh` invoked 100 times against the live gateway, timed
+from outside the fork. This is what a gated command would actually cost.
+Reproduce: `uv run src/bench_inline.py -n 100` (~$0.0013).
+
+| component | p50 | p90 | p99 | max |
+|---|---|---|---|---|
+| **end-to-end (what the session waits)** | **624ms** | 752ms | **929ms** | 978ms |
+| ├─ spawn + prelude | 25ms | 29ms | 33ms | 39ms |
+| ├─ hook internals (jq, openssl) | 44ms | 47ms | 48ms | 49ms |
+| └─ API (curl total) | 557ms | 682ms | 858ms | 910ms |
+
+**~69ms is scaffolding that no faster model can remove** — process spawn plus
+four `jq` invocations and an `openssl` hash. That is the floor for *any*
+inline-hook design in bash, and it is worth knowing separately from model
+latency. About 10ms of it is recoverable by collapsing jq calls.
+
+The inline hook's state string is **byte-identical to the Python builder's** —
+verified by independent hash comparison, and asserted in the test suite. Without
+that, shadow mode and enforce mode would score different inputs and the whole
+comparison would be void.
+
+**An unresolved operating decision:** the default `--max-time` is 2.0s, which
+sits *below* Jev's measured p99 of 2,681ms. At that value roughly the top 1–3%
+of Jev's tail becomes `timeout` attrition and fails open. That is a deliberate
+choice to make, not a default to inherit; `max_time_s` is recorded on every row
+so it is analysable either way.
 
 ## Part 5 — Model routing: a promising probe, and its failure mode
 

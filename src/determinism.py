@@ -72,6 +72,7 @@ BANDS: list[tuple[float, float]] = [
 MIN_REPEATS = 3        # below this a "group" is not a measurement
 MIN_BUCKET = 5         # below this a bucket prints its n instead of a rate
 MIN_GROUPS = 5         # below this the whole analysis is withheld
+FAR = 0.10             # |p - tau| beyond which a flip is no longer a boundary effect
 
 
 # --------------------------------------------------------------------------
@@ -376,24 +377,57 @@ def render(results: list[ArmQuestion],
 
 
 def _interpret_bands(r: ArmQuestion) -> str:
-    measured = [b for b in r.bands if b.flip_rate is not None]
-    if not measured:
-        return ("every bucket is below the minimum count; the shape of the "
-                "relationship is unmeasured. More repeats, not more analysis.")
-    flipping = [b for b in measured if b.flip_rate > 0]
+    """Read the shape, using EVERY bucket.
+
+    Deliberately counts flips in thin buckets too. A bucket with 4 items, all of
+    which flipped, is not enough to put a rate on -- the table correctly refuses
+    -- but it is emphatically not evidence of stability, and an earlier version
+    of this function that ignored thin buckets reported "no flips anywhere"
+    over a sample in which every flip had occurred.
+    """
+    populated = [b for b in r.bands if b.n_groups]
+    if not populated:
+        return "no items at all at this threshold."
+    flipping = [b for b in populated if b.n_flipping]
     if not flipping:
+        thin = [b for b in populated if b.flip_rate is None]
+        tail = (f" ({len(thin)} bucket(s) hold fewer than {MIN_BUCKET} items, so "
+                f"'stable' there means 'no flip seen', not 'flip rate near zero')"
+                if thin else "")
         return (f"no flips anywhere in {r.n_calls} calls. At this tau the arm is "
-                f"decision-stable on this sample -- which is the precondition for "
-                f"enforcing on it.")
+                f"decision-stable on this sample{tail} -- which is the precondition "
+                f"for enforcing on it.")
+
+    # "Far" is fixed at 0.10 rather than derived, so the bad case is reachable:
+    # an edge computed from the flipping buckets themselves can never have flips
+    # beyond it, and a test for "flips everywhere" against such an edge would
+    # always pass vacuously.
+    far_flipping = [b for b in flipping if b.lo >= FAR]
     edge = max(b.hi for b in flipping)
-    clean = [b for b in measured if b.lo >= edge]
-    if clean and all(b.flip_rate == 0 for b in clean):
-        return (f"flips are CONFINED to |p - tau| < {edge:.2f}; every measured bucket "
-                f"beyond it is stable. Enforcement outside that band is reproducible, "
-                f"and inside it the honest move is to ask rather than to decide.")
-    return (f"flips reach out to |p - tau| >= {edge:.2f} and the far buckets are not "
-            f"clean. That is the bad case: no band is safe, and the arm should not "
-            f"gate anything until this is understood.")
+    beyond = [b for b in populated if b.lo >= edge]
+    resolved = all(b.flip_rate is not None for b in flipping)
+    caveat = "" if resolved else (
+        f" The affected bucket(s) hold fewer than {MIN_BUCKET} items, so the"
+        f" concentration is visible but the rate inside the band is not yet"
+        f" resolvable -- that needs more repeated items near tau, not more analysis.")
+
+    if far_flipping:
+        return (f"flips occur out at |p - tau| >= {min(b.lo for b in far_flipping):.2f}, "
+                f"far from the threshold. That is the bad case: the wobble is not a "
+                f"boundary effect, no band is clean, and the arm should not gate "
+                f"anything until this is understood.{caveat}")
+    if beyond and all(b.n_flipping == 0 for b in beyond):
+        return (f"flips are CONFINED to |p - tau| < {edge:.2f}; every populated bucket "
+                f"beyond it was unanimous. Enforcement outside that band is "
+                f"reproducible, and inside it the honest move is to ask rather than "
+                f"to decide.{caveat}")
+    if not beyond:
+        return (f"every populated bucket reaches only to |p - tau| < {edge:.2f}, so "
+                f"there is no far region to compare against. The concentration "
+                f"hypothesis is untested here.{caveat}")
+    return (f"flips reach |p - tau| < {edge:.2f} and there is no clean region beyond "
+            f"them to compare against. Inconclusive on the concentration "
+            f"hypothesis.{caveat}")
 
 
 def _render_no_repeats(L: list[str],
@@ -456,9 +490,18 @@ def _render_occupancy(L: list[str],
                                  f"n={len(scores)} is too small to call a workload.")
                     else:
                         L.append(f"    -> {near}/{len(scores)} decisions "
-                                 f"({near / len(scores):.0%}) sit within 0.05 of tau: "
-                                 f"the band where flips were seen.")
+                                 f"({near / len(scores):.0%}) sit within 0.05 of tau.")
                     L.append("")
+    L.append("  What 'within 0.05 of tau' is and is not: FINDINGS 2.3 saw flips within")
+    L.append("  0.05 of tau=0.50, on items whose probability was genuinely uncertain. It")
+    L.append("  also measured sd 0.000 at p=0.97 -- Jev does not wobble when it is")
+    L.append("  confident. Distance from tau and intrinsic uncertainty coincide at")
+    L.append("  tau=0.50 and come apart at tau=0.95, where a crowded band may be crowded")
+    L.append("  with items that are perfectly stable. Read occupancy as an EXPOSURE")
+    L.append("  UPPER BOUND, not as a flip count; only the sweep separates the two, and")
+    L.append("  when it lands the flip-rate-versus-distance table must be read per tau,")
+    L.append("  never pooled across them.")
+    L.append("")
     L.append("  The synthetic set is balanced 1:1:1 by design, so its occupancy figure is")
     L.append("  an artefact of how it was written, not a workload. The live base rate is")
     L.append("  far more skewed and the live occupancy number is the one that decides")
