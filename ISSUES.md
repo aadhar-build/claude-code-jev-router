@@ -46,6 +46,9 @@ automated test suite.
 - [ ] Determines empirically whether `providerMetadata.typesafe.confidence` survives the REST path (documented for the AI SDK only)
 - [ ] Determines whether repeated identical calls return identical probabilities
 - [ ] Determines whether prompt caching fires for short classifier prefixes
+- [ ] Confirm `effort` belongs inside `output_config` for the Anthropic arms (check the claude-api skill's curl docs before spending)
+- [ ] Watch `stop_reason`: if thinking is on by default for Opus 5, `max_tokens: 256` may be consumed entirely by thinking and every call returns `malformed_response: no text content`. The code surfaces this correctly — read it rather than guessing
+- [ ] Print the EXACT `response_model` string each arm returns and add it to `config/pricing.json`. An unpriced model yields `cost_usd: null` and a `nan` in the cost column, by design — the table has to be populated from the spike rather than guessed
 - [ ] Findings recorded in `docs/API-FINDINGS.md` with the date and the response model string
 
 ---
@@ -246,6 +249,7 @@ until the analysis path is proven on one -- otherwise you collect thousands of
 records you cannot use.
 
 - [ ] `stop`, `user_prompt` and `post_edit` capture hooks registered
+- [ ] **Blocker found during JEV-03, resolve before building this.** `build_stop` requires `transcript_bytes_at_capture`, but `capture.sh` does no JSON parsing by design, so it cannot `stat` a path it never reads. Decision #7's mechanism has no implementation route as currently written. Two options: give `stop` its own hook line that extracts the path with a single `sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p'` and calls `stat -f %z`, then re-time it against the 10ms budget; or find a different truncation marker. `build_stop` already refuses to run without the offset, so the leakage guard holds either way — the surface simply cannot be enabled until this is settled
 - [ ] `stop` state built from the transcript truncated at `transcript_bytes_at_capture`, never the tail
 - [ ] Each capture records its `state_source`
 - [ ] Per-surface switches verified independently

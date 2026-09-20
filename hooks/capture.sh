@@ -11,9 +11,18 @@
 #
 # Usage: capture.sh <surface>            (hook payload arrives on stdin)
 
-exec 2>>"${CLAUDE_PROJECT_DIR:-.}/logs/capture.err"
+# The trap comes FIRST, before anything that can fail. `logs/` is gitignored,
+# so on a fresh checkout it does not exist -- and a failed `exec` redirect
+# would exit non-zero before any later trap could catch it. That is a fail-open
+# violation caused by the very line meant to make failures visible.
 trap 'exit 0' EXIT
 # No `set -e`: a failure must skip the record, not abort with a nonzero status.
+
+if [ -n "$CLAUDE_PROJECT_DIR" ] && [ -d "$CLAUDE_PROJECT_DIR/logs" ]; then
+  exec 2>>"$CLAUDE_PROJECT_DIR/logs/capture.err"
+else
+  exec 2>/dev/null
+fi
 
 ROOT="${CLAUDE_PROJECT_DIR:-}"
 [ -n "$ROOT" ] || exit 0

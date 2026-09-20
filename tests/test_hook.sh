@@ -83,6 +83,18 @@ after=$(count)
 [ "$before" = "$after" ]   && ok "backpressure: stops writing past the cap" || bad "wrote past cap ($before -> $after)"
 reset
 
+# --- missing logs/ (fail-open on a fresh checkout) ---------------------------
+# logs/ is gitignored, so it is absent on a clone. If the stderr redirect ran
+# before the trap was installed, the hook would exit non-zero here.
+reset
+mv "$ROOT/logs" "$ROOT/logs.bak" 2>/dev/null
+(cd "$ROOT" && echo "$PAYLOAD" | CLAUDE_PROJECT_DIR="$ROOT" "$HOOK" pre_bash) >/dev/null 2>&1; rc=$?
+captured=$(count)
+mv "$ROOT/logs.bak" "$ROOT/logs" 2>/dev/null
+[ "$rc" -eq 0 ]        && ok "no logs/ dir: still exits 0" || bad "no logs/ dir exit $rc"
+[ "$captured" = "1" ]  && ok "no logs/ dir: still captures" || bad "no logs/ dir captured $captured"
+reset
+
 # --- latency budget ---------------------------------------------------------
 start=$(python3 -c 'import time;print(time.time())')
 i=0; while [ $i -lt 30 ]; do (cd "$ROOT" && echo "$PAYLOAD" | CLAUDE_PROJECT_DIR="$ROOT" "$HOOK" pre_bash); i=$((i+1)); done

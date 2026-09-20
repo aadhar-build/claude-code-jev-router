@@ -271,6 +271,8 @@ class TestLiveArmWireFormats(unittest.TestCase):
     """
 
     def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
         from arms import claude, jev
         self.jev, self.claude = jev, claude
         self.q = cl.questions_for("pre_bash")
@@ -360,16 +362,27 @@ class TestLiveArmWireFormats(unittest.TestCase):
         self.assertEqual(set(jev_out["b"]), set(fake_out["b"]))
 
     def test_live_arms_refuse_to_run_without_credentials(self):
-        """Fail loudly and classifiably rather than silently sending nothing."""
+        """Fail loudly and classifiably rather than silently sending nothing.
+
+        Both the environment AND the .env file are hidden, because
+        paths.require reads .env first. Popping only os.environ would make
+        this test start spending money the moment the user fills in .env --
+        the suite's zero-API-spend property has to hold after that, not just
+        before it.
+        """
         import os
-        saved = os.environ.pop("AI_GATEWAY_API_KEY", None)
+        saved_env = os.environ.pop("AI_GATEWAY_API_KEY", None)
+        saved_file = paths.ENV_FILE
+        paths.ENV_FILE = Path(self._tmp.name) / "definitely-not-here.env"
+        paths.load_env.cache_clear() if hasattr(paths.load_env, "cache_clear") else None
         try:
             run = worker.evaluate_one("state", self.q, cl.arm("jev"))
-            self.assertFalse(run.ok)
+            self.assertFalse(run.ok, "an arm with no credential must not report success")
             self.assertIsNotNone(run.error_kind)
         finally:
-            if saved is not None:
-                os.environ["AI_GATEWAY_API_KEY"] = saved
+            paths.ENV_FILE = saved_file
+            if saved_env is not None:
+                os.environ["AI_GATEWAY_API_KEY"] = saved_env
 
 
 class TestStatistics(unittest.TestCase):

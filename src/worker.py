@@ -61,7 +61,10 @@ def evaluate_one(state: str, questions: dict[str, Any], config: ArmConfig) -> Ru
     """
     try:
         return load_arm_module(config.kind).evaluate(state, questions, config)
-    except BaseException as exc:  # noqa: BLE001 -- an arm must never kill the worker
+    except Exception as exc:  # noqa: BLE001 -- an arm must never kill the worker
+        # Deliberately NOT BaseException: a Ctrl-C during a live call would
+        # otherwise be recorded as an arm failure, quietly poisoning the
+        # attrition statistics with failures the arm never had.
         kind, detail = classify_exception(exc)
         return Run(
             arm=config.name,
