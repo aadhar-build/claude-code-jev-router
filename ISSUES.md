@@ -1875,7 +1875,7 @@ same report belongs to JEV-19 and is not addressed here.
 
 ## JEV-43: `cc_*` wall-clock is contaminated by the operator's own user-level hooks
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** science, blocking, metrics
 **Blocked by:** None
 
@@ -1903,11 +1903,114 @@ This project took great care that nothing leaks *out* of the folder into the
 user's environment. This is the reverse: the user's global environment leaking
 *into* the measurement. Nothing in the isolation design was looking for it.
 
-- [ ] Quantify it: decompose `total_ms` against `raw.duration_api_ms` across all existing `cc_*` rows and report the spawn-plus-hooks residual, per arm, as a distribution rather than a mean
-- [ ] Establish which user-level hooks fire inside an arm subprocess, and whether the arm can suppress them without altering what it is supposed to measure — note that suppressing them makes the arm *less* representative of Claude Code as deployed, so this is a real trade-off and not an obvious fix
-- [ ] **Decide which number is publishable.** `raw.duration_api_ms` is clean but excludes spawn, which A5.3 commits to reporting; `total_ms` includes spawn and unrelated automation. Neither is the figure the pre-registration assumes exists
-- [ ] Re-check A5.3's commitment to "quantify the bias rather than assert it is small" — it was written about spawn contention and now has a second, larger term
-- [ ] Whatever is decided, no `cc_*` wall-clock figure is published until the residual is characterised
+- [x] Quantify it: decompose `total_ms` against `raw.duration_api_ms` across all existing `cc_*` rows and report the spawn-plus-hooks residual, per arm, as a distribution rather than a mean — **three clocks, not two**, per `(arm, arm_config_id, arm_dispatch, run_context)`; `reports/jev43-wallclock.md`
+- [x] Establish which user-level hooks fire inside an arm subprocess, and whether the arm can suppress them without altering what it is supposed to measure — **identified**: the `security-guidance` plugin's `Stop` hook. Suppression is possible and **deliberately not taken**; `src/arms/claude_cli.py` is untouched
+- [x] **Decide which number is publishable.** `api_ms` primary; `total_ms` over **clean rows only** as the wall-clock co-primary, with `n` dropped stated; never a pooled `cc_*` `total_ms`
+- [x] Re-check A5.3's commitment to "quantify the bias rather than assert it is small" — the spawn term is **~180ms** and survives (it is computed on `total_ms - duration_ms`, which excludes the hook); the second term is identified and removed rather than bounded
+- [x] Whatever is decided, no `cc_*` wall-clock figure is published until the residual is characterised — characterised; **JEV-33's 16.5s is withdrawn**, see below
+
+---
+
+### Resolved 2026-09-20. The 18.7s was a plugin, not "a user hook", and one published number dies.
+
+**The decomposition.** A `cc_*` row carries two independent clocks for the same
+event, one outside the subprocess and one inside it, and the difference is the
+whole ticket:
+
+```
+total_ms      = spawn_ms + in_session_ms + api_ms       exactly, by construction
+spawn_ms      = total_ms - raw.duration_ms              fork/exec, Node + CLI boot, teardown
+in_session_ms = raw.duration_ms - raw.duration_api_ms   preamble, tool round trip, OPERATOR HOOKS
+api_ms        = raw.duration_api_ms                     the model call. clean.
+```
+
+**The source, identified rather than bounded.** `in_session_ms` is sharply
+bimodal: 1,255 of 1,322 successful `cc_*` rows below 1.24s, **zero rows between
+1.24s and 18.53s**, and 67 rows at 18.5-22.0s totalling 1,266s. That second
+mode is the **`security-guidance` plugin's `Stop` hook**. It runs an LLM code
+review over the working-tree diff; on this machine those requests fail TLS
+certificate verification, so it burns a fixed retry ladder and gives up. **The
+hook's own log prints the elapsed time: 18.3s in 253 of 309 recorded firings**,
+with a tail to 20.4s that matches the rows' tail. In the window the log still
+covers, **25 of 25** contaminated rows have a hook completion 0.47-0.69s before
+the row's `evaluated_at`, against 44 of 388 clean rows. The earlier MCP
+diagnosis was already ruled out; the correct answer was a plugin-registered
+hook, as suspected, and it is a *`Stop`* hook as originally observed.
+
+Two things worth carrying forward. The hook declares `asyncRewake: true` — its
+author intended it **not** to block — and in `claude -p` it blocks anyway. And
+18.3s is contingent on a broken certificate chain: with working TLS the same
+hook makes a real LLM call, which is variable latency *and* the operator's
+plugin spending API budget inside every arm subprocess.
+
+**Why only ~5%, and why that number does not forecast anything.** The hook
+returns early on an empty diff, so it only fires when this repo had uncommitted
+changes at that instant. The trigger is **the operator editing the repo** — not
+the arm, not the model, not the decision. Measured hourly rate over the window:
+0% to **34.6%**. The corpus-wide 5.07% is an average over how busy someone was.
+
+**Which published numbers move.**
+
+| claim | was | is | verdict |
+|---|---|---|---|
+| JEV-33 serial sum per capture | 20.1s | **19.7s** | survives — a sum of medians |
+| JEV-33 concurrent `dispatch_wall_ms` | 16.5s | **9.7s** | **withdrawn** |
+| JEV-33 "20.1s → 16.5s, ~1.2x" | 1.2x | **~2.0x** | **restated** |
+| JEV-33 "the ~6s above the floor is contention" | ~6s | ~0s | **withdrawn** |
+| JEV-41 "wall-minus-API ~3.5s Haiku vs ~1.4s Opus" | 3.5 / 1.4s | **1.41 / 1.52s** | **ordering withdrawn** |
+| A5.3 spawn contention | ~170ms | ~180ms | survives |
+| `jev` sequential-vs-concurrent null | 565.7 / 564.6ms | unchanged | survives |
+
+JEV-33's 16.5s was measured over the first 17 concurrent decisions, and **7 of
+those 17** contain a contaminated arm — a 41% rate, because that sample sits
+inside the busiest editing burst of the day. A per-decision wall is a **max**
+over arms, so one contaminated arm carries the whole decision. The substantive
+correction is that **the wall sits at the slowest arm and the "~6s of
+contention" above it was the operator's hook.** Quote the restated 2.0x with
+its n=17, and do not pool the full concurrent era for it: `cc_haiku45` changed
+`arm_config_id` at 15:15:49Z and got much faster, so the 235-decision figure
+(6.9s) measures JEV-41's fix as much as concurrency.
+
+JEV-41's wall-minus-API gap was a **mean**, and Haiku had the highest
+contamination rate. Clean, the gap is flat across arms — `cc_haiku45` 1.41s,
+`cc_opus5` 1.52s, `cc_sonnet5` 1.59s — as a fixed spawn cost should be. JEV-41
+used that gap to argue spawn does not explain Haiku's slowness; that conclusion
+is **right and now much better supported**, and both its root causes stand.
+
+**What is NOT removed.** Dropping the second mode does not leave a clean
+number, and the report says so rather than implying otherwise:
+
+- **≤~0.6s/row at p95** of fast operator `SessionStart` hooks, which sit inside
+  the clean in-session mode alongside the preamble and are not separable from a
+  row. The ceiling is the whole clean `in_session_ms` distribution (p50
+  0.28-0.35s, p95 0.39-0.62s).
+- **~1.1-1.3s/row of `spawn_ms`**, of which an unknown fraction is Claude Code
+  loading the operator's settings and plugin manifests before it starts its own
+  clock. Unresolvable from rows; bounded and disclosed.
+
+**Rejected: suppressing the hooks.** `claude -p` would honour a `--settings`
+override with an empty hook set, in the same spirit as the
+`--strict-mcp-config` the arm already passes. Not taken, for the reason this
+ticket names: a `cc_*` arm exists to represent Claude Code *as deployed*, and a
+real deployment carries the operator's hooks. Suppressing them buys a cleaner
+number by measuring something nobody runs — and it would create a fourth
+`arm_config_id` era boundary inside the window. `src/arms/claude_cli.py` is
+untouched.
+
+**What was built.**
+
+| file | what it does |
+|---|---|
+| `src/latency.py` | the decomposition as pure functions over a row. `decompose` **refuses** a `jev` row, an `ok=False` row, or a row missing a clock, rather than returning zeros. `is_contaminated` cuts inside the empirical gap; `empirical_gap` is reported so a future corpus that fills the hole in invalidates the method loudly. `clean_baselines`, `adjusted_total_ms`, `dispatch_walls`, `summarise` |
+| `src/latency_report.py` | writes `reports/jev43-wallclock.{md,json}`. **Not** a second `analyze.py`: it computes nothing about answers, labels, agreement, cost or thresholds |
+| `tests/test_latency.py` | 19 tests, every number hand-computed. The two that matter: **threshold invariance** across 2/5/10/15/18s (the robustness argument, in code rather than in prose), and **`summarise` never pools across `run_context`** — which was a real defect, caught because the JEV-16 determinism sweep appends `replay` rows to the very file this report reads |
+
+**Noticed, not repaired (not mine).** `data/runs/2026-09-20.jsonl` grew from
+2,005 to 2,006 rows mid-analysis: the JEV-16 determinism agent writing `replay`
+rows into the shared append-only file. Nothing is wrong with that, but any
+report over `data/runs/` that does not split on `run_context` is silently
+pooling a live latency with a replay latency. Mine now does; `analyze.py` is
+frozen and was not inspected for it.
 
 ---
 
@@ -2701,3 +2804,94 @@ rather than smuggled in here.
 - [ ] A recommendation with evidence on whether `pre_bash` should switch, and an
       explicit statement that switching is JEV-52's decision, not this ticket's
 - [ ] JEV-34's state design revisited in light of the SWE-Router finding
+
+## JEV-55: the clustered bootstrap has ONE cluster — the primary interval cannot be computed
+
+Status: ready-for-agent
+Labels: science, blocking, threat-to-validity
+Blocked by: none. **This gates JEV-27 (power analysis), JEV-52 (the gate) and
+the primary metric itself.**
+
+**Measured 2026-09-20, verified directly.**
+
+```
+run rows by context : live 1783 | synthetic 180 | canary 42 | replay 38
+DISTINCT session_id among LIVE rows : 1
+   4ba49645-fb8d-4fb2-b496-c274f6ed1490   1783
+```
+
+All 1,783 live run rows carry **one** `session_id` — this session. The other
+three "sessions" visible among captures (`synthetic-destructive`,
+`synthetic-benign`, `synthetic-borderline`) are stratum labels on the synthetic
+set, not real sessions.
+
+**Why this is a headline problem, not a bookkeeping one.** The primary metric is
+
+> PABAK between `jev` and `cc_opus5` on `pre_bash.destructive`, **with a 95%
+> bootstrap CI clustered on `session_id`** (§2)
+
+and §A1.1 rules an interval inconclusive below 30 clusters. **We have 1.**
+Resampling clusters when there is one cluster returns the same cluster every
+time: the interval is degenerate, not merely wide. The primary interval as
+pre-registered **cannot be computed from any amount of data collected this way**
+— collecting for seven days instead of one changes N and does not change the
+number of clusters.
+
+This is the exact failure the plan named as the thing "a stats-literate reader
+would attack first" (`docs/PLAN.md`, metrics section), and the defence was
+clustering. The defence does not currently exist.
+
+**Cause, and it is structural rather than a bug.** The isolation requirement
+confines the hook to this repository, and the work in this repository has been
+one continuous operator session. Sessions are long here by nature: the unit that
+makes decisions correlated — same repo, same task, same commands repeated — is
+precisely the unit we have exactly one of.
+
+## What this ticket must decide
+
+Not "fix the bootstrap". Choose, with the reasoning recorded, between:
+
+1. **Change the clustering unit.** `prompt_id` is already on every capture row.
+   Decisions inside one user prompt are strongly correlated; across prompts much
+   less so. That yields many clusters immediately. **The cost is that it is a
+   weaker claim** — it controls for within-prompt correlation but not for
+   within-session effects like a repeated `npm test`, which is the correlation
+   §A1.1 was written about. Any change here is a pre-registration amendment and
+   must be argued, not asserted.
+2. **Collect across many sessions.** Honest, and changes the stopping rule from
+   "seven calendar days" to something with a session count in it. Note the
+   operator cannot be instructed to fragment their work without changing the
+   behaviour being measured — that is itself a confound (cf. JEV-24a/24b).
+3. **Report the primary interval as uncomputable** and demote PABAK's CI to a
+   point estimate with the limitation stated. Permitted by §6, which already
+   pre-commits to publishing "the live sample cannot support a discrimination
+   claim" as a finding. Least satisfying, most honest, and **requires no
+   amendment** because §6 anticipated it.
+4. Some combination: e.g. report the point estimate as headline, a
+   `prompt_id`-clustered interval as clearly-labelled secondary.
+
+**Whatever is chosen, the naive-vs-clustered comparison the plan promised must
+still be published**, because the gap between them is now the finding rather
+than a footnote.
+
+## Interacting facts already on the board
+
+- **The live corpus is two arm-set eras** (JEV-32): 531 three-arm rows and 1,252
+  four-arm rows. Any resampling scheme has to respect that boundary or it pools
+  across a concurrency-regime change.
+- **`destructive` never crossed tau in 487 live decisions** (max 0.16). Even with
+  perfect clustering the live `destructive` signal is degenerate, so this ticket
+  and the base-rate problem compound rather than substitute.
+- **PointFive's ICC finding** (`.scratch/prior-art.md`): 712 runs per arm bought
+  ~38-45 effective tasks at ICC 0.37-0.55. Our effective sample is smaller than
+  our row count by a factor nobody has computed yet. **Compute it.**
+
+**Acceptance criteria**
+
+- [ ] The effective sample size computed and reported, not just the row count
+- [ ] A decision among the options above, with the argument written down
+- [ ] If the clustering unit changes, a drafted pre-registration amendment that
+      states what the new unit does and does not control for
+- [ ] Naive-vs-clustered intervals published side by side whatever is decided
+- [ ] JEV-27's power analysis re-scoped to size on clusters, not rows
+- [ ] The limitation stated in the abstract, not a footnote
