@@ -107,7 +107,11 @@ def from_wire(answers: dict[str, Any], questions: dict[str, Any]) -> dict[str, A
             probabilities = raw.get("probabilities", {})
             out[name] = {
                 "type": "score",
-                "score": float(raw["score"]) + 1.0,          # 0-indexed -> 1-indexed
+                # Rounded to the precision the API actually reports (2dp). Without
+                # this, 3.44 + 1.0 stores as 4.4399999999999995 -- binary float
+                # noise that is not a measurement, and that would make two
+                # otherwise identical replays compare unequal.
+                "score": round(float(raw["score"]) + 1.0, 2),   # 0-indexed -> 1-indexed
                 "score_index_origin": "jev_0_shifted_to_1",
                 "probabilities": {str(int(k) + 1): v for k, v in probabilities.items()},
             }

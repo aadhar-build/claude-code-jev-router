@@ -116,13 +116,30 @@ study that is a measurable property. For enforce mode it is a deployment
 hazard: a borderline command would be gated inconsistently, which is worse than
 being gated always or never, because it is unreproducible for the user.
 
+**Second run, after the parser fixes.** All three fixes verified live:
+confidence captured (`{route: 0.90, risk: 0.62}`), score a float on the 1–5
+scale, probability keys shifted. Determinism on the same borderline command came
+back **0/10 flips** this time, against 1/10 on the first run.
+
+That difference is itself the point. Two runs, one flip in twenty — the flip
+rate is a property of how close an item sits to the threshold, not a fixed
+constant, and a ten-call sample cannot pin it down. **Do not quote "1 in 10"**;
+quote "observed at least once in twenty calls on a p≈0.50 item, rate not yet
+characterised." The determinism sweep exists to characterise it properly, and
+it now has a clear job.
+
 This also kills a hypothesis the design had been carrying — that Jev might be
 deterministic where temperature-zero LLMs are not, and that this would earn its
 own section. It does not. The determinism sweep now measures how much both
 wobble, which is a fairer question anyway.
 
-Input token counts *are* stable across identical calls, so billing is
-reproducible even though answers are not.
+Input token counts *are* stable across identical calls (412 every time), so
+billing is reproducible even though answers are not.
+
+One data-hygiene note: the 0→1 shift is applied with `round(x + 1.0, 2)` to the
+precision the API itself reports. Without the rounding, `3.44 + 1.0` stores as
+`4.4399999999999995` — binary float noise that is not a measurement and would
+make two identical replays compare unequal.
 
 ### 5. Token cost is dominated by fixed overhead, not by state
 

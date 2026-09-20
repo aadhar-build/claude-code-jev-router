@@ -353,6 +353,17 @@ class TestLiveArmWireFormats(unittest.TestCase):
         self.assertEqual(sorted(out["s"]["probabilities"], key=int), ["1", "2", "3"])
         self.assertEqual(out["s"]["score_index_origin"], "jev_0_shifted_to_1")
 
+    def test_jev_score_carries_no_binary_float_noise(self):
+        """3.44 + 1.0 is 4.4399999999999995 in binary floating point. That is
+        not a measurement, and it would make two identical replays compare
+        unequal."""
+        out = self.jev.from_wire(
+            {"s": {"type": "score", "score": 3.44, "probabilities": {}}},
+            {"s": {"type": "score", "instructions": "x", "anchors": ["a"] * 5}},
+        )
+        self.assertEqual(out["s"]["score"], 4.44)
+        self.assertEqual(len(str(out["s"]["score"]).split(".")[1]), 2)
+
     def test_jev_and_claude_score_scales_agree_at_both_ends(self):
         """The bottom and top anchors must mean the same number in both arms."""
         n = len(self.all_types["s"]["anchors"])
