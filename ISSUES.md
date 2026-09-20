@@ -2536,3 +2536,126 @@ document owns them:**
 - [ ] No number in the paper that is not traceable to a committed artifact
 - [ ] A reproduction section: what a reader would have to run, and what they
       cannot reproduce because it needs our transcripts or a waitlisted endpoint
+
+## JEV-54: does Jev do better with richer input? Test it offline before changing the hook
+
+Status: blocked
+Labels: science, arms, state
+Blocked by: JEV-16 (owns `replay.py`, the instrument this needs)
+
+**The question.** Jev currently receives three facts and nothing else. From
+`state_builders.build_pre_bash` (`src/state_builders.py:52-60`):
+
+```
+Command:
+ls && ls data 2>/dev/null | head -20
+
+Working directory: /Users/aadharagarwal/projects/JEV-experiments
+```
+
+plus a `Stated purpose:` line when the tool call carries a description. Median
+343 input tokens. The question is whether that is why answers look the way they
+do.
+
+**First, the thing enrichment will NOT fix.** Across 487 live decisions
+`destructive` never crossed tau=0.5 — max **0.16**, median 0.01, 481 of 487 in
+[0.0, 0.1). That is a **base rate** problem, not an information problem. No
+amount of context makes `ls` destructive. Richer input cannot rescue the live
+`destructive` signal and this ticket does not claim it will; that is what the
+synthetic stress set (JEV-10) is for.
+
+**Second, where it plausibly DOES help.** `needs_review` has median **0.49**
+across the same 487 rows — Jev is hedging almost exactly at the coin flip. That
+is the signature of a question it cannot discriminate on the evidence given,
+which is a *candidate* information problem and worth testing.
+
+**Third, the constraint that rules out the obvious approach.** `hooks/capture.sh`
+is `cat > tmp; mv; exit 0` — it does no parsing at all and spools the raw payload
+for the worker to interpret later. Adding `git status` to answer "is this
+recoverable from version control" would cost 50-500ms on every Bash command
+against a <10ms budget, and plan decision #1 exists precisely to forbid it. Any
+enrichment must be free at capture time or it is not enrichment, it is a tax on
+every tool call in the session.
+
+**Fourth — the opening. We are already discarding context we captured.** Every
+capture row carries `agent_type`, `permission_mode`, `is_sidechain`, `cwd`,
+`prompt_id` and `tool_use_id`. **None of them reach Jev.** They cost nothing —
+they are already on disk for all 571 captures — and they are exactly the kind of
+fact that separates "a human should look at this" from "this is routine": a
+command issued under `permission_mode: auto` inside a sidechain by a subagent is
+a different object from the same bytes typed by a human at the top level.
+
+**So this is testable offline, retroactively, for the price of a replay sweep,
+with no era boundary and no hook change.**
+
+## What to build
+
+An A/B of state builders over the **existing** corpus:
+
+- **arm A — `state-builders-v1`**: exactly what shipped. Already on disk; no
+  calls needed for the control if existing rows are reused.
+- **arm B — `state-builders-v2-context`**: v1 plus the capture-row fields listed
+  above, rendered as labelled lines in the same shape as the existing state.
+
+Re-ask the frozen `pre_bash/v1#a` question set over both, paired on
+`decision_id`. Report: change in `needs_review` distribution (does the mass move
+off 0.49?), change in `destructive` (expected: none — state it either way),
+agreement between builders, and whether any decision flips at tau.
+
+**This is a state-builder experiment, not a question-set change.**
+`questions/*/v1.json` stays frozen. Two builders, one question set.
+
+## Non-negotiables
+
+- **v2 is a new `state_builder_version` and therefore a new `state_sha256`.**
+  Rows from the two builders never pool. The §5 byte-identity assertion is
+  per-builder, not across.
+- **Both arms must see byte-identical state within a builder.** The existing
+  cross-arm assertion still applies.
+- **Do not change the live hook or the live builder on the strength of this.**
+  Switching `pre_bash` to v2 in production is a separate decision with its own
+  era boundary, and it would be taken at JEV-52 or not at all.
+- **Leakage check.** Every field proposed must be present in the hook payload at
+  capture time. `agent_type`, `permission_mode`, `is_sidechain` are. Anything
+  requiring a read of the live transcript or the filesystem at worker time is
+  **forbidden** under plan decision #7 — it would let the arm see a future the
+  enforce path does not have.
+
+## The enrichment this ticket deliberately does NOT attempt
+
+**Git-relative recoverability** — whether the paths a command touches are
+tracked, ignored, or absent. This is the single most relevant fact to the
+`destructive` question as worded ("cannot be recovered from version control or a
+backup") and Jev currently has no access to it whatsoever. It is excluded
+because it cannot be computed inside the hook's budget. The viable design, if
+this is ever pursued, is a **sidecar sampler**: a process writes a small git-state
+summary to a file every N seconds and the hook `cat`s it, costing one file read.
+That is a real piece of engineering with its own era boundary, and it should not
+ride along on an experiment. Recorded here so the idea is not lost.
+
+## Where richer input actually matters most, and it is not this surface
+
+**`agent_route` (JEV-34, wave A4) has not been built yet.** SWE-Router
+(arXiv:2607.00053) finds that routing on a task description alone "inherits an
+information-theoretic Bayes-error floor in agentic settings: a similar issue can
+hide either a localized typo or a multi-module refactor, and the prompt does not
+separate the two" — and that routing on a partial trajectory instead was worth
+**+15.3pp Route-AUC**. Our `agent_route` state is currently specified as
+description-only, i.e. exactly the K=0 router that paper measures a floor for.
+
+**Design `agent_route`'s state rich from the start.** There is no legacy corpus
+to split, no era boundary to pay, and the literature says this is where the
+information actually is. That is a change to JEV-34's scope and is filed as such
+rather than smuggled in here.
+
+**Acceptance criteria**
+
+- [ ] `state-builders-v2-context` implemented alongside v1, both selectable
+- [ ] Every v2 field verified present in the capture-time payload; the leakage
+      argument written per field, not asserted once
+- [ ] Paired A/B over the existing corpus on the frozen question set
+- [ ] Reported: `needs_review` distribution shift, `destructive` shift (expected
+      none), inter-builder agreement, flips at tau
+- [ ] A recommendation with evidence on whether `pre_bash` should switch, and an
+      explicit statement that switching is JEV-52's decision, not this ticket's
+- [ ] JEV-34's state design revisited in light of the SWE-Router finding
