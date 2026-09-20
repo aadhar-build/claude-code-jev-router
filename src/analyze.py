@@ -1,0 +1,253 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+"""Turn rows into per-surface tables.
+
+Everything here is reported PER SURFACE. The four surfaces have different
+states, base rates and difficulty; pooling a 99%-agreement Bash gate with a
+60%-agreement router produces a headline number that means nothing.
+
+The word "accuracy" does not appear in generated output, and a test enforces
+that. Phase 1 compares arms against a pseudo-label, not against truth.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import config_loader as cl  # noqa: E402
+import paths  # noqa: E402
+import stats  # noqa: E402
+import store  # noqa: E402
+
+REFERENCE_ARM = "opus5"
+THRESHOLD = 0.5
+BANNED = ("accuracy", "accurate", "correct answer", "ground truth")
+
+
+class Joined:
+    """captures joined to runs on decision_id."""
+
+    def __init__(self, run_context: str | None = "live"):
+        self.captures = {c["decision_id"]: c for c in store.captures()}
+        self.runs = [
+            r
+            for r in store.runs()
+            if r.get("decision_id") in self.captures
+            and (run_context is None or r.get("run_context") == run_context)
+        ]
+        self.sha_mismatches = self._check_state_identity()
+
+    def _check_state_identity(self) -> list[str]:
+        """Hard assertion: every arm for a decision must have seen the same bytes.
+
+        A serialisation drift that made one arm's input differ would otherwise
+        skew every comparison silently. It fails loudly here instead.
+        """
+        by_decision: dict[str, set[str]] = defaultdict(set)
+        for r in self.runs:
+            by_decision[r["decision_id"]].add(r.get("state_sha256", ""))
+        bad = []
+        for decision_id, shas in by_decision.items():
+            expected = self.captures[decision_id].get("state_sha256")
+            if len(shas) > 1 or (expected and shas and expected not in shas):
+                bad.append(decision_id)
+        return bad
+
+    def surfaces(self) -> list[str]:
+        return sorted({self.captures[r["decision_id"]]["surface"] for r in self.runs})
+
+    def by_surface(self, surface: str) -> list[dict[str, Any]]:
+        return [r for r in self.runs if self.captures[r["decision_id"]]["surface"] == surface]
+
+
+def _paired(rows: list[dict[str, Any]], arm: str, reference: str, question: str):
+    """Rows where both arms answered the same question for the same decision."""
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for r in rows:
+        if r.get("ok") and question in (r.get("answers") or {}):
+            index[(r["decision_id"], r["arm"])] = r
+    out = []
+    for (decision_id, a), row in index.items():
+        if a != arm:
+            continue
+        ref = index.get((decision_id, reference))
+        if ref is not None:
+            out.append((row, ref))
+    return out
+
+
+def _boolean_section(rows, arm, reference, question, lines):
+    paired = _paired(rows, arm, reference, question)
+    if not paired:
+        lines.append(f"    {question}: no paired observations")
+        return
+    a = [p[0]["answers"][question]["probability"] >= THRESHOLD for p in paired]
+    b = [p[1]["answers"][question]["probability"] >= THRESHOLD for p in paired]
+    clusters = [p[0].get("session_id") or p[0]["decision_id"] for p in paired]
+
+    ci = stats.clustered_bootstrap(clusters, lambda idx: stats.pabak([a[i] for i in idx], [b[i] for i in idx]))
+    naive = stats.naive_bootstrap(len(a), lambda idx: stats.pabak([a[i] for i in idx], [b[i] for i in idx]))
+    cm = stats.confusion(a, b)
+    probs = [p[0]["answers"][question]["probability"] for p in paired]
+
+    lines.append(f"    {question}  (n={len(a)}, sessions={ci.n_clusters})")
+    lines.append(f"      agreement with {reference}   {stats.raw_agreement(a, b):.3f}")
+    lines.append(f"      majority-class baseline   {stats.majority_baseline(b):.3f}"
+                 f"   (base rate of {reference}-positive: {stats.base_rate(b):.3f})")
+    lines.append(f"      Cohen's kappa             {stats.cohens_kappa(a, b):.3f}")
+    lines.append(f"      PABAK  [clustered 95%]    {ci}")
+    lines.append(f"      PABAK  [naive 95%]        {naive}   <- shown once to expose the clustering gap")
+    lines.append(f"      confusion (arm x {reference})  ++{cm['tt']} +-{cm['tf']} -+{cm['ft']} --{cm['ff']}")
+    lines.append(f"      sharpness (mean bits)     {stats.entropy_bits(probs):.3f}   (0 = decisive, 1 = hedging)")
+
+
+def _choice_section(rows, arm, reference, question, lines):
+    paired = _paired(rows, arm, reference, question)
+    if not paired:
+        lines.append(f"    {question}: no paired observations")
+        return
+    a = [p[0]["answers"][question]["choice"] for p in paired]
+    b = [p[1]["answers"][question]["choice"] for p in paired]
+    clusters = [p[0].get("session_id") or p[0]["decision_id"] for p in paired]
+    ci = stats.clustered_bootstrap(
+        clusters, lambda idx: stats.categorical_agreement([a[i] for i in idx], [b[i] for i in idx])
+    )
+    lines.append(f"    {question}  (n={len(a)}, sessions={ci.n_clusters})")
+    lines.append(f"      agreement with {reference} [clustered 95%]  {ci}")
+    lines.append(f"      unweighted kappa            {stats.categorical_kappa(a, b):.3f}")
+    counts = defaultdict(int)
+    for x, y in zip(a, b):
+        counts[(x, y)] += 1
+    for (x, y), n in sorted(counts.items(), key=lambda kv: -kv[1])[:8]:
+        mark = "  " if x == y else " *"
+        lines.append(f"      {mark} arm={x:<12} {reference}={y:<12} n={n}")
+
+
+def _score_section(rows, arm, reference, question, lines, k):
+    paired = _paired(rows, arm, reference, question)
+    if not paired:
+        lines.append(f"    {question}: no paired observations")
+        return
+    a = [p[0]["answers"][question]["score"] for p in paired]
+    b = [p[1]["answers"][question]["score"] for p in paired]
+    diffs = [x - y for x, y in zip(a, b)]
+    mean_diff = sum(diffs) / len(diffs)
+    lines.append(f"    {question}  (n={len(a)})")
+    lines.append(f"      Spearman rho              {stats.spearman_rho(a, b):.3f}")
+    lines.append(f"      quadratic-weighted kappa  {stats.quadratic_weighted_kappa(a, b, k):.3f}")
+    lines.append(f"      MAE                       {sum(abs(d) for d in diffs) / len(diffs):.3f}")
+    lines.append(f"      Bland-Altman mean bias    {mean_diff:+.3f}   (a uniform offset correlation would hide)")
+
+
+def _operational_table(rows, lines):
+    by_arm: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        by_arm[r["arm"]].append(r)
+    lines.append(f"    {'arm':<10} {'n':>5} {'ok':>5} {'p50ms':>8} {'p90ms':>8} {'p99ms':>8} "
+                 f"{'$/1k':>10} {'model':<28}")
+    for arm in sorted(by_arm):
+        rs = by_arm[arm]
+        ok = [r for r in rs if r.get("ok")]
+        lat = [r["timing_ms"]["total_ms"] for r in ok if r.get("timing_ms")]
+        q = stats.quantiles(lat, [0.5, 0.9, 0.99])
+        costs = [r["cost_usd"] for r in ok if r.get("cost_usd") is not None]
+        per_1k = (sum(costs) / len(costs) * 1000) if costs else float("nan")
+        model = next((r.get("response_model") or "" for r in ok), "")
+        lines.append(f"    {arm:<10} {len(rs):>5} {len(ok):>5} {q['p50']:>8.1f} {q['p90']:>8.1f} "
+                     f"{q['p99']:>8.1f} {per_1k:>10.4f} {model:<28}")
+        errors = defaultdict(int)
+        for r in rs:
+            if not r.get("ok"):
+                errors[r.get("error_kind") or "unknown"] += 1
+        if errors:
+            detail = ", ".join(f"{k}={v}" for k, v in sorted(errors.items()))
+            lines.append(f"      attrition: {detail}")
+
+
+def report(run_context: str | None = "live", reference: str = REFERENCE_ARM) -> str:
+    data = Joined(run_context=run_context)
+    lines: list[str] = []
+    lines.append("=" * 78)
+    lines.append("JEV SHADOW-MODE REPORT")
+    lines.append("=" * 78)
+    lines.append("")
+    lines.append("Phase 1 measures AGREEMENT BETWEEN ARMS. The reference arm is a pseudo-label,")
+    lines.append("not truth. No claim in this report is a claim about correctness; ground-truth")
+    lines.append("labels and calibration metrics arrive in Phase 2 from a human-labelled set.")
+    lines.append("")
+    lines.append(f"reference arm : {reference}")
+    lines.append(f"run context   : {run_context or 'all'}")
+    lines.append(f"pricing       : {cl.pricing()['version']}")
+    lines.append(f"decisions     : {len(data.captures)}   runs: {len(data.runs)}")
+
+    if data.sha_mismatches:
+        lines.append("")
+        lines.append(f"!! STATE IDENTITY VIOLATED for {len(data.sha_mismatches)} decision(s):")
+        lines.append("!! arms did not see byte-identical state; every comparison below is suspect.")
+        for d in data.sha_mismatches[:5]:
+            lines.append(f"!!   {d}")
+    else:
+        lines.append("state identity: OK (all arms saw byte-identical state)")
+
+    for surface in data.surfaces():
+        rows = data.by_surface(surface)
+        spec = cl.question_set(surface)
+        lines.append("")
+        lines.append("-" * 78)
+        lines.append(f"SURFACE: {surface}")
+        lines.append("-" * 78)
+        lines.append("  operational")
+        _operational_table(rows, lines)
+
+        arms = sorted({r["arm"] for r in rows if r["arm"] != reference})
+        for arm in arms:
+            lines.append(f"  {arm} vs {reference}")
+            for question, q in spec["questions"].items():
+                if q["type"] == "boolean":
+                    _boolean_section(rows, arm, reference, question, lines)
+                elif q["type"] == "choice":
+                    _choice_section(rows, arm, reference, question, lines)
+                elif q["type"] == "score":
+                    _score_section(rows, arm, reference, question, lines, len(q["anchors"]))
+        if not arms:
+            lines.append(f"  (only {reference} present; nothing to compare)")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Per-surface agreement report.")
+    parser.add_argument("--report", action="store_true")
+    parser.add_argument("--reference", default=REFERENCE_ARM)
+    parser.add_argument("--context", default="live", help="live|replay|synthetic|canary|all")
+    parser.add_argument("--out", help="also write to this file under reports/")
+    args = parser.parse_args()
+
+    context = None if args.context == "all" else args.context
+    text = report(run_context=context, reference=args.reference)
+
+    lowered = text.lower()
+    for word in BANNED:
+        assert word not in lowered, f"banned word in Phase 1 output: {word!r}"
+
+    print(text)
+    if args.out:
+        paths.REPORTS.mkdir(parents=True, exist_ok=True)
+        target = paths.REPORTS / args.out
+        target.write_text(text, encoding="utf-8")
+        print(f"written: {target}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

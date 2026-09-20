@@ -1,0 +1,35 @@
+{
+  "_comment": "Per-surface switches. `off` means the hook entry is absent from .claude/settings.local.json entirely. `capture_only` and `shadow` are worker-side: the hook ALWAYS captures when registered, because capture is cheap and a captured state is permanently replayable. `enforce` is NOT reachable from this file — it requires registering a different script, so a passive observer can never become a blocker by way of a typo.",
+  "version": "surfaces-v1",
+  "surfaces": {
+    "pre_bash": {
+      "mode": "shadow",
+      "hook_event": "PreToolUse",
+      "matcher": "Bash",
+      "question_set": "v1",
+      "state_source": "payload"
+    },
+    "stop": {
+      "mode": "off",
+      "hook_event": "Stop",
+      "matcher": null,
+      "question_set": "v1",
+      "state_source": "transcript@byte_offset"
+    },
+    "user_prompt": {
+      "mode": "off",
+      "hook_event": "UserPromptSubmit",
+      "matcher": null,
+      "question_set": "v1",
+      "state_source": "payload"
+    },
+    "post_edit": {
+      "mode": "off",
+      "hook_event": "PostToolUse",
+      "matcher": "Edit|Write|NotebookEdit",
+      "question_set": "v1",
+      "state_source": "payload"
+    }
+  },
+  "spool_backpressure_max_files": 500
+}

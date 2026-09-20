@@ -1,0 +1,57 @@
+{
+  "_comment": "Each arm implements evaluate(state, questions, config) -> Run. arm_config_id is recorded on every row; change the config, change the id, never reuse one.",
+  "version": "arms-v1",
+  "arms": {
+    "jev": {
+      "arm_config_id": "jev-gateway-v1",
+      "kind": "jev",
+      "endpoint": "https://ai-gateway.vercel.sh/v1/evaluate",
+      "model": "typesafe-ai/jev",
+      "timeout_s": 10.0,
+      "role": "treatment"
+    },
+    "opus5": {
+      "arm_config_id": "opus5-effort-low-v1",
+      "kind": "anthropic",
+      "model": "claude-opus-5",
+      "effort": "low",
+      "max_tokens": 256,
+      "timeout_s": 60.0,
+      "role": "headline_baseline",
+      "_comment": "Do NOT set thinking:{type:'disabled'} on Opus 5 \u2014 documented failure mode where tool calls leak into visible text. Low effort is the correct lever."
+    },
+    "haiku45": {
+      "arm_config_id": "haiku45-effort-low-v1",
+      "kind": "anthropic",
+      "model": "claude-haiku-4-5",
+      "effort": "low",
+      "max_tokens": 256,
+      "timeout_s": 60.0,
+      "role": "credibility_baseline",
+      "_comment": "The actual incumbent. Nobody deploys Opus as a hook gate, so an Opus-only comparison is a strawman informed readers will discount."
+    },
+    "fake": {
+      "arm_config_id": "fake-v1",
+      "kind": "fake",
+      "timeout_s": 0.0,
+      "role": "test_double"
+    },
+    "fake_b": {
+      "arm_config_id": "fake-b-v1",
+      "kind": "fake",
+      "timeout_s": 0.0,
+      "role": "test_double"
+    },
+    "fake_c": {
+      "arm_config_id": "fake-c-v1",
+      "kind": "fake",
+      "timeout_s": 0.0,
+      "role": "test_double"
+    }
+  },
+  "enabled": [
+    "jev",
+    "opus5",
+    "haiku45"
+  ]
+}

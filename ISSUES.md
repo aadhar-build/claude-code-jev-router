@@ -52,25 +52,25 @@ automated test suite.
 
 ## JEV-03: Offline tracer bullet
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** core, test
 **Blocked by:** JEV-01
 
 **What to build:** The entire pipeline working end to end with no network at all,
 so the shape is proven before any money or any live session is involved.
 
-- [ ] `capture.sh` accepts a recorded hook payload on stdin, spools it atomically, and exits 0 in under 10ms
-- [ ] Kill switch, cwd guard, backpressure and fail-open all behave correctly at the process boundary
-- [ ] `worker.py --once` drains the spool, builds state, evaluates through `FakeArm`, and writes a `runs` row
-- [ ] `analyze.py --report` reads the resulting jsonl and prints a per-surface table
-- [ ] Seam 1 (hook process boundary) and seam 2 (`evaluate` with a fake arm) both have tests
-- [ ] The whole path runs from a single command with zero API spend
+- [x] `capture.sh` accepts a recorded hook payload on stdin, spools it atomically, and exits 0 in under 10ms
+- [x] Kill switch, cwd guard, backpressure and fail-open all behave correctly at the process boundary
+- [x] `worker.py --once` drains the spool, builds state, evaluates through `FakeArm`, and writes a `runs` row
+- [x] `analyze.py --report` reads the resulting jsonl and prints a per-surface table
+- [x] Seam 1 (hook process boundary) and seam 2 (`evaluate` with a fake arm) both have tests
+- [x] The whole path runs from a single command with zero API spend
 
 ---
 
 ## JEV-04: Three real arms, interleaved
 
-**Status:** blocked
+**Status:** ready-for-agent
 **Labels:** core
 **Blocked by:** JEV-02, JEV-03
 
@@ -89,20 +89,20 @@ comparison between them fair by construction.
 
 ## JEV-05: Statistics and report v1
 
-**Status:** blocked
+**Status:** done
 **Labels:** analysis, test
 **Blocked by:** JEV-03
 
 **What to build:** The analysis that turns rows into defensible numbers, verified
 against known answers before any real data exists.
 
-- [ ] Every metric reported per surface; nothing pooled across surfaces
-- [ ] Boolean agreement at tau=0.5 with Cohen's kappa and PABAK reported together
-- [ ] The majority-class baseline and the base rate printed beside every agreement number
-- [ ] Confidence intervals bootstrapped clustered on `session_id`, with the naive interval shown once for comparison
-- [ ] Hard assertion that all arms for a decision share a `state_sha256`
-- [ ] The word "accuracy" appears nowhere in generated output
-- [ ] Known-answer tests over hand-built fixtures for kappa, PABAK and the clustered bootstrap
+- [x] Every metric reported per surface; nothing pooled across surfaces
+- [x] Boolean agreement at tau=0.5 with Cohen's kappa and PABAK reported together
+- [x] The majority-class baseline and the base rate printed beside every agreement number
+- [x] Confidence intervals bootstrapped clustered on `session_id`, with the naive interval shown once for comparison
+- [x] Hard assertion that all arms for a decision share a `state_sha256`
+- [x] The word "accuracy" appears nowhere in generated output
+- [x] Known-answer tests over hand-built fixtures for kappa, PABAK and the clustered bootstrap
 
 ---
 

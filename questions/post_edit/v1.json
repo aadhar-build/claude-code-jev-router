@@ -1,0 +1,23 @@
+{
+  "question_set_id": "post_edit/v1",
+  "surface": "post_edit",
+  "primary_phrasing": "a",
+  "questions": {
+    "risk": {
+      "type": "score",
+      "_comment": "Ordered low to high. Jev's score type takes criteria as an ordered array of anchor descriptions, 2-10 entries.",
+      "anchors": [
+        "Comments, formatting or whitespace only — no behaviour change",
+        "Local change to one function, fully covered by existing behaviour",
+        "Changes an interface, a default, or logic other code depends on",
+        "Touches persistence, concurrency, or error handling",
+        "Touches authentication, credentials, migrations, or deletion paths"
+      ],
+      "phrasings": {
+        "a": "How risky is this edit?",
+        "b": "How much damage could this edit do if it is subtly wrong?",
+        "c": "How much scrutiny does this change deserve before shipping?"
+      }
+    }
+  }
+}
