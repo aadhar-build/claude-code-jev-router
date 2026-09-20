@@ -67,13 +67,22 @@ find live.
 | wave | tickets | why these together |
 |---|---|---|
 | **A1** | **51**, **30 + 31** (one agent), **31b**, **44** | The shutdown/config-staleness cluster. 51 first because until it lands "stopped" is four manual steps and a belief. 30+31 share an agent (same drain loop); 31b is the same class of defect in five more fields. 44 pins the interpreter |
-| **A2** | **49**, **16**, **32**, **43** | The measurement instruments, before anything depends on their numbers. 49 corrects the cost pipeline **before** JEV-27 sizes a study on its output. 16 is the wave's data writer (`run_context: replay`, exempt but declared). 43 resolves the contaminated wall-clock that 33 and 41 already quote |
-| **A3** | **27**, **46**, **47**, **48** | The science design, all downstream of a corrected cost distribution (49) and a known flip rate (16). 46 replaces the rejected static-heuristic arm; 27 must now size a **three**-arm study, which is why it moved after 46 rather than before |
-| **A4** | **34**, **29**, **17**, **28** | 34 builds the `agent_route` surface **in shadow, deciding nothing** — buildable offline against replayed states. 29 builds and freezes the blinded grader. 17 replaces fitted thresholds with a rule. 28 reconciles Fable pricing, now inside a primary outcome |
-| **A5** | **35**, **36**, **25**, **50** | 35 writes the actuator **and its two gates** but does not arm it. 36 writes outcome measurement against fixtures. 50 is the writeup correction and touches no code, so it is free to share any wave |
+| **A2** | **49**, **16**, **32**, **43** | The measurement instruments, before anything depends on their numbers. 49 corrects the cost pipeline **before** JEV-27 sizes a study on its output. 16 is a replay writer (`run_context: replay`). 43 resolves the contaminated wall-clock that 33 and 41 already quote |
+| **A3** | **27**, **46**, **47**, **48** | The science design, downstream of a corrected cost distribution (49) and a known flip rate (16). 46 replaces the rejected static-heuristic arm; 27 sizes a **three**-arm study, which is why it follows 46 |
+| **A4** | **34**, **29**, **17**, **28** | 34 builds `agent_route` **in shadow, deciding nothing** — buildable offline against replayed states. 29 builds and freezes the blinded grader. 17 replaces fitted thresholds with a rule. 28 reconciles Fable pricing, now inside a primary outcome |
+| **A5** | **35**, **36**, **25**, **50** | 35 writes the actuator **and its two gates** but does not arm it. 36 writes outcome measurement against fixtures. 50 is the writeup correction and touches no code |
+| **A6** | **22**, **10**, **39**, **12** | **Reclassified from Phase B on review**: all four are offline. 22 and 10 replay the *existing* 60 synthetic items against the arms; 39 and 12 read rows already on disk. None needs a hook, a surface or a running worker |
+| **A7** | **37**, **45** | The gate's own prerequisites. 37 builds the canary scheduler and wrapper so JEV-52 step 5 has something to run; 45 records the endpoint limitation and checks whether Cloudflare access is open |
 
-Phase A ends with: every surface built, every arm implemented, every analysis
-path exercised against fixtures and replayed rows, and **nothing running.**
+**⚠️ Waves A2 and A6 spend money without being "live".** JEV-16, 22 and 10 are
+offline *replay* sweeps — no hook fires, no session is affected, the worker
+stays stopped — but they do make API calls against the arms (JEV-16 alone is
+~1,390 calls, ~31 min, ~$0.018 plus ~190 subscription calls). This is a
+different thing from live collection and the plan treats it as permitted, but
+it is called out here rather than buried because "the experiment is stopped"
+and "nothing is calling the API" are not the same claim. **If the operator wants
+zero spend during Phase A, A2 and A6 move to after the gate and the plan loses
+its offline validation of the analysis path — say so and it will be changed.**
 
 ### The gate — JEV-52 (to be written)
 
@@ -93,9 +102,10 @@ A single ticket, done by one agent, no parallelism:
 
 | wave | tickets | why |
 |---|---|---|
-| **B1** | **22**, **10**, **24b**, **09** | The offline-heavy collection: the five-arm matrix, the synthetic stress set, the working rule, and the inline shadow — which is the window's first live registration and must be alone in that role |
-| **B2** | **23**, **18**, **12** | The routing A/B itself. 18 is the next surface in the one-at-a-time queue. 12 produces the publishable export from whatever exists |
-| **B3** | **19**, **20**, **39** | The last two surfaces, and the persisted stats layer |
+| **B1** | **09** | Alone. The inline shadow hook is the window's first live registration, and the one-registration-per-window rule makes it a wave by itself |
+| **B2** | **23**, **18**, **24b** | The routing A/B itself. 18 is the next surface in the queue. 24b adopts the working rule whose baseline 24a already froze |
+| **B3** | **19**, **20** | The last two surfaces |
+| **B4** | **53** | The writeup. Alone, because it depends on everything and owns no code |
 
 ### What moved, and why
 
@@ -301,9 +311,9 @@ three verification tests that must all pass before the hook is enabled.
 
 ## JEV-09: True inline shadow
 
-**Status:** in-progress
+**Status:** blocked
 **Labels:** hooks, hot-path
-**Blocked by:** None. **Not blocked — stalled on two decisions**, which is different and should not read as blocked: whether to register the inline hook live alongside `capture.sh`, and what `--max-time` should be given the 2.0s default sits BELOW Jev's 2,681ms p99.
+**Blocked by:** **JEV-52** (the activation gate — this registers a hook, so it cannot happen in Phase A). **Two decisions are also still open** and must be settled during Phase A rather than at the gate: whether to register the inline hook live alongside `capture.sh`, and what `--max-time` should be given the 2.0s default sits BELOW Jev's 2,681ms p99
 
 **What to build:** The script you would actually deploy, running live but never
 blocking -- because a capture-and-replay harness never exercises it.
@@ -321,9 +331,9 @@ blocking -- because a capture-and-replay harness never exercises it.
 
 ## JEV-10: Synthetic stress set and robustness
 
-**Status:** in-progress
+**Status:** ready-for-agent
 **Labels:** science
-**Blocked by:** None. The sweeps needed credentials and now have them. **JEV-16 is the determinism sweep split out** because it gates enforcement; the other three sweeps (phrasing, option-order, truncation) stay here.
+**Blocked by:** None. The sweeps needed credentials and now have them. **JEV-16 is the determinism sweep split out** because it gates enforcement; the other three sweeps (phrasing, option-order, truncation) stay here
 
 **What to build:** The discrimination story, which the live base rate is too
 degenerate to provide on its own.
@@ -364,7 +374,7 @@ retrain. The probability deltas are the only signal for the latter.
 
 **Status:** blocked
 **Labels:** analysis, security
-**Blocked by:** JEV-10 (the sweeps it draws figures from). JEV-05 is done.
+**Blocked by:** JEV-10 (the sweeps it draws figures from). JEV-05 is done
 
 **Prior-art amendment (2026-09-20).** Add **decision-curve / net-benefit
 analysis**. The sweep found **nothing** applying it to LLM routing, gating,
@@ -550,7 +560,7 @@ as data accumulates.
 
 **Status:** blocked
 **Labels:** hooks, science
-**Blocked by:** JEV-15
+**Blocked by:** **JEV-52** (the activation gate), JEV-15
 
 *(The old second blocker — "the mechanism work in `SPEC.md` *Surface plans* §0" —
 is removed. That mechanism question was answered by JEV-26: per-turn routing is
@@ -584,7 +594,7 @@ Strongest economics, thinnest evidence.
 
 **Status:** blocked
 **Labels:** hooks, science
-**Blocked by:** JEV-18
+**Blocked by:** **JEV-52** (the activation gate), JEV-18
 
 *The gate is operational, not technical: **register one new surface at a time.** Two new capture hooks landing in the same window makes the capture stream uninterpretable, because you cannot attribute a change in volume or base rate to either. Step 0's payload inspection does not depend on JEV-18 and can be done any time.*
 
@@ -608,7 +618,7 @@ transcript before the hook fires?
 
 **Status:** blocked
 **Labels:** hooks
-**Blocked by:** JEV-19
+**Blocked by:** **JEV-52** (the activation gate), JEV-19
 
 *Same one-surface-at-a-time rule as JEV-19.*
 
@@ -644,7 +654,7 @@ live analysis ran.
 
 **Status:** ready-for-agent
 **Labels:** science
-**Blocked by:** None. **It incidentally produces the real Fable session JEV-28 needs** — if this runs first, JEV-28 should use its transcript rather than generating another.
+**Blocked by:** None. **It incidentally produces the real Fable session JEV-28 needs** — if this runs first, JEV-28 should use its transcript rather than generating another
 
 **SCOPE CUT 2026-09-20, by the owner: 60 items, not 360.** Grilling Q15 chose
 the full 360-item run. That decision was taken when there were four arms; Q8
@@ -685,11 +695,11 @@ same cost; nothing is discarded, only deferred.
 
 **Status:** blocked
 **Labels:** science, hooks
-**Blocked by:** JEV-34 (the surface), JEV-35 (the actuator and its gates),
+**Blocked by:** **JEV-52** (the activation gate), JEV-34 (the surface), JEV-35 (the actuator and its gates),
 JEV-36 (outcome measurement), JEV-24a (the pre-rule baseline this destroys),
 JEV-27 (the stopping rule), JEV-28 (Fable pricing, now inside a primary
 outcome), JEV-29 (the grader), **JEV-46** (the third routing arm), **JEV-47**
-(delegation-shape equality).
+(delegation-shape equality), **JEV-52** (the activation gate — this ticket needs live collection, which does not exist until the gate opens).
 
 **Prior-art amendment (2026-09-20).** Three changes from `.scratch/prior-art.md`:
 1. **A third routing arm, `random_matched` (JEV-46), is now required.** Two arms
@@ -745,7 +755,7 @@ after the data.
 
 ## JEV-24a: Pre-rule delegation baseline — **measure this first or lose it**
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** science, blocking
 **Blocked by:** None (can start immediately — and must, before JEV-23 or JEV-24b). **Do it in the same pass as JEV-38**: both read the same transcript corpus, both are destroyed by the same retention risk, and reading it twice is wasted work on data that may not survive.
 
@@ -770,7 +780,7 @@ cannot be scheduled after the thing that erases it.
 
 **Status:** blocked
 **Labels:** science
-**Blocked by:** JEV-24a
+**Blocked by:** **JEV-52** (the activation gate), JEV-24a
 
 **What to build:** A standing rule that work is delegated to subagents where
 practical, raising the share of spend that is routable at all.
@@ -835,7 +845,7 @@ the wrong conclusion from it.
 
 ## JEV-27: Power analysis for the routing A/B stopping rule
 
-**Status:** ready-for-agent
+**Status:** blocked
 **Labels:** science, blocking
 **Blocked by:** JEV-38, **JEV-49** (the cost pipeline it sizes against has three
 known defects), **JEV-46** (a three-arm study needs a different N)
@@ -917,7 +927,7 @@ chosen after results are visible are not evidence.
 
 ## JEV-30: The worker reads config once, and nothing says so
 
-**Status:** ready-for-agent
+**Status:** blocked
 **Labels:** defect, science, blocking
 **Blocked by:** JEV-33
 
@@ -949,7 +959,7 @@ report it.
 
 ## JEV-31: Claimed spool files are never reaped — silent, unmeasured data loss
 
-**Status:** ready-for-agent
+**Status:** blocked
 **Labels:** defect, blocking, science
 
 **Blocked by:** JEV-33
@@ -1036,7 +1046,7 @@ post-fix numbers.
 
 ## JEV-33: The worker drains slower than the hook captures
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** defect, science, blocking
 
 **Blocked by:** None
@@ -1316,7 +1326,7 @@ wrapper, no instruction and no record of whether it ran exists.
 
 ## JEV-38: Persist the "before" baseline — the source is outside the folder and not ours
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** metrics, blocking, science
 **Blocked by:** None — and it is the most time-sensitive ticket on the board. **Do it in the same pass as JEV-24a.**
 
@@ -1352,7 +1362,7 @@ dependency and the same exposure.
 **Status:** ready-for-agent
 **Labels:** analysis, ops
 
-**Blocked by:** None. Overlaps JEV-32 in `analyze.py`; if both are agent-run, serialise them.
+**Blocked by:** None. Overlaps JEV-32 in `analyze.py`; if both are agent-run, serialise them
 
 **What to build:** A dated, committed snapshot of the collection's statistics,
 produced on a schedule rather than when someone happens to run `analyze.py`.
@@ -1971,9 +1981,15 @@ unredacted command text changes too.
 
 ## JEV-46: `random_matched` — the third routing arm, and why it is NOT a static heuristic
 
-Status: ready-for-agent
+Status: blocked
 Labels: science, arms, prior-art
-Blocked by: JEV-34 (the surface), JEV-27 (the stopping rule must cover three arms)
+Blocked by: JEV-34 (the surface)
+
+*Not blocked by JEV-27, though JEV-27 is blocked by this. Building the arm is
+independent of sizing the study: the mix is derived post hoc from `jev_routed`'s
+realised behaviour, so no N is needed to implement it. The reverse direction is
+real — you cannot size a three-arm study without knowing the third arm exists.
+An earlier draft had both directions and was a cycle.*
 
 **The problem this fixes.** With two routing arms — `default` (everything at
 session tier) and `jev_routed` — a win confounds two effects: **(a)** the value
@@ -2039,7 +2055,7 @@ before the first `random_matched` run.
 
 ## JEV-47: both routing arms must delegate identically, or we measure the delegation penalty
 
-Status: ready-for-agent
+Status: blocked
 Labels: science, threat-to-validity, prior-art
 Blocked by: JEV-34
 
@@ -2081,7 +2097,7 @@ delegation penalty with a routing label on it. Our design randomises assignment
 
 ## JEV-48: are we measuring tier fit, or just task difficulty?
 
-Status: ready-for-agent
+Status: blocked
 Labels: science, analysis, prior-art
 Blocked by: JEV-36 (outcome measurement)
 
@@ -2261,3 +2277,132 @@ manual steps instead of one.
 - [ ] A test that SIGTERMs a worker mid-dispatch and asserts no stranded claim
 - [ ] `status` reports capture state and worker state as two separate facts
 - [ ] `docs/REVERSIBILITY.md` updated: the one-command path to fully quiescent
+
+## JEV-52: the activation gate — the single deliberate act that turns the experiment on
+
+Status: blocked
+Labels: gate, safety, science
+Blocked by: every ticket in Phase A — JEV-16, JEV-17, JEV-25, JEV-27, JEV-28,
+JEV-29, JEV-30, JEV-31, JEV-31b, JEV-32, JEV-34, JEV-35, JEV-36, JEV-43,
+JEV-44, JEV-45, JEV-46, JEV-47, JEV-48, JEV-49, JEV-50, JEV-51
+
+**Why this ticket exists.** The operator's constraint is that the system is
+dev-complete before any part of it goes live. A rule in prose is not a gate — an
+agent reads `Status: ready-for-agent` and starts, and the rule was in a section
+it never opened. So the gate is a **ticket**, every Phase B ticket lists it as a
+blocker, and turning anything on without it closing is a board violation
+visible in `git diff`.
+
+The failure mode this prevents is *partial* live state, and we have hit it four
+times already: a test suite that destroyed live captures (JEV-42), five config
+fields that looked live and were inert (JEV-31b), a kill switch that stopped one
+writer and not the other (JEV-51), and an arm misconfigured for six hours before
+anyone looked at its numbers (JEV-41). Every one was cheap offline and expensive
+live.
+
+**Current state, frozen 2026-09-20T21:42Z.** `.jev-disabled` engaged; worker
+terminated; `spool/{ready,claimed,tmp,dead}` all empty; hook verified to exit 0
+without capturing. **571 captures, 2,005 run rows** already collected under the
+pre-gate configuration — these are NOT discarded, but they carry pre-gate
+`arm_config_id`s and the era rules in `PREREGISTRATION.md` A7 govern whether
+they pool with anything collected after.
+
+**This ticket is done by ONE agent with no parallelism.** It is a sequence, and
+a step that fails stops the sequence rather than being worked around.
+
+**The sequence**
+
+1. **Full suite green**, run through `tests/run_all.sh` so `audit_live_writes.sh`
+   runs first. Green from a clean checkout, not from a working tree with
+   uncommitted fixes.
+2. **`tests/reversibility.sh` green** — OFF provably means vanilla (JEV-40).
+3. **JEV-51's proof executed, not assumed**: kill switch engaged plus a
+   non-empty spool ⇒ **zero arm invocations**, counted by a test rather than
+   observed by eye. This is the step that was missing when collection was
+   stopped by hand.
+4. **`run-collection.sh status` reports capture state and worker state
+   separately** and both read OFF.
+5. **A canary baseline sweep recorded while still disabled**, so drift has a
+   reference from the first live hour rather than from whenever someone
+   remembers (JEV-37). Its `arm_config_id` and `canary_set_id` are recorded.
+6. **`PREREGISTRATION.md` amended and committed, with its git hash quoted**,
+   covering everything settled during Phase A: three routing arms and the
+   `random_matched` procedure (JEV-46); the declared auth path and cache-write
+   multiplier (JEV-49); the Jev endpoint limitation and the waitlist (JEV-45);
+   the corrected Amendment 6 loss bound; fail-open and escalation semantics
+   (JEV-35); the era rules for the 2,005 pre-gate rows.
+7. **A dated inventory of what is about to become live**: which hooks are
+   registered, which surfaces are in which mode, which arms are enabled, and
+   the `arm_config_id` of each. Committed. This is the document that makes
+   "what was running on day N" answerable later.
+8. **Only then**: remove `.jev-disabled`, start the worker, register the first
+   surface. In that order, one at a time, with `status` checked between each.
+
+**What this ticket must NOT do.** It does not fix anything it finds. A failure
+at any step reopens the relevant Phase A ticket and the gate stops. The
+temptation to patch a small thing in order to finish the sequence is exactly how
+partial live state gets created, and it would be the fifth instance.
+
+**Acceptance criteria**
+
+- [ ] Steps 1-5 executed and their output pasted into the ticket, not summarised
+- [ ] Pre-registration amended, committed, hash recorded here
+- [ ] Live inventory committed
+- [ ] Kill switch removed, worker started, first surface registered — in that
+      order, with `status` output recorded between each
+- [ ] A named rollback: the exact command sequence that returns to this frozen
+      state, tested once before the switch comes off
+
+## JEV-53: the writeup — and the seven criteria across the board that have nowhere to land
+
+Status: blocked
+Labels: writeup, science
+Blocked by: JEV-12 (figures and export), JEV-23 (the experiment), JEV-50
+(related work and the retracted claim), JEV-48 (headroom), JEV-52
+
+**The gap this closes.** Seven unchecked acceptance criteria on other tickets
+say some version of "report it in the writeup" — JEV-24a's external-validity
+anchor, JEV-45's endpoint limitation, JEV-46's rejected-arm rationale, JEV-47's
+delegation check, JEV-48's headroom bound, JEV-50's related work, JEV-12's
+figures. **There was no writeup ticket.** Those criteria could never be ticked,
+which means seven tickets could never reach `done`, which means the board's
+completion state was unreachable by construction. `docs/PLAN.md` deferred the
+writeup to "Phase 2, on your go" and nothing carried it.
+
+**What to build.** The paper, assembled from artifacts that already exist rather
+than written fresh — if a number is not already in `reports/` or a committed
+fixture, it is not in the paper.
+
+**The non-negotiables, all already pre-registered and listed here so one
+document owns them:**
+
+- **The scope stated in the abstract**: n=1 operator, one machine, one repo. An
+  honest n=1 study is publishable; one dressed as a benchmark is not.
+- **"Accuracy" does not appear** in any Phase 1 claim. Every agreement axis
+  reads "agreement with <arm>", and the disclaimer is in the abstract, not a
+  footnote.
+- **Base rate and majority-class baseline printed beside every agreement
+  statistic.**
+- **Synthetic and live never pooled**, and every synthetic result labelled.
+- **The data path disclosed**: unredacted command text and prompts transit the
+  Vercel AI Gateway and the Anthropic API.
+- **The pre-registration's git hash quoted**, and every amendment listed with
+  the date it was made and whether it preceded the data it governs.
+- **Attrition reported**, including the losses that structurally cannot enter
+  the attrition count — JEV-31, JEV-32, JEV-33, JEV-42 — and the corrected
+  Amendment 6 bound with its unsampled first fourteen minutes.
+- **The off-frontier control acknowledged**: HAL found the most expensive model
+  on the Pareto frontier in only 1 of 9 benchmarks, so all-Opus is a flattering
+  comparator and we say so first.
+- **The price table pinned with a date** (HAL's rule), and raw token counts
+  published so a reader can recompute at their own prices.
+
+**Acceptance criteria**
+
+- [ ] Every "report in the writeup" criterion elsewhere on the board is
+      satisfied and its box ticked, with this ticket naming which section
+      satisfies it
+- [ ] Every non-negotiable above present and checkable by a reader
+- [ ] No number in the paper that is not traceable to a committed artifact
+- [ ] A reproduction section: what a reader would have to run, and what they
+      cannot reproduce because it needs our transcripts or a waitlisted endpoint
