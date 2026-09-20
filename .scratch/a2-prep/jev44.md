@@ -18,7 +18,7 @@ a CI step or another script can invoke, write:
 
 ```sh
 PY="${JEV_PYTHON:-/opt/homebrew/bin/python3}"
-"$PY" "$ROOT/src/pyversion.py" || exit 1     # refuses <3.12, exits 78, says why
+"$PY" "$ROOT/src/pyversion.py" || exit $?    # refuses <3.12, exits 78, says why
 "$PY" "$ROOT/src/canary.py" ...              # only now do the work
 ```
 
@@ -32,13 +32,28 @@ library, use that instead — it does the same thing and also fixes PATH for
 everything you then invoke:
 
 ```sh
-. "$ROOT/tests/lib/require_python.sh" || exit 1
+. "$ROOT/tests/lib/require_python.sh" || exit $?
 "$JEV_PY" ...
 ```
 
 `$JEV_PYTHON` is the override. It is honoured **strictly**: if you name an
 interpreter below 3.12 you get a refusal, not a silent substitution
-(`tests/lib/require_python.sh:41-84`).
+(`tests/lib/require_python.sh:40-88`).
+
+**Two things that will bite you if you skim this.**
+
+1. **`|| exit $?`, never `|| exit 1`.** The guard exits **78** precisely so it
+   cannot be mistaken for a canary verdict (§3). `|| exit 1` throws that away
+   and hands your wrapper a `1`, which `src/canary.py` semantics read as
+   **drift** — you would have rebuilt the false alarm this ticket exists to
+   prevent, one layer up.
+2. **`require_python.sh` is bash-only.** It uses `${BASH_SOURCE[0]}`. Cron runs
+   `SHELL=/bin/sh`, where `BASH_SOURCE` is empty and the repo root would
+   resolve to `/..` — the preflight would then fail for entirely the wrong
+   reason and tell you nothing useful. **A `/bin/sh` cron wrapper must use the
+   two-liner against `src/pyversion.py`, not source the library.** Use the
+   library only from bash scripts under `tests/`, or put `#!/bin/bash` on your
+   wrapper and set `SHELL=/bin/bash` in the crontab.
 
 ---
 
@@ -102,7 +117,7 @@ ways. Pick by what your entry point is.
 ### (a) Shell preflight — for a cron wrapper
 
 ```sh
-"$PY" "$ROOT/src/pyversion.py" || exit 1
+"$PY" "$ROOT/src/pyversion.py" || exit $?
 ```
 
 `src/pyversion.py` costs one process spawn, touches no network, writes nothing,
@@ -229,7 +244,7 @@ running under an unintended runtime, or an immediate `SyntaxError` into
 change I would want**, at the top of `run-collection.sh` after `ROOT` is set:
 
 ```sh
-. "$ROOT/tests/lib/require_python.sh" || exit 1
+. "$ROOT/tests/lib/require_python.sh" || exit $?
 ```
 
 then `python3 -u` → `"$JEV_PY" -u` on line 29 and `python3` → `"$JEV_PY"` on

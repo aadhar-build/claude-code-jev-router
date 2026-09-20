@@ -28,14 +28,14 @@
 #
 # Usage, from any script in this repo:
 #
-#     . "$ROOT/tests/lib/require_python.sh" || exit 1
+#     . "$ROOT/tests/lib/require_python.sh" || exit $?
 #     "$JEV_PY" some_script.py
 #
 # For a CRON or wrapper entry point that must not depend on this repo's shell
 # library, the equivalent two lines are:
 #
 #     PY="${JEV_PYTHON:-/opt/homebrew/bin/python3}"
-#     "$PY" "$ROOT/src/pyversion.py" || exit 1
+#     "$PY" "$ROOT/src/pyversion.py" || exit $?
 
 jev_require_python() {
   local root py dir
@@ -88,5 +88,15 @@ jev_require_python() {
 }
 
 # Sourcing this file performs the check. `.` returns the status of the last
-# command it ran, so `. require_python.sh || exit 1` does the right thing.
+# command it ran, so `. require_python.sh || exit $?` does the right thing.
+#
+# `|| exit $?`, NOT `|| exit 1`. The whole point of exit 78 is that it cannot
+# be confused with src/canary.py's 0-4 verdicts; `|| exit 1` throws 78 away
+# and hands JEV-37's cron wrapper a 1, which it reports to the operator as
+# DRIFT. Propagate the code.
+#
+# BASH ONLY. This file uses ${BASH_SOURCE[0]} and must be sourced by bash.
+# Cron runs SHELL=/bin/sh, where BASH_SOURCE is empty and `root` would resolve
+# to "/.." -- so a /bin/sh wrapper must use the two-line form above against
+# src/pyversion.py directly, not source this file.
 jev_require_python

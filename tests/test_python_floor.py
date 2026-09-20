@@ -227,6 +227,15 @@ class TestTheSuiteRefusesTheWrongInterpreter(unittest.TestCase):
         )
         out = r.stdout + r.stderr
         self.assertNotEqual(r.returncode, 0, "the suite ran on 3.9.6")
+        # Not merely nonzero: the guard's 78 must SURVIVE the shell. The
+        # natural thing to write is `. require_python.sh || exit 1`, and that
+        # collapses 78 into 1 -- which is the very confusion with
+        # src/canary.py's DRIFT verdict that 78 was chosen to avoid. A caller
+        # copying this line into a cron wrapper would rebuild the false alarm.
+        self.assertEqual(
+            r.returncode, pyversion.EXIT_WRONG_PYTHON,
+            "run_all.sh swallowed the guard's exit code; use `|| exit $?`",
+        )
         self.assertIn("3.12", out)
         self.assertIn("3.9.", out)
         # The resolver must echo the path the caller actually named, because

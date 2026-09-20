@@ -51,7 +51,12 @@ set -o pipefail
 #
 # This resolves $JEV_PY to an absolute interpreter, proves it is >= 3.12, and
 # prepends its directory to PATH so the shell tests underneath inherit it too.
-. "$ROOT/tests/lib/require_python.sh" || exit 1
+#
+# `exit $?`, not `exit 1`: the guard's 78 (EX_CONFIG) is chosen to be
+# distinguishable from a test failure and from src/canary.py's 0-4 verdicts,
+# and collapsing it to 1 here would teach the wrong pattern to everything that
+# copies this line.
+. "$ROOT/tests/lib/require_python.sh" || exit $?
 
 GUARD="$ROOT/tests/lib/live_guard.sh"
 SNAP="$(mktemp "${TMPDIR:-/tmp}/jev-live-snapshot.XXXXXX")"
