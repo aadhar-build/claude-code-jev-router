@@ -155,3 +155,57 @@ Repeated here so prompts can be shorter and no agent can miss them:
 - Do not restart the worker without reaping `spool/claimed/` first, or the restart loses whatever was mid-flight.
 - `uv run src/doctor.py` must pass; the full suite must pass before and after.
 - Nothing is ever written outside this folder.
+
+---
+
+## JEV-42 (new, URGENT) — the test suite destroys live collection data
+
+Found by the JEV-15 agent on 2026-09-20 while it was working around the problem.
+
+**`tests/test_hook.sh` is destructive against a live collection window.**
+
+- line 18: `reset(){ rm -f "$ROOT"/spool/ready/*.json ... }` — run **between assertions**
+- line 58: `chmod 500 "$ROOT/spool/tmp"`
+
+`$ROOT` is the real project root. A live worker drains real captures out of that
+exact directory. **62 live captures were pending when the JEV-15 agent started
+work.** `tests/run_all.sh` invokes it, so "run the test suite" is the dangerous
+command — which is exactly what every agent brief tells an agent to do.
+
+**Why it is worse than ordinary data loss, and why it belongs with JEV-31/32/33
+rather than in a tidy-up pile:** a capture deleted from `spool/ready/` produces
+no run row and no capture row. It never existed as far as the analysis is
+concerned, so it **cannot appear in the attrition count the pre-registration
+commits to reporting**. It is the fourth instance of the same shape — loss
+invisible to the measurement built to catch it.
+
+The pre-change `gates.sh` had the same defect plus worse: it moved `spool/ready`
+and `logs/` aside and wrote 501 filler files into the directory a running worker
+was draining. **That half is fixed** — `gates.sh` now points
+`CLAUDE_PROJECT_DIR` at a throwaway root under `logs/`, and because the hook's
+guards are `CLAUDE_PROJECT_DIR`-anchored the behaviour under test is unchanged.
+`test_hook.sh` was left alone because another agent was active in the tree.
+
+- [ ] Give `test_hook.sh` the same sandbox treatment `gates.sh` now has
+- [ ] Audit **every** test file for writes to the real `spool/`, `data/` or `logs/` — `test_inline_shadow.sh` touches the kill switch and should be checked
+- [ ] Add a guard that makes this class of mistake loud: a test that writes to the real spool while a worker pid is live should **fail**, not silently succeed
+- [ ] Decide whether `run_all.sh` should refuse to run at all while a collection window is open, or always sandbox
+
+**Until it is fixed, the standing rule for every agent is: run `test_hook.sh` and
+`run_all.sh` only from a throwaway copy of the tree.** All three wave-1 agents
+still running were warned directly and asked to disclose if they had already run
+it.
+
+### Related, from the same report — a spec claim with no implementation
+
+`docs/PLAN.md` decision #7 states the spooler records
+`stat -f %z "$transcript_path"` as `transcript_bytes_at_capture`. **Nothing
+produces that field.** `capture.sh` parses no JSON and cannot `stat` a path it
+never reads, so GATE 4 had to *inject* the offset the hook cannot emit.
+
+The consequence, stated plainly: the `stop` leakage path is now **verified but
+not reachable in production.** The guard holds — an offsetless `stop` capture is
+quarantined, which is the safe outcome — but no real `stop` capture could ever
+carry the offset as the pipeline stands. This is JEV-19's known blocker seen
+from the gate's side, and it should be recorded in JEV-19 as independent
+confirmation rather than rediscovered a third time.
