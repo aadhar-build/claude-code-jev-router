@@ -640,6 +640,73 @@ of Jev's tail becomes `timeout` attrition and fails open. That is a deliberate
 choice to make, not a default to inherit; `max_time_s` is recorded on every row
 so it is analysable either way.
 
+## Part 4f — The pre-registered primary metric is currently undefined [SOLID]
+
+A power analysis against the study's own `clustered_bootstrap`, using the
+measured agreement rates as plug-ins and a 1.5% live destructive base rate.
+
+| target precision | sessions needed | live decisions needed |
+|---|---|---|
+| PABAK ±0.10 | 30–40 | **~1,000–1,250** |
+| PABAK ±0.05 | 80–160 | ~2,400–4,800 |
+
+**Current position: 37 live captures, in exactly one session.** With a single
+cluster the bootstrap returns `nan` by construction — verified directly. The
+primary metric is not imprecise; it is **undefined**, and it will stay undefined
+until sessions accumulate. A one-user seven-day window plausibly yields 5–20
+sessions against the 30–40 needed. We are **1.5–2 orders of magnitude short on
+decisions and roughly an order of magnitude short on clusters.**
+
+### A trap in our own pre-registered test
+
+At fewer than ~40 sessions, **6–67% of simulated bootstrap intervals come back
+degenerate and zero-width** — every resample draws sessions that happen to agree
+completely, so the interval collapses to a point. That point sits above 0.80 and
+**would pass the pre-registered hypothesis trivially.**
+
+> **A narrow interval at small N is more likely to be degenerate than precise.**
+> A passing result at 5–20 sessions would be an artefact, not evidence.
+
+This needs a pre-committed guard *before* the window closes: report the number of
+clusters beside every interval, and treat any interval with zero width, or fewer
+than a pre-stated minimum number of sessions, as **inconclusive by rule** rather
+than as a pass. Adding that guard after seeing the data would be exactly the kind
+of post-hoc adjustment pre-registration exists to prevent.
+
+On the brighter side: the plug-in PABAK sits at 0.92–0.97, comfortably above the
+0.80 hypothesis, so **±0.10 is sufficient to test it** and ±0.05 is a nicety.
+The problem is clusters, not precision.
+
+### The synthetic overfit closes at a reachable N
+
+Optimism gap by synthetic set size, calibrated against the measured +0.100 at
+n=59:
+
+| n | 59 | 100 | 150 | 200 | 300 | 500 |
+|---|---|---|---|---|---|---|
+| median gap | 0.097 | 0.056 | 0.040 | 0.029 | 0.020 | 0.011 |
+
+**Gap < 0.05 at n ≈ 110; gap < 0.02 at n ≈ 300–500.** The synthetic set already
+holds **360 items** and we have only ever run 60 of them. Running the full set
+would take the threshold overfit from "does not survive" to "negligible" —
+for Jev alone that is minutes and pennies.
+
+### Phase 2 gold labels are more expensive than they look
+
+| target | total labelled N |
+|---|---|
+| ECE stable at 5 bins | ~500 |
+| ECE stable at 10 bins | ~500–700 |
+| Murphy resolution distinguishable from null (2% base rate) | ~500–1,000 |
+
+At 15s per `pre_bash` item that is 2.1–4.2 hours of human labelling, plus 15%
+double-labelling. For `stop`, at ~90s per mini-transcript, **12.5–25 hours.**
+
+And a structural problem no amount of labelling fixes: at a 2% base rate,
+n=1,000 puts only **2–5 positives in each upper reliability bin**, so the
+right-hand end of the reliability diagram — the part that matters for a gate —
+**stays unreadable.**
+
 ## Part 5 — Model routing: a promising probe, and its failure mode
 
 Not a planned surface. Probed on request; 8 prompts, one run. **[PRELIMINARY]**
@@ -709,9 +776,34 @@ invented after collection ends.
 | sonnet → haiku | $0.0130 | 918× |
 
 **opus → sonnet captures 75% of the opus → haiku saving at a far smaller
-capability drop.** Adding Sonnet is not a marginal third option; it is probably
-where most of the safely-realisable value is, because the downgrade that is safe
-to make often is worth more than the one that is risky to make rarely.
+capability drop.** Adding Sonnet is not a marginal third option.
+
+> **Correction.** An earlier version of this section argued Sonnet was the
+> *safer* bet. **Break-even analysis does not support that.** Charging a misroute
+> at 2× the original turn, the break-even misroute rate is **37.5% for
+> opus→sonnet and 44.4% for opus→haiku** — Haiku tolerates *more* error before
+> going net-negative, because its saving is larger. The Sonnet case rests
+> entirely on its misroute *rate* being lower, which is plausible from the
+> smaller capability gap but **is not measured**. Stated as a hypothesis, not a
+> result, until the A/B provides actual rates.
+
+### The break-even rates are the most decision-relevant numbers in the study
+
+| policy | saving/turn | **break-even misroute rate** |
+|---|---|---|
+| opus → sonnet | $0.0390 | **37.5%** |
+| opus → haiku | $0.0520 | **44.4%** |
+
+Charging a misroute at 2× the original turn (the wasted turn plus the
+escalation). Under the gentler assumption that only the weak turn is wasted,
+break-even rises to 60% and 80%.
+
+**Routing stays net-positive unless more than a third of downgrade decisions are
+wrong.** That is an enormous margin, and it is the strongest quantitative
+argument the study has for pursuing routing at all. Two caveats: e\* is
+conditional on *deciding to route down*, not an overall error rate, and it
+contains **no term for the user's wasted time**, which Part 5.3 argues dominates
+the monetary cost.
 
 ### `needs_frontier` caught the case the original probe got wrong
 
