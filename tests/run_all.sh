@@ -39,6 +39,20 @@
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 set -o pipefail
 
+# JEV-44: the interpreter, before anything else -- before the live-write audit,
+# before the first test, before anything that could produce output a reader has
+# to interpret.
+#
+# On an interpreter below 3.12, this suite used to run to completion and report
+# 16 errors out of test_pipeline.py, every one of them the same SyntaxError at
+# src/arms/jev.py:237 reached through a lazy import in setUp. Sixteen red
+# errors that are not about the code under test is how a suite teaches its
+# reader to ignore red -- the same failure as JEV-42, one remove further out.
+#
+# This resolves $JEV_PY to an absolute interpreter, proves it is >= 3.12, and
+# prepends its directory to PATH so the shell tests underneath inherit it too.
+. "$ROOT/tests/lib/require_python.sh" || exit 1
+
 GUARD="$ROOT/tests/lib/live_guard.sh"
 SNAP="$(mktemp "${TMPDIR:-/tmp}/jev-live-snapshot.XXXXXX")"
 trap 'rm -f "$SNAP"' EXIT
@@ -73,23 +87,26 @@ echo
 echo "=== seam 1: inline shadow hook (loopback fake, no spend) ==="
 guarded "test_inline_shadow.sh" "$ROOT/tests/test_inline_shadow.sh" || exit 1
 echo
+echo "=== JEV-44: the interpreter floor is asserted, not assumed ==="
+guarded "test_python_floor.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_python_floor.py' 2>&1 | tail -4" || exit 1
+echo
 echo "=== seam 2 + 3: pipeline, statistics, report ==="
-guarded "test_pipeline.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_pipeline.py' 2>&1 | tail -4" || exit 1
+guarded "test_pipeline.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_pipeline.py' 2>&1 | tail -4" || exit 1
 echo "=== seam 3b: threshold validation and determinism ==="
-guarded "test_validation.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_validation.py' 2>&1 | tail -4" || exit 1
+guarded "test_validation.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_validation.py' 2>&1 | tail -4" || exit 1
 echo "=== baseline: known answers from a real transcript ==="
-guarded "test_session_metrics.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_session_metrics.py' 2>&1 | tail -4" || exit 1
+guarded "test_session_metrics.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_session_metrics.py' 2>&1 | tail -4" || exit 1
 
 echo "=== baseline: the persisted 'before' record is append-only and idempotent ==="
-guarded "test_baseline.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_baseline.py' 2>&1 | tail -4" || exit 1
+guarded "test_baseline.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_baseline.py' 2>&1 | tail -4" || exit 1
 
 echo "--- canary: frozen set stability, drift flags, row-schema identity ---"
-guarded "test_canary.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_canary.py' 2>&1 | tail -4" || exit 1
+guarded "test_canary.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_canary.py' 2>&1 | tail -4" || exit 1
 echo
 echo "=== JEV-40: reversibility -- one switch, and OFF proven equal to vanilla ==="
 guarded "reversibility.sh" bash -c "set -o pipefail; '$ROOT/tests/reversibility.sh' | tail -4" || exit 1
 echo "=== doctor ==="
-guarded "doctor.py" bash -c "set -o pipefail; python3 '$ROOT/src/doctor.py' | tail -3"
+guarded "doctor.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/src/doctor.py' | tail -3"
 
 echo
 echo "=== live window untouched by the full suite ==="

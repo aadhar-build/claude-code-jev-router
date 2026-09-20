@@ -1,9 +1,22 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 """Offline exercise of src/canary.py. Zero spend, temp storage, real data untouched."""
 import json, sys, tempfile
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+
+import pyversion  # noqa: E402
+
+# JEV-44: assert the floor BEFORE importing anything that does not parse
+# below it. The PEP-723 header above binds `uv run` only; `python3
+# tests/<this file>` ignores it entirely, and that is the invocation that
+# produced 16 SyntaxErrors out of src/arms/jev.py:237.
+pyversion.require()
+
 import paths, canary, store
 
 tmp = Path(tempfile.mkdtemp(prefix="canary-test-"))

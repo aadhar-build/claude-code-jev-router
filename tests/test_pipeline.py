@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 """Seam 2 (the arm interface) and seam 3 (analysis as pure functions).
 
 Seam 2: a fake arm behind `evaluate(state, questions, config) -> Run` lets the
@@ -26,6 +30,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+
+import pyversion  # noqa: E402
+
+# JEV-44: assert the floor BEFORE importing anything that does not parse
+# below it. The PEP-723 header above binds `uv run` only; `python3
+# tests/<this file>` ignores it entirely, and that is the invocation that
+# produced 16 SyntaxErrors out of src/arms/jev.py:237.
+pyversion.require()
+
 
 import analyze  # noqa: E402
 import config_loader as cl  # noqa: E402

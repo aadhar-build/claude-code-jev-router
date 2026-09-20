@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 """GATE 4's drain step: run the real worker against a SANDBOX spool.
 
 `tests/gates.sh` owns the assertions; this file exists only to do the one thing
@@ -36,6 +40,15 @@ from pathlib import Path
 
 TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS.parent / "src"))
+
+import pyversion  # noqa: E402
+
+# JEV-44: assert the floor BEFORE importing anything that does not parse
+# below it. The PEP-723 header above binds `uv run` only; `python3
+# tests/<this file>` ignores it entirely, and that is the invocation that
+# produced 16 SyntaxErrors out of src/arms/jev.py:237.
+pyversion.require()
+
 
 import paths  # noqa: E402
 

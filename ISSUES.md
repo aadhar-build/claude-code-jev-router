@@ -1852,7 +1852,7 @@ user's environment. This is the reverse: the user's global environment leaking
 
 ## JEV-44: `src/arms/jev.py` does not parse under Python 3.11, and nothing pins the version
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** defect, test
 
 **Blocked by:** None
@@ -1870,10 +1870,58 @@ already lost live captures to a test suite nobody had re-examined since the
 surface went live (JEV-42); a suite that cries wolf is the same failure at one
 remove.
 
-- [ ] Pin the Python version where it belongs — a PEP-723 `requires-python` header on the test modules, matching the convention already used elsewhere in `src/`
-- [ ] Either rewrite the f-string so it parses on 3.11, or state the floor explicitly and make the failure legible instead of a SyntaxError
-- [ ] Make `tests/run_all.sh` fail loudly on the wrong interpreter rather than producing 16 errors that look like real failures
-- [ ] Check every test module for the same missing pin
+- [x] Pin the Python version where it belongs — a PEP-723 `requires-python` header on the test modules, matching the convention already used elsewhere in `src/`
+- [x] Either rewrite the f-string so it parses on 3.11, or state the floor explicitly and make the failure legible instead of a SyntaxError — **the floor is stated**; `src/arms/jev.py` is unchanged
+- [x] Make `tests/run_all.sh` fail loudly on the wrong interpreter rather than producing 16 errors that look like real failures
+- [x] Check every test module for the same missing pin
+
+### Resolved: pin and assert, not raise the floor
+
+**What was built.**
+
+| file | what it does |
+|---|---|
+| `src/pyversion.py` | The floor in one place (`MIN = (3, 12)`), a pure `explain()` and a `require()` that exits **78** (`EX_CONFIG`) with a sentence. Imports nothing but `sys`, uses no f-strings and no annotations, so it **parses on 3.9.6** — a guard that raises `SyntaxError` is a second copy of the bug. Also runnable as a shell preflight: `"$PY" src/pyversion.py \|\| exit 1` |
+| `tests/lib/require_python.sh` | Resolves `$JEV_PY` to an absolute interpreter (`$JEV_PYTHON`, else PATH), proves it against `src/pyversion.py`, and **prepends its directory to PATH** so the six shell tests underneath inherit it. Strict: a named interpreter below the floor fails, it is not silently replaced |
+| `tests/run_all.sh` | Sources the resolver **before** `audit_live_writes.sh` — before any output a reader has to interpret. Every `python3` became `"$JEV_PY"` |
+| `tests/*.py`, `tests/gate4_drain.py` | PEP-723 `requires-python = ">=3.12"` + `#!/usr/bin/env -S uv run --script`, matching `src/`, **plus** `pyversion.require()` at module scope. The header binds `uv run` only; `python3 tests/test_pipeline.py` ignores it, and that invocation is how the 16 errors were produced |
+| `src/doctor.py` | `pyversion.require()` — it already had the header and is the entry point `README.md:52` tells people to run |
+| `tests/test_python_floor.py` | 14 tests. The one that matters asserts the suite refuses **before doing any work**: not merely that it exits nonzero (it always did, after 16 errors), but that the `=== JEV-42 guard` banner never appears |
+
+**Why not raise the floor.** Rewriting line 237 would make `test_pipeline.py`
+*pass* under 3.11 while every header in `src/` still declares 3.12 — converting
+a loud wrong-interpreter failure into a silent one, on an interpreter this
+study has never been measured on. And it would not reach the case that
+actually threatens JEV-37: `python3` under cron is `/usr/bin/python3`, which on
+this machine is **3.9.6**, not 3.11. A 3.11 fix aims at the wrong target.
+`src/arms/jev.py` is therefore untouched.
+
+**Rejected: a `pyproject.toml`.** `requires-python` there would be the tidy
+place for it, but no `pyproject.toml` exists, and adding one flips `uv` into
+project mode for every `uv run` in the repo — a change to other people's
+invocations, bought for nothing that the PEP-723 headers do not already give.
+
+**The error count, measured rather than inherited.** Prior handover notes say
+"16 errors is the known defect; a different count is your regression". Measured
+at HEAD on 2026-09-20:
+
+| interpreter | result |
+|---|---|
+| `/usr/bin/python3` 3.9.6 (**what cron gets**) | 16 errors |
+| `/opt/homebrew/bin/python3.11` 3.11.15 (what a bare `uv run` got) | 16 errors |
+| `/opt/homebrew/bin/python3` 3.14.7 | 0 errors |
+
+All 16 are the same `SyntaxError`, reached through the lazy
+`from arms import claude, jev` in `TestLiveArmWireFormats.setUp`
+(`tests/test_pipeline.py:445`). So **16 is not diagnostic**: it is identical
+across two interpreters five minor versions apart, and it tracks the size of
+one test class — `test_pipeline.py` went from 89 tests to 104 during this
+ticket's own wave, and the same 16 would have been 17 the moment anyone added
+a test to that class. The rule was unusable; it has been replaced by a guard
+that names the interpreter, so nobody needs to memorise a number.
+
+`src/arms/jev.py:237` remains the only pre-3.12 syntax in `src/`, `tests/` or
+`hooks/` — `python3.9 -m compileall` flags it and nothing else.
 
 ---
 
