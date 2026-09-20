@@ -1,5 +1,16 @@
 # Jev Shadow-Mode Measurement Harness for Claude Code
 
+> **Frozen 2026-09-20 — historical record, not a live document.** This is the
+> original plan, written before any measurement was taken. It has been
+> **superseded in specific ways by `SPEC.md`**, whose *Status* section names
+> each reversal and the evidence that forced it; read that first and treat
+> anything here that contradicts it as the superseded side. Nothing below has
+> been edited to match, and nothing will be — the plan is retained unaltered
+> because its numbered **Decisions #1–#9** are cited by name from source
+> comments (`src/state_builders.py`, `src/bench_inline.py`, `src/store.py`,
+> `hooks/inline_shadow_bash.sh`, `tests/test_inline_shadow.sh`), and deleting
+> it would orphan those references.
+
 ## Context
 
 TypeSafe AI's **Jev** is a "System One" model: state + typed questions in, calibrated probabilities

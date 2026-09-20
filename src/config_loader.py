@@ -58,6 +58,22 @@ def _validate_question_sets(config: dict[str, Any]) -> None:
                 f"surface '{surface}' is pinned to question set '{version}' but "
                 f"{path} does not exist. Available for this surface: {', '.join(have)}."
             )
+        # The file declares its own identity. Config selects a version. Those are
+        # two representations of one fact, and nothing forced them to agree --
+        # so a question file copied to a new version number while keeping the
+        # old `question_set_id` inside would be selected by config, recorded on
+        # every row under the WRONG id, and never noticed, because the id on the
+        # row is the one thing the analysis trusts to say which questions were
+        # asked. Assert the agreement instead of hoping for it.
+        declared = json.loads(path.read_text(encoding="utf-8")).get("question_set_id")
+        expected = f"{surface}/{version}"
+        if declared != expected:
+            raise QuestionSetError(
+                f"{path} declares question_set_id '{declared}' but config/surfaces.json "
+                f"selects '{expected}'. The canonical form is '<surface>/<version>', and "
+                "the file, the config and the id recorded on every row must agree -- "
+                "the row-level id additionally carries a '#<phrasing>' suffix."
+            )
 
 
 def surface_question_version(surface: str) -> str:

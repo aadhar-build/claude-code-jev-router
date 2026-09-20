@@ -60,7 +60,7 @@ automated test suite.
 - [x] Confirm `effort` belongs inside `output_config` for the Anthropic arms (check the claude-api skill's curl docs before spending)
 - [x] Watch `stop_reason`: if thinking is on by default for Opus 5, `max_tokens: 256` may be consumed entirely by thinking and every call returns `malformed_response: no text content`. The code surfaces this correctly — read it rather than guessing
 - [x] Print the EXACT `response_model` string each arm returns and add it to `config/pricing.json`. An unpriced model yields `cost_usd: null` and a `nan` in the cost column, by design — the table has to be populated from the spike rather than guessed
-- [x] Findings recorded in `docs/API-FINDINGS.md` with the date and the response model string
+- [x] Findings recorded in `FINDINGS.md` Appendix A with the date and the response model string
 
 ---
 
@@ -138,7 +138,7 @@ ever be differenced against, so it starts collecting on day 0.
 - [x] Friction proxies counted: user interruptions and permission denials
 - [x] Runs against a real completed transcript read in place; only DERIVED numbers are frozen into `data/fixtures/` — no third-party transcript content is copied into this folder
 - [x] Subagent transcripts under `<session>/subagents/` are included (found via the reconciliation check; worth 4.4 points of delta)
-- [x] Findings written up in `docs/COST-RECONCILIATION.md`
+- [x] Findings written up in `FINDINGS.md` Appendix B
 
 ---
 
@@ -359,9 +359,9 @@ as data accumulates.
 
 **Status:** blocked
 **Labels:** hooks, science
-**Blocked by:** JEV-15, plus the mechanism work in `docs/PLAN-SURFACES.md` §0
+**Blocked by:** JEV-15, plus the mechanism work in `SPEC.md` *Surface plans* §0
 
-**What to build:** Per `docs/PLAN-SURFACES.md` §2. Sequenced FIRST, reversing the
+**What to build:** Per `SPEC.md` *Surface plans* §2. Sequenced FIRST, reversing the
 original order: Part 4c established that gating is additive on every axis and
 **routing is the only surface that can make Claude Code faster or cheaper.**
 
@@ -389,7 +389,7 @@ Strongest economics, thinnest evidence.
 **Labels:** hooks, science
 **Blocked by:** JEV-18
 
-**What to build:** Per `docs/PLAN-SURFACES.md` §1. **STEP 0 FIRST, before any
+**What to build:** Per `SPEC.md` *Surface plans* §1. **STEP 0 FIRST, before any
 code**: register `capture_only` with the unmodified hook, run one session, and
 settle two unknowns by looking — does the Stop payload carry
 `last_assistant_message` (contested), and is the final message flushed to the
@@ -409,7 +409,7 @@ transcript before the hook fires?
 **Labels:** hooks
 **Blocked by:** JEV-19
 
-**What to build:** Per `docs/PLAN-SURFACES.md` §3.
+**What to build:** Per `SPEC.md` *Surface plans* §3.
 
 - [ ] Fix the verified matcher mismatch: `surfaces.json` says `Edit|Write|NotebookEdit`, the builder quarantines NotebookEdit and MultiEdit unconditionally. Register `Edit|Write` only
 - [ ] Verify `isinstance(response, str)` against a real payload — `tool_response` is likely a dict, silently dropping the tool result
@@ -803,7 +803,7 @@ blocking on any writeup.
 
 - [x] Rewrite Part 5c: per-**turn** routing is impossible (session-scoped switches only; `PreModelSwitch` cannot redirect); per-**task** routing is available via `PreToolUse` on `Agent`
 - [x] Record the correction as a dated finding rather than a silent edit — being wrong about the mechanism, and finding out by checking, is itself the most useful thing in the section
-- [x] Re-check every other document that repeats the claim — `SPEC.md`, `docs/PLAN-SURFACES.md` §0/§2/§4 all corrected; a paraphrase sweep over every `.md` found no further hits
+- [x] Re-check every other document that repeats the claim — `SPEC.md`, `SPEC.md` *Surface plans* §0/§2/§4 all corrected; a paraphrase sweep over every `.md` found no further hits
 - [x] Cite the source: `code.claude.com/docs/en/hooks.md`, Claude Code v2.1.278, verified 2026-09-20
 
 **Done 2026-09-20.** The correction is recorded as a dated finding rather than a

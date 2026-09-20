@@ -1215,19 +1215,29 @@ Against the claimed 70–500ms, the low end is not reachable from here and the
 median sits just above the top of the range. That is a single-machine, single
 -location sample and will be characterised properly over the collection window.
 
-### Still unanswered## Still unanswered — blocked on the billing gate
+### Still unanswered
 
-These are the questions the spike exists to settle. Everything downstream
-assumes an answer, so none of them should be guessed:
+*(Two defects fixed here on 2026-09-20 during the merge: the heading was
+concatenated with an earlier draft's — "Still unanswered## Still unanswered —
+blocked on the billing gate" — and it was followed by a paragraph saying these
+questions were unanswered, immediately contradicted by the next line saying they
+all are. The billing gate was cleared long ago. Both are drafting residue, not
+findings.)*
 
 All five spike questions are now answered above. What remains needs volume
 rather than another spike:
 
 - [ ] Latency distribution over the full collection window, not one machine on
       one afternoon — p50/p90/p99 with a time-of-day drift plot.
-- [ ] Whether the 1-in-10 decision flip rate at τ=0.5 holds across a stratified
-      sample, and how it varies with distance from the threshold. This is the
-      determinism sweep, and it is now a headline result rather than a footnote.
+- [ ] How much **both** arms wobble at τ=0.5 across a stratified sample, and how
+      that varies with distance from the threshold. This is the determinism
+      sweep (JEV-16), and it is now a headline result rather than a footnote.
+      *(Previously worded as "whether the 1-in-10 decision flip rate holds" —
+      `PREREGISTRATION.md` §7 commits explicitly that **"1 in 10" will not be
+      quoted**: it came from a single command observed twenty times, the rate is
+      not characterised, and asking how much both arms wobble is the fairer
+      question. A pre-registered commitment contradicted inside the findings
+      document is exactly what a reviewer looks for.)*
 - [ ] Whether `confidence` on `choice`/`score` carries information beyond the
       probability vector itself — i.e. is it just max(p), or something more?
 

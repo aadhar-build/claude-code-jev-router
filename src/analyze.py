@@ -318,7 +318,7 @@ def report(run_context: str | None = "live", reference: str = REFERENCE_ARM) -> 
     lines.append("therefore a claim about CLAUDE CODE AS DEPLOYED, not about Opus 5 or Haiku 4.5")
     lines.append("as classifiers. A bare Messages API call answers the same question with roughly")
     lines.append("386 input tokens in under a second. See the attribution table in each surface")
-    lines.append("section, and docs/SUBSCRIPTION-ARM.md.")
+    lines.append("section, and FINDINGS.md Appendix C.")
     lines.append("")
     lines.append(f"reference arm : {reference}")
     lines.append(f"run context   : {run_context or 'all'}")

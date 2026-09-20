@@ -46,6 +46,16 @@ time; never from the live transcript.
 **capture** — the durable record that a decision point occurred. Written by the
 worker, never by the hook.
 
+**question set** — the questions put to a classifier arm for a surface, pinned
+by version. Its canonical identity is **`<surface>/<version>`** — `pre_bash/v1`.
+That exact string appears in three places and they must agree: the question
+file declares it, `config/surfaces.json` selects the version half of it, and
+every run row records it. The row's copy carries one addition, a
+**`#<phrasing>`** suffix naming which of the 2–3 independently written
+phrasings was actually used: `pre_bash/v1#a`. Nothing else is a valid form, and
+the agreement between file and config is asserted at load time rather than
+assumed.
+
 **run** — one result: a `(decision_id, classifier arm, question set, attempt)`
 tuple. Not a collection session, and not a subagent execution.
 
@@ -79,6 +89,12 @@ same statistic.
 flip, recorded before the subagent spawns. Distinct from what actually ran: a
 failed classifier call falls open to the default, so assignment and outcome can
 disagree, and the primary analysis follows the assignment.
+
+**label** — an outcome derived from what happened *after* a decision point,
+used to score an answer. The distinction from state is the project's sharpest
+rule and is easy to get backwards: **future turns are forbidden as state and
+permitted as labels.** An arm may never see the future it is asked to predict;
+the analysis may read it to find out what actually happened.
 
 **shadow** — observing and recording the decision that *would* have been made,
 changing nothing. The `pre_bash` surface is shadow; `agent_route` is not.

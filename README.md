@@ -43,7 +43,7 @@ with Jev.
 
 The metered-API arms (`opus5`, `haiku45`) remain defined in `config/arms.json`
 but disabled. Enabling them turns the headline back into a model-vs-model
-comparison and requires an API key. See `docs/SUBSCRIPTION-ARM.md`.
+comparison and requires an API key. See `FINDINGS.md Appendix C`.
 
 ## Getting started
 

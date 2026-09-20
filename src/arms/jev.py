@@ -244,7 +244,7 @@ def selftest() -> int:
     print("\n--- findings ---")
     for f in findings:
         print(f"  {f}")
-    print("\nRecord these in docs/API-FINDINGS.md.")
+    print("\nRecord these in FINDINGS.md Appendix A.")
     return 0
 
 

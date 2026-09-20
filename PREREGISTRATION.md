@@ -12,7 +12,7 @@ says so here rather than being quietly dropped.
 - **Design**: shadow mode. Observed, never enforced. No session behaviour changes.
 - **Scope**: n=1 user, one machine, one repository, one surface (`pre_bash`) in Phase 1.
 - **Collection window opens**: on the commit following this file.
-- **Pricing snapshot**: `pricing-2026-09-20`, verified against source (`docs/COST-RECONCILIATION.md`, `docs/API-FINDINGS.md`).
+- **Pricing snapshot**: `pricing-2026-09-20`, verified against source (`FINDINGS.md` Appendices B and A — the same content, moved 2026-09-20 when the `docs/` findings files were merged; no commitment changed, only a path).
 
 ---
 
