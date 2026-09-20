@@ -254,5 +254,37 @@ class GroupKeying(Sandboxed):
         self.assertEqual(r.groups[0].decision_id, "syn1")
 
 
+class OccupancyKeying(Sandboxed):
+    """The same defect one table further down: 371 live `cc_haiku45` rows are
+    v1 and 119 are v2, and a single-shot occupancy table that pools them
+    describes a configuration nobody ran."""
+
+    def single_row(self, decision_id, sha, arm, arm_config_id, p):
+        store.append_run({
+            "decision_id": decision_id, "surface": "pre_bash", "arm": arm,
+            "arm_config_id": arm_config_id, "ok": True,
+            "question_set_id": cl.question_set_id("pre_bash"),
+            "state_sha256": sha, "run_context": "live",
+            "answers": {"needs_review": {"type": "boolean", "probability": p}},
+        })
+
+    def test_occupancy_separates_arm_config_ids(self):
+        for i, (acid, p) in enumerate([("cc-haiku45-cli-v1", 0.85),
+                                       ("cc-haiku45-cli-v2-nothink", 0.02)]):
+            sha = self.seed_capture(f"d{i}", f"echo {i}", "live")
+            self.single_row(f"d{i}", sha, "cc_haiku45", acid, p)
+        _groups, single, _diag = determinism.collect("pre_bash")
+        self.assertEqual(sorted(single["live"], key=lambda t: (t[0], t[1] or "")),
+                         [("cc_haiku45", "cc-haiku45-cli-v1"),
+                          ("cc_haiku45", "cc-haiku45-cli-v2-nothink")])
+
+    def test_occupancy_table_names_the_configuration(self):
+        sha = self.seed_capture("d0", "echo hi", "live")
+        self.single_row("d0", sha, "cc_haiku45", "cc-haiku45-cli-v2-nothink", 0.02)
+        _g, single, diag = determinism.collect("pre_bash")
+        text = determinism.render([], single, diag, surface="pre_bash", tau_map={})
+        self.assertIn("cc_haiku45 [cc-haiku45-cli-v2-nothink]", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

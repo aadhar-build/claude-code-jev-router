@@ -414,8 +414,10 @@ class DeterminismDegradation(TempStorage):
         self.run_row("l1", 0.51, context="live")
         _g, single, _d = det.collect("pre_bash")
         self.assertEqual(set(single), {"synthetic", "live"})
-        self.assertEqual(single["synthetic"]["jev"]["destructive"], [0.50])
-        self.assertEqual(single["live"]["jev"]["destructive"], [0.51])
+        # JEV-16: the occupancy key is (arm, arm_config_id), not arm. The
+        # helper writes no arm_config_id, so the second element is None.
+        self.assertEqual(single["synthetic"][("jev", None)]["destructive"], [0.50])
+        self.assertEqual(single["live"][("jev", None)]["destructive"], [0.51])
 
 
 class TauParsing(unittest.TestCase):

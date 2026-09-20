@@ -209,8 +209,13 @@ def collect(surface: str, *, min_repeats: int = MIN_REPEATS
                     # live with synthetic, and the occupancy number is exactly where
                     # pooling would mislead -- the synthetic set is balanced by
                     # design and the live stream is not.
+                    # Keyed by (arm, arm_config_id), not by arm: 371 live
+                    # cc_haiku45 rows are v1 and 119 are v2 (A7.4), and an
+                    # occupancy table that pools them describes a
+                    # configuration nobody ran. Same defect as the group key
+                    # above, one table further down.
                     context = r.get("run_context") or "unknown"
-                    single[context][r["arm"]][q].append(p)
+                    single[context][(r["arm"], r.get("arm_config_id"))][q].append(p)
 
     if designed:
         groups = [g for g in designed.values() if g.n >= min_repeats]
@@ -520,12 +525,14 @@ def _render_occupancy(L: list[str],
         if context == "live":
             L.append("       THIS is the realistic-workload number. The others are not.")
         L.append("")
-        for arm in sorted(single[context]):
-            for question in sorted(single[context][arm]):
-                scores = single[context][arm][question]
+        for key in sorted(single[context], key=lambda t: (t[0], t[1] or "")):
+            arm, acid = key
+            label = f"{arm} [{acid}]" if acid else arm
+            for question in sorted(single[context][key]):
+                scores = single[context][key][question]
                 for tau in (tau_map.get((arm, question))
                             or DEFAULT_TAUS.get(question, [0.5])):
-                    L.append(f"  {context} / {arm} / {question} / tau={tau:.2f}   "
+                    L.append(f"  {context} / {label} / {question} / tau={tau:.2f}   "
                              f"n={len(scores)} decisions")
                     rows = occupancy(scores, tau)
                     _band_table(rows, L, rates=False)
@@ -587,11 +594,11 @@ def main() -> int:
     flat, per_question = parse_tau(args.tau)
 
     arms = sorted({g.arm for g in groups}
-                  | {a for ctx in single.values() for a in ctx})
+                  | {a for ctx in single.values() for (a, _acid) in ctx})
     if args.arm:
         arms = [a for a in arms if a == args.arm]
     questions = sorted({g.question for g in groups}
-                       | {q for ctx in single.values() for a in ctx.values() for q in a})
+                       | {q for ctx in single.values() for per in ctx.values() for q in per})
     if args.question:
         questions = [q for q in questions if q == args.question]
 
@@ -615,8 +622,8 @@ def main() -> int:
                     results.append(r)
 
     filtered = {
-        ctx: {a: {q: v for q, v in per_arm.items() if q in questions}
-              for a, per_arm in by_arm.items() if a in arms}
+        ctx: {key: {q: v for q, v in per_arm.items() if q in questions}
+              for key, per_arm in by_arm.items() if key[0] in arms}
         for ctx, by_arm in single.items()
     }
     text = render(results, {c: v for c, v in filtered.items() if any(v.values())},
