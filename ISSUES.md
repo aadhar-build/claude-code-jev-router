@@ -33,9 +33,16 @@ demand that it writes nothing outside itself.
 
 ## JEV-02: Jev API spike
 
-**Status:** ready-for-agent
+**Status:** blocked
 **Labels:** spike, blocking
-**Blocked by:** JEV-01
+**Blocked by:** JEV-01, plus a credit card on the Vercel account
+
+> **Run 2026-09-20.** The key authenticates, but the gateway returns
+> `HTTP 403 customer_verification_required`: "AI Gateway requires a valid credit
+> card on file to service requests." This is a billing gate, not an auth failure —
+> a 401 would mean the key is wrong. Add a card at vercel.com to unlock the free
+> credits, then re-run. The arm classified it correctly as `account_gated` and
+> recorded it as an attrition row, which is the behaviour we wanted to see.
 
 **What to build:** A single live round-trip against the Jev endpoint that settles
 the vendor contract every later ticket assumes. Run deliberately, never from the
@@ -255,6 +262,24 @@ records you cannot use.
 - [ ] Per-surface switches verified independently
 
 ---
+
+## JEV-14: Subscription-only baseline, and the disclosure that makes it honest
+
+**Status:** done
+**Labels:** core, science
+**Blocked by:** None
+
+**What to build:** Run the entire study on the Claude subscription with no
+Anthropic API key, and make the resulting confound impossible to miss.
+
+- [x] `cc_opus5` and `cc_haiku45` arms via `claude -p --output-format json --json-schema`
+- [x] Enabled set is subscription-only; `opus5`/`haiku45` stay defined but disabled
+- [x] Recursion guard: `JEV_ARM_SUBPROCESS=1` makes `capture.sh` exit on line one, so a spawned session cannot capture its own decisions
+- [x] Attribution table in every surface section, decomposing state tokens from preamble tokens and process spawn from API time
+- [x] Scope disclosure in the report header, stating the claim is about Claude Code as deployed
+- [x] `doctor.py` treats a missing `ANTHROPIC_API_KEY` as correct, and warns if a metered arm is ever enabled
+- [x] 403 classified as `account_gated`, distinct from `auth` — different problems, and an attrition table that conflates them is useless
+- [x] Verified live: 10 state tokens against 5,460 preamble tokens, 1.5s spawn on 4.6s API
 
 ## Deferred: Phase 2
 

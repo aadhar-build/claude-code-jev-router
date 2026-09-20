@@ -28,7 +28,7 @@ import paths  # noqa: E402
 import stats  # noqa: E402
 import store  # noqa: E402
 
-REFERENCE_ARM = "opus5"
+REFERENCE_ARM = "cc_opus5"
 THRESHOLD = 0.5
 BANNED = ("accuracy", "accurate", "correct answer", "ground truth")
 
@@ -148,6 +148,62 @@ def _score_section(rows, arm, reference, question, lines, k):
     lines.append(f"      Bland-Altman mean bias    {mean_diff:+.3f}   (a uniform offset correlation would hide)")
 
 
+def _attribution_table(rows, lines):
+    """Separate harness overhead from model work.
+
+    This study's baseline is Claude Code as it ships, not a bare model call. So
+    the comparison necessarily bundles the model with a ~5K-token system
+    preamble, its tool definitions, a structured-output tool round trip and a
+    process spawn. A reader is entitled to know how much of any gap is the model
+    and how much is the wrapper -- and if we do not decompose it for them, the
+    honest ones will assume the worst and the careless ones will quote a number
+    that means nothing.
+
+    So every headline figure comes with this table beside it. It is the single
+    most important disclosure in the report.
+    """
+    by_arm: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        if r.get("ok"):
+            by_arm[r["arm"]].append(r)
+    if not by_arm:
+        return
+
+    lines.append("  attribution -- how much of the gap is the model, and how much is the wrapper")
+    lines.append(f"    {'arm':<12} {'state tok':>10} {'preamble':>10} {'think tok':>10} "
+                 f"{'turns':>6} {'spawn ms':>9} {'api ms':>9} {'total ms':>9}")
+    for arm in sorted(by_arm):
+        rs = by_arm[arm]
+
+        def mean(fn):
+            vals = [fn(r) for r in rs if fn(r) is not None]
+            return sum(vals) / len(vals) if vals else float("nan")
+
+        # Tokens the state itself is worth, versus tokens the harness adds.
+        state_tok = mean(lambda r: (r.get("usage") or {}).get("input_tokens"))
+        preamble = mean(lambda r: (r.get("usage") or {}).get("cache_creation_input_tokens", 0)
+                        + (r.get("usage") or {}).get("cache_read_input_tokens", 0))
+        think = mean(lambda r: ((r.get("raw") or {}) or {}).get("thinking_tokens"))
+        turns = mean(lambda r: ((r.get("raw") or {}) or {}).get("num_turns"))
+        api_ms = mean(lambda r: ((r.get("raw") or {}) or {}).get("duration_api_ms"))
+        total_ms = mean(lambda r: (r.get("timing_ms") or {}).get("total_ms"))
+        spawn = total_ms - api_ms if api_ms == api_ms and total_ms == total_ms else float("nan")
+
+        def fmt(v, width, dp=0):
+            return f"{'-':>{width}}" if v != v else f"{v:>{width}.{dp}f}"
+
+        lines.append(f"    {arm:<12} {fmt(state_tok, 10)} {fmt(preamble, 10)} {fmt(think, 10)} "
+                     f"{fmt(turns, 6, 1)} {fmt(spawn, 9)} {fmt(api_ms, 9)} {fmt(total_ms, 9)}")
+
+    lines.append("")
+    lines.append("    state tok = tokens the decision itself is worth")
+    lines.append("    preamble  = tokens the harness adds before the question is even asked")
+    lines.append("    spawn ms  = wall clock minus API time, i.e. process startup")
+    lines.append("    A cc_* arm's advantage-gap is NOT the model's deficit. Read this table")
+    lines.append("    before quoting any latency or token ratio from the section above.")
+    lines.append("")
+
+
 def _operational_table(rows, lines):
     by_arm: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
@@ -256,6 +312,14 @@ def report(run_context: str | None = "live", reference: str = REFERENCE_ARM) -> 
     lines.append("not truth. No claim in this report is a claim about correctness; ground-truth")
     lines.append("labels and calibration metrics arrive in Phase 2 from a human-labelled set.")
     lines.append("")
+    lines.append("SCOPE OF THE BASELINE. The cc_* arms are Claude Code as it actually ships,")
+    lines.append("invoked headless on a subscription. They bundle the model with a ~5K-token")
+    lines.append("preamble, a tool round trip and a process spawn. Every comparison below is")
+    lines.append("therefore a claim about CLAUDE CODE AS DEPLOYED, not about Opus 5 or Haiku 4.5")
+    lines.append("as classifiers. A bare Messages API call answers the same question with roughly")
+    lines.append("386 input tokens in under a second. See the attribution table in each surface")
+    lines.append("section, and docs/SUBSCRIPTION-ARM.md.")
+    lines.append("")
     lines.append(f"reference arm : {reference}")
     lines.append(f"run context   : {run_context or 'all'}")
     lines.append(f"pricing       : {cl.pricing()['version']}")
@@ -279,6 +343,7 @@ def report(run_context: str | None = "live", reference: str = REFERENCE_ARM) -> 
         lines.append("-" * 78)
         lines.append("  operational")
         _operational_table(rows, lines)
+        _attribution_table(rows, lines)
 
         arms = sorted({r["arm"] for r in rows if r["arm"] != reference})
         for arm in arms:

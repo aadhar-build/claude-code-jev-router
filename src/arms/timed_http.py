@@ -130,12 +130,19 @@ def post_json(url: str, payload: dict[str, Any], headers: dict[str, str], timeou
     """POST and return (parsed_json, Timing). Raises ArmError on any failure."""
     conn = TimedHTTPSConnection(url, timeout)
     status, body = conn.request(payload, {"Content-Type": "application/json", **headers})
+    text = body[:500].decode("utf-8", "replace")
     if status == 429:
-        raise ArmError("rate_limit", body[:500].decode("utf-8", "replace"))
+        raise ArmError("rate_limit", text)
+    if status in (401, 403):
+        # Worth its own kind: "the key is wrong" and "the key is fine but the
+        # account is gated" are different problems, and lumping both under
+        # client_error makes an attrition table useless for telling them apart.
+        kind = "auth" if status == 401 else "account_gated"
+        raise ArmError(kind, f"HTTP {status}: {text}")
     if status >= 500:
-        raise ArmError("server_error", f"HTTP {status}: {body[:500].decode('utf-8', 'replace')}")
+        raise ArmError("server_error", f"HTTP {status}: {text}")
     if status >= 400:
-        raise ArmError("client_error", f"HTTP {status}: {body[:500].decode('utf-8', 'replace')}")
+        raise ArmError("client_error", f"HTTP {status}: {text}")
     try:
         return json.loads(body), conn.timing
     except json.JSONDecodeError as exc:

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -72,11 +73,43 @@ def check_credentials() -> None:
         record("PASS", "env-mode", "mode 600")
 
     env = paths.load_env()
-    for key in ("AI_GATEWAY_API_KEY", "ANTHROPIC_API_KEY"):
-        if env.get(key):
-            record("PASS", f"cred:{key}", f"present ({len(env[key])} chars)")
-        else:
-            record("WARN", f"cred:{key}", "empty — live arms will not run until this is filled in")
+    if env.get("AI_GATEWAY_API_KEY"):
+        record("PASS", "cred:AI_GATEWAY_API_KEY", f"present ({len(env['AI_GATEWAY_API_KEY'])} chars)")
+    else:
+        record("WARN", "cred:AI_GATEWAY_API_KEY", "empty — the jev arm cannot run until this is set")
+
+    # ANTHROPIC_API_KEY is deliberately NOT required: the baseline runs on the
+    # subscription via the claude CLI. The metered-API arms stay defined but
+    # disabled, so a missing key is the expected state, not a problem.
+    if env.get("ANTHROPIC_API_KEY"):
+        record("PASS", "cred:ANTHROPIC_API_KEY",
+               "present — only needed if you re-enable the metered opus5/haiku45 arms")
+    else:
+        record("PASS", "cred:ANTHROPIC_API_KEY",
+               "absent, as intended — the baseline runs on the subscription")
+
+
+def check_claude_cli() -> None:
+    """The cc_* arms shell out to `claude`, so it has to be there and logged in."""
+    found = shutil.which("claude")
+    if not found:
+        record("FAIL", "claude-cli", "not on PATH — the cc_* baseline arms cannot run")
+        return
+    record("PASS", "claude-cli", found)
+
+    try:
+        arms = json.loads((paths.CONFIG / "arms.json").read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        record("WARN", "arms-config", str(exc))
+        return
+    enabled = arms.get("enabled", [])
+    metered = [n for n in enabled if arms["arms"].get(n, {}).get("kind") == "anthropic"]
+    if metered:
+        record("WARN", "arms-enabled",
+               f"metered-API arms enabled ({', '.join(metered)}) — these need ANTHROPIC_API_KEY "
+               f"and change the headline claim back to model-vs-model")
+    else:
+        record("PASS", "arms-enabled", f"{', '.join(enabled)} — subscription-only, no API key needed")
 
 
 def check_gitignore() -> None:
@@ -175,6 +208,7 @@ def main() -> int:
     check_layout()
     check_paths_inside_root()
     check_credentials()
+    check_claude_cli()
     check_gitignore()
     check_nothing_staged_secret()
     check_user_settings_untouched()

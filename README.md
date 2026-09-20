@@ -22,14 +22,38 @@ each arm *would* have made. No tool call is ever gated by it.
 | `docs/PLAN.md` | The full design, including the nine decisions that shaped it |
 | `PREREGISTRATION.md` | Analysis commitments, committed before collection starts (ticket 7) |
 
+## What is being compared
+
+**Jev** against **Claude Code as it actually ships** — invoked headless on a
+subscription via `claude -p`, no `ANTHROPIC_API_KEY` anywhere.
+
+This is a deliberate choice and it bounds the claim. A `cc_*` arm bundles the
+model with a ~5.2K-token preamble, its tool definitions, a structured-output
+tool round trip and a process spawn. Measured on a real decision: **10 tokens of
+actual state against 5,460 tokens of harness**, and 1.5s of process startup on
+top of 4.6s of API time.
+
+So the finding is about **the deployed system**, not about Opus 5 or Haiku 4.5 as
+classifiers. A bare Messages API call answers the same question in roughly 386
+tokens, in under a second. Every surface section of the report prints an
+**attribution table** decomposing harness overhead from model work, because a
+reader is entitled to know which one is producing the gap — and because without
+it the cost and latency ratios flatter Jev for reasons that have nothing to do
+with Jev.
+
+The metered-API arms (`opus5`, `haiku45`) remain defined in `config/arms.json`
+but disabled. Enabling them turns the headline back into a model-vs-model
+comparison and requires an API key. See `docs/SUBSCRIPTION-ARM.md`.
+
 ## Getting started
 
 ```sh
-cp .env.example .env && chmod 600 .env   # then fill in the two API keys
+cp .env.example .env && chmod 600 .env   # AI_GATEWAY_API_KEY only
 uv run src/doctor.py                     # layout, credentials, isolation, self-containment
 ```
 
-`doctor.py` exits non-zero if anything is wrong. Run it first.
+`doctor.py` exits non-zero if anything is wrong. Run it first. It treats a
+missing `ANTHROPIC_API_KEY` as the expected state.
 
 ## Two hard constraints
 

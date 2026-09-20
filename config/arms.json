@@ -1,5 +1,5 @@
 {
-  "_comment": "Each arm implements evaluate(state, questions, config) -> Run. arm_config_id is recorded on every row; change the config, change the id, never reuse one.",
+  "_comment": "Each arm implements evaluate(state, questions, config) -> Run. arm_config_id is recorded on every row; change the config, change the id, never reuse one. The enabled set is SUBSCRIPTION-ONLY by deliberate choice: no ANTHROPIC_API_KEY is required to run this study. opus5/haiku45 remain defined but disabled -- they are the metered-API arms, and enabling them would turn the headline back into a model-vs-model comparison. See docs/SUBSCRIPTION-ARM.md.",
   "version": "arms-v1",
   "arms": {
     "jev": {
@@ -17,7 +17,7 @@
       "effort": "low",
       "max_tokens": 256,
       "timeout_s": 60.0,
-      "role": "headline_baseline",
+      "role": "metered_api_baseline (DISABLED)",
       "_comment": "Do NOT set thinking:{type:'disabled'} on Opus 5 \u2014 documented failure mode where tool calls leak into visible text. Low effort is the correct lever."
     },
     "haiku45": {
@@ -27,7 +27,7 @@
       "effort": "low",
       "max_tokens": 256,
       "timeout_s": 60.0,
-      "role": "credibility_baseline",
+      "role": "metered_api_baseline (DISABLED)",
       "_comment": "The actual incumbent. Nobody deploys Opus as a hook gate, so an Opus-only comparison is a strawman informed readers will discount."
     },
     "fake": {
@@ -54,8 +54,8 @@
       "model": "claude-opus-5",
       "effort": "low",
       "timeout_s": 180.0,
-      "role": "deployment_realism",
-      "_comment": "Claude Code on the subscription. Measures the shipped harness -- ~5.2K-token preamble, a tool round trip and a process spawn -- not the model as a classifier. Reported separately from opus5; never the headline."
+      "role": "headline_baseline",
+      "_comment": "Claude Code on the subscription, as it actually ships. This is the headline baseline. It bundles the model with a ~5.2K-token preamble, a tool round trip and a process spawn, so the study's claim is about Claude Code as deployed, NOT about Opus 5 as a classifier. The report decomposes harness overhead from model work so a reader can see exactly how much of any gap is attributable to which."
     },
     "cc_haiku45": {
       "arm_config_id": "cc-haiku45-cli-v1",
@@ -63,13 +63,13 @@
       "model": "claude-haiku-4-5",
       "effort": "low",
       "timeout_s": 180.0,
-      "role": "deployment_realism",
+      "role": "secondary_baseline",
       "_comment": "As cc_opus5, on Haiku."
     }
   },
   "enabled": [
     "jev",
-    "opus5",
-    "haiku45"
+    "cc_opus5",
+    "cc_haiku45"
   ]
 }
