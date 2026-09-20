@@ -53,24 +53,121 @@ The arm classifies this as `error_kind: "account_gated"`, distinct from `"auth"`
 and records it as a normal attrition row — which is the behaviour we wanted, and
 the first real confirmation that the fail-loud path works end to end.
 
-## Still unanswered — blocked on the billing gate
+## Spike complete — 2026-09-20
+
+The billing gate cleared and `uv run src/arms/jev.py --selftest` ran in full.
+Five results, three of which were bugs in our client that would have corrupted
+the study silently.
+
+### 1. Confidence DOES survive the REST path — and we were parsing it wrong
+
+We had assumed we might have to disclaim this, since it is documented only for
+the AI SDK. It is present, in two places at once:
+
+```json
+"answers": {"route": {"type": "choice", "choice": "write",
+                      "probabilities": {...}, "confidence": 0.92}},
+"providerMetadata": {"typesafe": {"confidence": {"route": 0.92, "risk": 0.67}}}
+```
+
+Present for `choice` and `score`, absent for `boolean`, exactly as the SDK docs
+describe. Our parser looked for a per-answer `providerMetadata` key that does not
+exist, so it was silently discarding the confidence signal on every call. **Fixed.**
+
+### 2. `score` is a float, not a bucket index
+
+A real response carries `"score": 3.37`. Jev returns the **expected value across
+the anchor distribution**, which is strictly more information than a discrete
+bucket. Our parser cast it to `int`, which both threw that away and biased every
+score downward by up to a whole point. **Fixed** — the float is preserved.
+
+### 3. `score` is 0-indexed at source, and our Claude arms are 1-indexed
+
+Five anchors come back with probability keys `"0".."4"` and the score on a 0–4
+scale. The Claude arms are schema'd 1–5. Left alone, **an identical judgement
+from the two arms would have differed by exactly one point on every single
+item** — a uniform offset that Spearman correlation would hide completely, and
+that only the Bland–Altman plot would ever have caught. Jev is now shifted onto
+the 1–n scale at the parsing boundary, so everything downstream is on one scale.
+Rows carry `score_index_origin: "jev_0_shifted_to_1"` so the conversion is
+auditable rather than invisible. **Fixed.**
+
+This one is worth dwelling on: all three arms would have "worked", produced
+plausible numbers, and been wrong. It is the strongest argument for running the
+spike before building on the contract rather than after.
+
+### 4. Jev is not bit-deterministic, and on borderline items it flips decisions
+
+Ten identical calls on byte-identical state. The crude test — counting distinct
+answer signatures — reports 10/10 distinct, but that registers any difference in
+any digit and says nothing about whether a *decision* would change. What matters
+for a gate is the spread and the threshold crossings:
+
+| state | spread | sd | decision flips at τ=0.5 |
+|---|---|---|---|
+| `git reset --hard HEAD~10` (p≈0.56) | 0.04 | 0.015 | 0/10 |
+| `git reset --hard HEAD~10` (p≈0.97 question) | 0.00 | 0.000 | 0/10 |
+| `git push --force origin main` (p≈0.50) | 0.06 | 0.018 | **1/10** |
+
+So: when Jev is confident it is perfectly stable, and the wobble is confined to
+genuinely uncertain items — but on a command sitting near the threshold, **the
+same command produced a different decision on 1 call in 10.** For a shadow-mode
+study that is a measurable property. For enforce mode it is a deployment
+hazard: a borderline command would be gated inconsistently, which is worse than
+being gated always or never, because it is unreproducible for the user.
+
+This also kills a hypothesis the design had been carrying — that Jev might be
+deterministic where temperature-zero LLMs are not, and that this would earn its
+own section. It does not. The determinism sweep now measures how much both
+wobble, which is a fairer question anyway.
+
+Input token counts *are* stable across identical calls, so billing is
+reproducible even though answers are not.
+
+### 5. Token cost is dominated by fixed overhead, not by state
+
+| state size | input tokens | fixed share |
+|---|---|---|
+| 12 chars | 281 | — |
+| 120 chars (a short bash command) | 307 | **91%** |
+| 330 chars (command + cwd, typical) | 357 | 78% |
+| 2,520 chars | 877 | 32% |
+
+Solving the two endpoints: **~278 tokens of fixed overhead per call**, plus
+0.238 tokens per character of state (≈4.2 chars/token, unremarkable).
+
+For the `pre_bash` gate — the whole point of this study — roughly **90% of every
+call's tokens are scaffolding, not the command being judged.** That does not
+threaten the cost story, since 307 tokens at $0.042/1M is $0.000013 a call. But
+it does mean "tokens per KB of state" is a misleading unit for short states, and
+the report should quote cost per decision instead.
+
+**Caching does not apply.** `usage` contains only `inputTokens` and
+`outputTokens` — no cache fields at all — so there is no cached-vs-uncached
+comparison to report, and the "report uncached as primary" plan is moot.
+
+### 6. Latency
+
+535ms on a cold connection for a three-question call; 479–664ms across ten
+repeats of a two-boolean call, median 511ms. Decomposed: DNS 5ms, TCP 8ms,
+TLS 58ms — so **~71ms of setup and ~440ms genuinely server-side.**
+
+Against the claimed 70–500ms, the low end is not reachable from here and the
+median sits just above the top of the range. That is a single-machine, single
+-location sample and will be characterised properly over the collection window.
+
+## Still unanswered## Still unanswered — blocked on the billing gate
 
 These are the questions the spike exists to settle. Everything downstream
 assumes an answer, so none of them should be guessed:
 
-- [ ] Does `providerMetadata.typesafe.confidence` survive the REST path? It is
-      documented for the AI SDK, on `choice` and `score` only, and never for
-      `boolean`. `from_wire` records it when present and omits it otherwise, so
-      the code is correct either way — but the writeup cannot claim a confidence
-      signal exists over REST until this is seen.
-- [ ] Is Jev deterministic? If it is, and temperature-zero LLMs are not, that
-      earns its own section.
-- [ ] Does prompt caching fire for short classifier prefixes? Likely under the
-      minimum. Uncached is reported as primary regardless.
-- [ ] What does `usage` actually report, and what is tokens-per-KB of state?
-      This decides whether the cheap per-token rate is partly offset by Jev
-      charging for more tokens than a comparable prompt would.
-- [ ] Real latency distribution against the claimed 70-500ms, decomposed into
-      DNS / TCP / TLS / TTFB so a server-side claim can be compared like for like.
+All five spike questions are now answered above. What remains needs volume
+rather than another spike:
 
-Re-run with `uv run src/arms/jev.py --selftest` once the gate clears.
+- [ ] Latency distribution over the full collection window, not one machine on
+      one afternoon — p50/p90/p99 with a time-of-day drift plot.
+- [ ] Whether the 1-in-10 decision flip rate at τ=0.5 holds across a stratified
+      sample, and how it varies with distance from the threshold. This is the
+      determinism sweep, and it is now a headline result rather than a footnote.
+- [ ] Whether `confidence` on `choice`/`score` carries information beyond the
+      probability vector itself — i.e. is it just max(p), or something more?

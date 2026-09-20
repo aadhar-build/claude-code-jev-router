@@ -33,10 +33,13 @@ demand that it writes nothing outside itself.
 
 ## JEV-02: Jev API spike
 
-**Status:** blocked
+**Status:** done
 **Labels:** spike, blocking
-**Blocked by:** JEV-01, plus a credit card on the Vercel account
+**Blocked by:** JEV-01 (both cleared)
 
+> **Resolved 2026-09-20.** The billing gate cleared and the spike ran in full.
+> Three client bugs found, all fixed and regression-tested. Earlier note:
+>
 > **Run 2026-09-20.** The key authenticates, but the gateway returns
 > `HTTP 403 customer_verification_required`: "AI Gateway requires a valid credit
 > card on file to service requests." This is a billing gate, not an auth failure —
@@ -48,15 +51,15 @@ demand that it writes nothing outside itself.
 the vendor contract every later ticket assumes. Run deliberately, never from the
 automated test suite.
 
-- [ ] `arms/jev.py --selftest` performs one live evaluate call and prints the raw response
-- [ ] Confirms the shape of `answers` and `usage` matches what the design assumes
-- [ ] Determines empirically whether `providerMetadata.typesafe.confidence` survives the REST path (documented for the AI SDK only)
-- [ ] Determines whether repeated identical calls return identical probabilities
-- [ ] Determines whether prompt caching fires for short classifier prefixes
-- [ ] Confirm `effort` belongs inside `output_config` for the Anthropic arms (check the claude-api skill's curl docs before spending)
-- [ ] Watch `stop_reason`: if thinking is on by default for Opus 5, `max_tokens: 256` may be consumed entirely by thinking and every call returns `malformed_response: no text content`. The code surfaces this correctly — read it rather than guessing
-- [ ] Print the EXACT `response_model` string each arm returns and add it to `config/pricing.json`. An unpriced model yields `cost_usd: null` and a `nan` in the cost column, by design — the table has to be populated from the spike rather than guessed
-- [ ] Findings recorded in `docs/API-FINDINGS.md` with the date and the response model string
+- [x] `arms/jev.py --selftest` performs one live evaluate call and prints the raw response
+- [x] Confirms the shape of `answers` and `usage` matches what the design assumes
+- [x] Determines empirically whether `providerMetadata.typesafe.confidence` survives the REST path (documented for the AI SDK only)
+- [x] Determines whether repeated identical calls return identical probabilities
+- [x] Determines whether prompt caching fires for short classifier prefixes
+- [x] Confirm `effort` belongs inside `output_config` for the Anthropic arms (check the claude-api skill's curl docs before spending)
+- [x] Watch `stop_reason`: if thinking is on by default for Opus 5, `max_tokens: 256` may be consumed entirely by thinking and every call returns `malformed_response: no text content`. The code surfaces this correctly — read it rather than guessing
+- [x] Print the EXACT `response_model` string each arm returns and add it to `config/pricing.json`. An unpriced model yields `cost_usd: null` and a `nan` in the cost column, by design — the table has to be populated from the spike rather than guessed
+- [x] Findings recorded in `docs/API-FINDINGS.md` with the date and the response model string
 
 ---
 

@@ -306,23 +306,66 @@ class TestLiveArmWireFormats(unittest.TestCase):
         raw = {
             "b": {"type": "boolean", "probability": 0.9},
             "c": {"type": "choice", "choice": "x", "probabilities": {"x": 0.7, "y": 0.3}},
-            "s": {"type": "score", "score": 2, "probabilities": {"1": 0.2, "2": 0.6, "3": 0.2}},
+            "s": {"type": "score", "score": 2, "probabilities": {"0": 0.2, "1": 0.6, "2": 0.2}},
         }
         out = self.jev.from_wire(raw, self.all_types)
         self.assertEqual(out["b"]["probability"], 0.9)
         self.assertEqual(out["c"]["choice"], "x")
-        self.assertEqual(out["s"]["score"], 2)
+        self.assertEqual(out["s"]["score"], 3.0)   # 0-indexed 2 -> 1-indexed 3
 
-    def test_jev_records_confidence_only_when_present(self):
-        without = self.jev.from_wire({"b": {"type": "boolean", "probability": 0.5}},
-                                     {"b": self.all_types["b"]})
-        self.assertNotIn("confidence", without["b"])
-        with_meta = self.jev.from_wire(
-            {"b": {"type": "boolean", "probability": 0.5,
-                   "providerMetadata": {"typesafe": {"confidence": 0.8}}}},
-            {"b": self.all_types["b"]},
+    def test_jev_reads_confidence_from_the_answer_itself(self):
+        """Confirmed live: confidence sits directly on the answer, not under a
+        per-answer providerMetadata. We were looking in the wrong place and
+        silently discarding it on every call."""
+        out = self.jev.from_wire(
+            {"c": {"type": "choice", "choice": "x", "probabilities": {"x": 0.9, "y": 0.1},
+                   "confidence": 0.92}},
+            {"c": self.all_types["c"]},
         )
-        self.assertEqual(with_meta["b"]["confidence"], 0.8)
+        self.assertEqual(out["c"]["confidence"], 0.92)
+
+    def test_jev_omits_confidence_when_absent(self):
+        """Absent for boolean questions, as documented and as observed live."""
+        out = self.jev.from_wire({"b": {"type": "boolean", "probability": 0.5}},
+                                 {"b": self.all_types["b"]})
+        self.assertNotIn("confidence", out["b"])
+
+    def test_jev_score_keeps_its_fractional_part(self):
+        """Jev returns an expected value across the anchors -- 3.37, not 3.
+        Casting to int would discard that and bias every score downward."""
+        out = self.jev.from_wire(
+            {"s": {"type": "score", "score": 2.37, "probabilities": {"0": 0.1, "1": 0.5, "2": 0.4}}},
+            {"s": self.all_types["s"]},
+        )
+        self.assertAlmostEqual(out["s"]["score"], 3.37)      # 2.37 shifted onto the 1-n scale
+        self.assertNotEqual(out["s"]["score"], int(out["s"]["score"]))
+
+    def test_jev_score_is_shifted_onto_the_same_scale_as_the_claude_arms(self):
+        """Jev is 0-indexed, our Claude schema is 1-indexed. Unshifted, an
+        IDENTICAL judgement from two arms would differ by exactly one point on
+        every item -- a uniform offset Spearman hides entirely and only
+        Bland-Altman would catch."""
+        out = self.jev.from_wire(
+            {"s": {"type": "score", "score": 0.0, "probabilities": {"0": 1.0, "1": 0.0, "2": 0.0}}},
+            {"s": self.all_types["s"]},
+        )
+        self.assertEqual(out["s"]["score"], 1.0)             # bottom anchor is 1, not 0
+        self.assertEqual(sorted(out["s"]["probabilities"], key=int), ["1", "2", "3"])
+        self.assertEqual(out["s"]["score_index_origin"], "jev_0_shifted_to_1")
+
+    def test_jev_and_claude_score_scales_agree_at_both_ends(self):
+        """The bottom and top anchors must mean the same number in both arms."""
+        n = len(self.all_types["s"]["anchors"])
+        claude_schema = self.claude.build_schema(self.all_types)["properties"]["s"]["properties"]
+        self.assertEqual(claude_schema["score"]["minimum"], 1)
+        self.assertEqual(claude_schema["score"]["maximum"], n)
+        bottom = self.jev.from_wire(
+            {"s": {"type": "score", "score": 0.0, "probabilities": {}}}, {"s": self.all_types["s"]})
+        top = self.jev.from_wire(
+            {"s": {"type": "score", "score": float(n - 1), "probabilities": {}}},
+            {"s": self.all_types["s"]})
+        self.assertEqual(bottom["s"]["score"], claude_schema["score"]["minimum"])
+        self.assertEqual(top["s"]["score"], claude_schema["score"]["maximum"])
 
     def test_claude_boolean_schema_asks_for_a_probability_not_a_label(self):
         """If the baseline returned a bare label there would be no threshold
@@ -374,11 +417,15 @@ class TestLiveArmWireFormats(unittest.TestCase):
         saved_env = os.environ.pop("AI_GATEWAY_API_KEY", None)
         saved_file = paths.ENV_FILE
         paths.ENV_FILE = Path(self._tmp.name) / "definitely-not-here.env"
-        paths.load_env.cache_clear() if hasattr(paths.load_env, "cache_clear") else None
         try:
             run = worker.evaluate_one("state", self.q, cl.arm("jev"))
             self.assertFalse(run.ok, "an arm with no credential must not report success")
             self.assertIsNotNone(run.error_kind)
+            # A network error would mean we DID reach out. The only acceptable
+            # outcome is refusing before the socket opens.
+            self.assertNotIn(run.error_kind, ("account_gated", "auth", "rate_limit",
+                                              "server_error", "client_error", "timeout"),
+                             f"the arm contacted the network: {run.error_kind}")
         finally:
             paths.ENV_FILE = saved_file
             if saved_env is not None:

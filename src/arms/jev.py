@@ -63,7 +63,32 @@ def to_wire(questions: dict[str, Any]) -> dict[str, Any]:
 
 def from_wire(answers: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
     """Normalise Jev's answers into the shape every arm shares, so the analysis
-    never has to know which arm produced a row."""
+    never has to know which arm produced a row.
+
+    Three details here were wrong until the day-0 spike ran against the live
+    endpoint, and each would have corrupted results silently:
+
+    **`confidence` sits directly on the answer.** Not under a per-answer
+    `providerMetadata`, which is where the AI SDK documentation led us to look.
+    It is also mirrored at the top level under
+    `providerMetadata.typesafe.confidence`. It is present for `choice` and
+    `score` and absent for `boolean` -- so it DOES survive the REST path,
+    contrary to what we had assumed we would have to disclaim.
+
+    **`score` is a float, not an integer.** A real response carries
+    `"score": 3.37`. Jev returns an expected value across the anchor
+    distribution, which is strictly more information than a bucket index.
+    Casting it to int would throw that away and quietly bias every score
+    downward.
+
+    **`score` is 0-indexed.** Five anchors come back as probability keys
+    `"0".."4"` with the score on a 0..4 scale, while our Claude arms are
+    schema'd 1..n. Left alone, an identical judgement from the two arms would
+    differ by exactly one point on every single item -- a uniform offset that
+    Spearman correlation would hide completely and that only Bland-Altman would
+    have caught. We shift Jev onto the 1..n scale here, at the boundary, so that
+    every row downstream is on one scale.
+    """
     out: dict[str, Any] = {}
     for name, q in questions.items():
         raw = answers.get(name)
@@ -79,16 +104,15 @@ def from_wire(answers: dict[str, Any], questions: dict[str, Any]) -> dict[str, A
                 "probabilities": raw.get("probabilities", {}),
             }
         elif qtype == "score":
+            probabilities = raw.get("probabilities", {})
             out[name] = {
                 "type": "score",
-                "score": int(raw["score"]),
-                "probabilities": raw.get("probabilities", {}),
+                "score": float(raw["score"]) + 1.0,          # 0-indexed -> 1-indexed
+                "score_index_origin": "jev_0_shifted_to_1",
+                "probabilities": {str(int(k) + 1): v for k, v in probabilities.items()},
             }
-        # Documented for the AI SDK on choice/score only, and unverified for the
-        # REST path -- recorded when present rather than assumed.
-        confidence = (raw.get("providerMetadata") or {}).get("typesafe", {}).get("confidence")
-        if confidence is not None and name in out:
-            out[name]["confidence"] = confidence
+        if name in out and raw.get("confidence") is not None:
+            out[name]["confidence"] = float(raw["confidence"])
     return out
 
 
@@ -157,25 +181,51 @@ def selftest() -> int:
     print(f"   usage {run.usage}   model {run.response_model}")
     findings.append(f"round-trip OK, {run.timing_ms.total_ms:.0f}ms, model={run.response_model}")
 
-    print("\n2. does providerMetadata.typesafe.confidence survive the REST path?")
-    has_conf = [n for n, a in run.answers.items() if "confidence" in a]
-    raw_conf = "providerMetadata" in json.dumps(run.raw)
-    print(f"   normalised answers carrying confidence: {has_conf or 'none'}")
-    print(f"   providerMetadata present anywhere in raw response: {raw_conf}")
-    findings.append(f"confidence over REST: {'yes ' + str(has_conf) if has_conf else 'NO'}")
+    print("\n2. does typesafe confidence survive the REST path?")
+    has_conf = {n: a["confidence"] for n, a in run.answers.items() if "confidence" in a}
+    top_level = (run.raw.get("providerMetadata") or {}).get("typesafe", {}).get("confidence")
+    print(f"   answers carrying confidence: {has_conf or 'none'}")
+    print(f"   mirrored at providerMetadata.typesafe.confidence: {top_level}")
+    missing = [n for n, q in questions.items() if q["type"] == "boolean" and n not in has_conf]
+    print(f"   absent for boolean questions, as documented: {missing}")
+    findings.append(f"confidence over REST: {'YES ' + str(sorted(has_conf)) if has_conf else 'no'}")
 
-    print("\n3. determinism: 5 identical calls")
-    signatures = set()
-    latencies = []
-    for _ in range(5):
-        r = evaluate(state, questions, config)
-        signatures.add(json.dumps(r.answers, sort_keys=True))
-        latencies.append(r.timing_ms.total_ms)
-    deterministic = len(signatures) == 1
-    print(f"   distinct answer signatures: {len(signatures)}  -> "
-          f"{'DETERMINISTIC' if deterministic else 'NON-DETERMINISTIC'}")
-    print(f"   latencies: {', '.join(f'{x:.0f}ms' for x in latencies)}")
-    findings.append(f"deterministic: {deterministic}")
+    print("\n2b. score shape")
+    for name, q in questions.items():
+        if q["type"] != "score":
+            continue
+        a = run.answers[name]
+        print(f"   {name}: score={a['score']} (float, shifted to a 1-{len(q['anchors'])} scale "
+              f"from Jev's 0-indexed original)")
+        print(f"   probability keys after shift: {sorted(a['probabilities'], key=int)}")
+        findings.append(f"score is a float expected value, 0-indexed at source")
+
+    print("\n3. determinism: 10 identical calls")
+    # Counting distinct answer signatures is too crude to be useful: any
+    # difference in any digit registers as non-determinism, which tells you
+    # nothing about whether a DECISION would change. What matters for a gate is
+    # the spread, and whether it ever crosses the threshold.
+    import statistics
+
+    repeats = [evaluate(state, questions, config) for _ in range(10)]
+    signatures = {json.dumps(r.answers, sort_keys=True) for r in repeats}
+    print(f"   distinct answer signatures: {len(signatures)}/10")
+    total_flips = 0
+    for name, q in questions.items():
+        if q["type"] != "boolean":
+            continue
+        vals = [r.answers[name]["probability"] for r in repeats]
+        flips = sum(1 for v in vals if (v >= 0.5) != (vals[0] >= 0.5))
+        total_flips += flips
+        print(f"   {name:<14} spread {max(vals) - min(vals):.3f}  sd {statistics.stdev(vals):.4f}  "
+              f"decision flips at tau=0.5: {flips}/10")
+    latencies = [r.timing_ms.total_ms for r in repeats]
+    print(f"   latency  min {min(latencies):.0f}ms  median {statistics.median(latencies):.0f}ms  "
+          f"max {max(latencies):.0f}ms")
+    tokens = {r.usage.input_tokens for r in repeats}
+    print(f"   input tokens for identical state: {sorted(tokens)} "
+          f"({'stable' if len(tokens) == 1 else 'VARIES -- billing is not reproducible'})")
+    findings.append(f"bit-deterministic: {len(signatures) == 1}; decision flips at tau=0.5: {total_flips}/10")
 
     print("\n4. does the token count scale with state size? (caching proxy)")
     small = evaluate("Command:\nls", {"destructive": questions["destructive"]}, config)

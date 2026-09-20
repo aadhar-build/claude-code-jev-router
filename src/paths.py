@@ -57,12 +57,17 @@ def ensure_dirs() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
 
-def load_env(path: Path = ENV_FILE) -> dict[str, str]:
+def load_env(path: Path | None = None) -> dict[str, str]:
     """Parse .env into a dict. Does not mutate os.environ.
 
     Deliberately minimal: KEY=VALUE, '#' comments, no interpolation, no quoting
     rules. An API key does not need a parser.
     """
+    # Resolved at call time, not bound as a default: a default argument is
+    # evaluated once at import, so patching paths.ENV_FILE afterwards would have
+    # no effect -- which is exactly how a test meant to run WITHOUT credentials
+    # ended up making a real, billed API call.
+    path = path or ENV_FILE
     out: dict[str, str] = {}
     if not path.exists():
         return out
@@ -75,8 +80,9 @@ def load_env(path: Path = ENV_FILE) -> dict[str, str]:
     return out
 
 
-def env_file_mode_ok(path: Path = ENV_FILE) -> bool:
+def env_file_mode_ok(path: Path | None = None) -> bool:
     """True if .env is not readable or writable by group or other."""
+    path = path or ENV_FILE
     if not path.exists():
         return False
     mode = path.stat().st_mode
