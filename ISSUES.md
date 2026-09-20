@@ -1493,6 +1493,71 @@ about this change reaches live collection until then.
 
 ---
 
+## JEV-43: `cc_*` wall-clock is contaminated by the operator's own user-level hooks
+
+**Status:** ready-for-agent
+**Labels:** science, blocking, metrics
+**Blocked by:** None
+
+**What is wrong.** The `cc_*` arms spawn `claude -p`, and those sessions load
+the operator's `~/.claude` settings — including their **user-level hooks**.
+While diagnosing JEV-41, a user `Stop` hook was observed adding **18.5 seconds**
+of wall-clock to a single invocation whose API time was 11.7s. Intermittently,
+not uniformly.
+
+So `timing_ms.total_ms` on **every `cc_*` row** carries a variable amount of
+time that has nothing to do with the arm, the model, or the decision being
+classified. `raw.duration_api_ms` is clean; `total_ms` is not.
+
+**Why this is not a minor confound.** Wall-clock is now a **co-primary outcome**
+of the routing A/B (`PREREGISTRATION.md` A3.5). A latency figure inflated by the
+operator's unrelated automation, by an amount that varies per call, is not a
+measurement of anything. And the contamination is **not symmetric**: `jev` is a
+single HTTP request that spawns nothing and loads no user config, so it cannot
+be affected at all — which means this biases every latency comparison **toward
+the treatment arm**, the same direction as the concurrency bias A5.3 already
+declares.
+
+**The isolation constraint runs the other way here, and that is worth noting.**
+This project took great care that nothing leaks *out* of the folder into the
+user's environment. This is the reverse: the user's global environment leaking
+*into* the measurement. Nothing in the isolation design was looking for it.
+
+- [ ] Quantify it: decompose `total_ms` against `raw.duration_api_ms` across all existing `cc_*` rows and report the spawn-plus-hooks residual, per arm, as a distribution rather than a mean
+- [ ] Establish which user-level hooks fire inside an arm subprocess, and whether the arm can suppress them without altering what it is supposed to measure — note that suppressing them makes the arm *less* representative of Claude Code as deployed, so this is a real trade-off and not an obvious fix
+- [ ] **Decide which number is publishable.** `raw.duration_api_ms` is clean but excludes spawn, which A5.3 commits to reporting; `total_ms` includes spawn and unrelated automation. Neither is the figure the pre-registration assumes exists
+- [ ] Re-check A5.3's commitment to "quantify the bias rather than assert it is small" — it was written about spawn contention and now has a second, larger term
+- [ ] Whatever is decided, no `cc_*` wall-clock figure is published until the residual is characterised
+
+---
+
+## JEV-44: `src/arms/jev.py` does not parse under Python 3.11, and nothing pins the version
+
+**Status:** ready-for-agent
+**Labels:** defect, test
+
+**Blocked by:** None
+
+**What is wrong.** `src/arms/jev.py:237` uses a backslash inside an f-string
+expression, which is a **SyntaxError before Python 3.12**. `tests/test_pipeline.py`
+carries no `requires-python` header, so a bare `uv run` selects 3.11 and reports
+**16 spurious errors** that have nothing to do with the code under test.
+
+It fails identically at HEAD and was not introduced by any recent change.
+
+**Why it matters more than a version nit.** A test suite that reports 16 errors
+under a plausible default invocation trains its reader to ignore red. This study
+already lost live captures to a test suite nobody had re-examined since the
+surface went live (JEV-42); a suite that cries wolf is the same failure at one
+remove.
+
+- [ ] Pin the Python version where it belongs — a PEP-723 `requires-python` header on the test modules, matching the convention already used elsewhere in `src/`
+- [ ] Either rewrite the f-string so it parses on 3.11, or state the floor explicitly and make the failure legible instead of a SyntaxError
+- [ ] Make `tests/run_all.sh` fail loudly on the wrong interpreter rather than producing 16 errors that look like real failures
+- [ ] Check every test module for the same missing pin
+
+---
+
 ## Deferred: Phase 2
 
 Not ticketed. Opens on explicit go-ahead: transcript harvest, blind labelling UI,
