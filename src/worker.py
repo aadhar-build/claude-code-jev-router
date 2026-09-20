@@ -414,6 +414,14 @@ def process_capture(
     version = version or cl.surface_question_version(surface)
     questions = cl.questions_for(surface, version=version, phrasing=phrasing)
     qsid = cl.question_set_id(surface, version=version, phrasing=phrasing)
+    # JEV-30. Resolved ONCE, here, and stamped on both row streams. It is read
+    # before `_dispatch` on purpose: `config_fingerprint()` calls
+    # `assert_config_fresh()`, so reading it per row would let a config edit
+    # landing during a dispatch raise inside the row-writing loop, be swallowed
+    # by `drain_once`'s `except Exception`, and quarantine a perfectly good
+    # capture to dead/ -- after every arm call had already been paid for. Read
+    # here, a row honestly carries the config that was in force when it ran.
+    config_fp = cl.config_fingerprint()["config_sha256"]
 
     capture_row = {
         "decision_id": decision_id,
@@ -435,7 +443,7 @@ def process_capture(
         # derived from the BYTES rather than from a human-maintained version
         # string. Two rows with the same value ran on byte-identical config;
         # two that differ did not, whatever their version strings claim.
-        "config_fingerprint": cl.config_fingerprint()["config_sha256"],
+        "config_fingerprint": config_fp,
     }
 
     # Randomised submission order per decision point, then CONCURRENT dispatch.
@@ -476,7 +484,7 @@ def process_capture(
                 "dispatch_wall_ms": round(dispatch_wall_ms, 1),
                 "evaluated_at": store.utcnow(),
                 "pricing_version": cl.pricing()["version"],
-                "config_fingerprint": cl.config_fingerprint()["config_sha256"],
+                "config_fingerprint": config_fp,
                 "cost_usd": cl.cost_usd(run.response_model or "", usage) if run.ok else None,
             }
         )
@@ -547,6 +555,22 @@ def drain_once(arms: list[ArmConfig], *, verbose: bool = True) -> int:
         # rename is atomic, so exactly one worker wins and the loser moves on.
         # Without this, two workers evaluate the same capture against the live
         # arms and we pay twice for a duplicate row.
+        # Resolve the surface and its mode BEFORE the claim, not after.
+        #
+        # `cl.surface_mode` reaches `surfaces()`, which calls
+        # `assert_config_fresh()` -- so a config edit underneath a running
+        # worker raises here. That refusal is deliberate (config is pinned per
+        # process; see JEV-30), but it used to fire from AFTER the rename and
+        # OUTSIDE the try below, so it propagated past the poll loop and killed
+        # the process with a file stranded in claimed/. A refusal must cost
+        # nothing. Parsing from `candidate.name` is identical to parsing from
+        # the claimed name: `claim_name` only ever appends.
+        surface = candidate.name.split("__", 1)[0]
+        mode = cl.surface_mode(surface)
+        if mode == "off":
+            _quarantine(candidate, "surface is off", verbose=verbose)
+            continue
+
         # JEV-31: the claim records OUR pid and the time, so a later worker can
         # ask whether the owner is still alive. The old name was the hook's pid
         # and told a reaper nothing.
@@ -561,16 +585,10 @@ def drain_once(arms: list[ArmConfig], *, verbose: bool = True) -> int:
         except (FileNotFoundError, OSError):
             continue
 
-        surface = spooled.name.split("__", 1)[0]
         try:
             payload = json.loads(spooled.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
             _quarantine(spooled, f"unreadable: {exc}", verbose=verbose)
-            continue
-
-        mode = cl.surface_mode(surface)
-        if mode == "off":
-            _quarantine(spooled, "surface is off", verbose=verbose)
             continue
 
         active = [] if mode == "capture_only" else arms

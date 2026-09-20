@@ -208,6 +208,79 @@ class TestKillSwitchStopsDispatch(Sandbox):
         self.assertEqual(calls, [])
 
 
+class TestConfigStalenessStrandsNothing(Sandbox):
+    """The OTHER uncaught exit, found while fixing the signal one (JEV-30/51).
+
+    `cl.surface_mode()` reaches `surfaces()`, which calls
+    `assert_config_fresh()`. A config edit underneath a running worker is a
+    deliberate hard refusal -- config is pinned per process on purpose. But the
+    refusal used to fire from *after* `candidate.rename()` and *outside* the
+    `try:` wrapping `process_capture`, so it propagated past a poll loop that
+    caught only `KeyboardInterrupt` and killed the process **with a file
+    stranded in claimed/**. That is precisely the failure JEV-51 is about,
+    arriving by a second route.
+
+    A refusal must cost nothing: it fires before anything leaves `ready/`.
+    """
+
+    def test_a_stale_config_refusal_leaves_the_spool_untouched(self):
+        self.seed_ready(3)
+        calls = self.count_arm_calls()
+        real_mode = cl.surface_mode
+
+        def stale(surface):
+            raise cl.ConfigStaleError("config changed after this process loaded it")
+
+        cl.surface_mode = stale
+        self.addCleanup(lambda: setattr(cl, "surface_mode", real_mode))
+
+        with self.assertRaises(cl.ConfigStaleError):
+            worker.drain_once(self.arms(), verbose=False)
+
+        self.assertEqual(len(list(paths.SPOOL_READY.glob("*.json"))), 3,
+                         "a config refusal must not consume a capture")
+        self.assertEqual(list(paths.SPOOL_CLAIMED.glob("*.json")), [],
+                         "a config refusal stranded a claim")
+        self.assertEqual(list(paths.SPOOL_DEAD.glob("*.json")), [])
+        self.assertEqual(calls, [], "arms were called before the refusal")
+
+    def test_the_config_fingerprint_is_resolved_once_before_dispatch(self):
+        """If the fingerprint were read per row, a config edit landing during a
+        dispatch would raise INSIDE the row-writing loop, be swallowed by
+        `except Exception`, and quarantine a perfectly good capture to `dead/`
+        — after every arm call had already been paid for. Resolving it once,
+        beside the question version and before `_dispatch`, means a row
+        honestly carries the config that was in force when it ran."""
+        seen = []
+        real_fp = cl.config_fingerprint
+
+        def counting():
+            seen.append(1)
+            return real_fp()
+
+        cl.config_fingerprint = counting
+        self.addCleanup(lambda: setattr(cl, "config_fingerprint", real_fp))
+
+        arms = [cl.arm("fake"), cl.arm("fake_b"), cl.arm("fake_c")]
+        worker.process_capture(payload("ls"), "pre_bash", arms)
+        self.assertEqual(len(seen), 1,
+                         f"config_fingerprint called {len(seen)}x for one capture")
+
+    def test_both_row_streams_carry_the_same_fingerprint(self):
+        """JEV-30's join key is worthless if the capture row and its run rows
+        can disagree."""
+        import store
+        worker.process_capture(payload("ls"), "pre_bash", self.arms())
+        caps = list(store.captures())
+        runs = list(store.runs())
+        self.assertEqual(len(caps), 1)
+        self.assertTrue(runs)
+        fp = caps[0]["config_fingerprint"]
+        self.assertTrue(fp)
+        for r in runs:
+            self.assertEqual(r["config_fingerprint"], fp)
+
+
 # ---------------------------------------------------------------------------
 # JEV-51 (2,3): SIGTERM / SIGINT mid-dispatch strand nothing
 # ---------------------------------------------------------------------------
@@ -228,13 +301,20 @@ class TestGracefulStop(unittest.TestCase):
             (self.ready / f"pre_bash__8{i}-{i}.json").write_text(
                 json.dumps(payload(f"echo {i}")), encoding="utf-8")
 
-    def _start(self):
+    def _start(self, ignore_sigint=False):
+        # `ignore_sigint` reproduces the condition JEV-51 actually names: the
+        # worker is launched as a BACKGROUND JOB, and the shell sets SIGINT to
+        # SIG_IGN for background jobs, which Python inherits. Without this the
+        # SIGINT test would run against the default disposition and would not
+        # be testing the claim at all.
+        pre = (lambda: signal.signal(signal.SIGINT, signal.SIG_IGN)) if ignore_sigint else None
         proc = subprocess.Popen(
             [sys.executable, str(TESTS / "worker_driver.py"),
              "--sandbox", str(self.sandbox),
              "--dispatch-seconds", str(self.DISPATCH_SECONDS),
              "--interval", "0.2"],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            preexec_fn=pre)
         self.addCleanup(self._hard_kill, proc)
         return proc
 
@@ -254,8 +334,8 @@ class TestGracefulStop(unittest.TestCase):
             time.sleep(0.05)
         self.fail("the driver never reached a dispatch")
 
-    def _signal_mid_dispatch(self, sig):
-        proc = self._start()
+    def _signal_mid_dispatch(self, sig, ignore_sigint=False):
+        proc = self._start(ignore_sigint=ignore_sigint)
         self._wait_for_dispatch(proc)
         # Comfortably inside the 3s dispatch, comfortably after it started.
         time.sleep(0.4)
@@ -280,7 +360,7 @@ class TestGracefulStop(unittest.TestCase):
         `KeyboardInterrupt`: under `nohup ... &` the shell sets SIGINT to
         SIG_IGN, so the `except KeyboardInterrupt` that was the worker's only
         graceful exit is unreachable in the way it is actually run."""
-        rc, out = self._signal_mid_dispatch(signal.SIGINT)
+        rc, out = self._signal_mid_dispatch(signal.SIGINT, ignore_sigint=True)
         self.assertEqual(rc, 0, f"SIGINT did not exit cleanly (rc={rc}):\n{out}")
         stranded = sorted(p.name for p in self.claimed.glob("*.json"))
         self.assertEqual(stranded, [], f"stranded claim after SIGINT: {stranded}\n{out}")

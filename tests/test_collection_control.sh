@@ -138,7 +138,7 @@ if [ "$rc" -ne 0 ]; then
 else
   bad "stop exited 0 with a file stranded in claimed/"
 fi
-if has "1" "$out" && { has "WARNING" "$out" || has "claimed" "$out"; }; then
+if has "1 capture(s) stranded" "$out" && has "WARNING" "$out"; then
   ok "the stranded claim is named in the output"
 else
   bad "stop said nothing about the stranded claim: $out"

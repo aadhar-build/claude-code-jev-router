@@ -49,8 +49,16 @@ PIDFILE="$ROOT/logs/worker.pid"
 # tests/. `|| exit $?` and not `|| exit 1`: the guard's 78 (EX_CONFIG) is
 # chosen to be distinguishable from a real failure, and collapsing it loses
 # that. $JEV_PYTHON is the override and is honoured strictly.
-JEV_PY="${JEV_PYTHON:-/opt/homebrew/bin/python3}"
-[ -x "$JEV_PY" ] || JEV_PY="$(command -v python3)"
+# STRICT, not helpful. The fallback to PATH applies ONLY when $JEV_PYTHON is
+# unset -- an operator who NAMES an interpreter and silently gets a different
+# one has no way to reason about what actually ran, which is the same class of
+# defect as a config field that looks live and is inert (JEV-31b).
+if [ -n "${JEV_PYTHON:-}" ]; then
+  JEV_PY="$JEV_PYTHON"
+else
+  JEV_PY="/opt/homebrew/bin/python3"
+  [ -x "$JEV_PY" ] || JEV_PY="$(command -v python3)"
+fi
 "$JEV_PY" "$ROOT/src/pyversion.py" || exit $?
 
 # How long `stop` waits for a graceful exit. The worker finishes the capture it
