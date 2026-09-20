@@ -100,17 +100,34 @@ artefact.
 ## 4. Things I did not do, that A3 may want to
 
 - **I did not touch `src/arms/claude_cli.py`.** It is not mine this wave, and
-  suppressing the operator's hooks with a `--settings` override would buy a
-  cleaner number by measuring a Claude Code nobody deploys. If A3 decides the
-  trade-off goes the other way, the change is: add
-  `"--settings", '{"hooks":{}}'` alongside the existing
-  `--strict-mcp-config`, and note that it creates a **fourth** `arm_config_id`
-  era boundary in the window. Verify against the installed CLI's flag surface
-  before relying on it; I did not, because verifying would have meant spending.
+  suppressing the operator's hooks would buy a cleaner number by measuring a
+  Claude Code nobody deploys. If A3 decides the trade-off goes the other way,
+  **do not reach for `--settings '{"hooks":{}}'`** — the hook is
+  *plugin-registered* through `enabledPlugins`, and the `hooks` block in the
+  operator's settings is already empty, so that override changes nothing. That
+  is the same wrong turn the earlier MCP diagnosis took.
+
+  The flag that does reach it is **`--bare`**: "Minimal mode: skip hooks, LSP,
+  plugin sync, attribution, auto-memory, background prefetches, keychain reads,
+  and CLAUDE.md auto-discovery" (read from `claude --help`, zero spend). Two
+  concrete costs beyond the representativeness argument: it makes auth
+  **strictly `ANTHROPIC_API_KEY` or `apiKeyHelper`**, and the arm deliberately
+  *pops* `ANTHROPIC_API_KEY` to force subscription auth — so adopting it
+  silently moves which billing surface is measured; and it suppresses LSP,
+  auto-memory and CLAUDE.md discovery as well. It would also create a
+  **fourth** `arm_config_id` era boundary in the window.
 - **I did not propose disabling the operator's plugin.** `~/.claude/` is
   read-only to this study and it is the operator's machine.
 - **I did not re-measure anything live.** Phase A is offline, collection is
   stopped, and zero API was spent on this ticket.
+- **It is firing on other agents' work right now.** The groups table shows
+  `replay | cc-haiku45-cli-v2-nothink` at **3 of 4 rows contaminated (75%)**,
+  written at 17:26Z — the JEV-16 determinism sweep running while this repo was
+  dirty. That is independent, real-time confirmation of the mechanism, and it
+  is a warning: **if JEV-16 quotes latency from its determinism rows, those
+  rows are contaminated at 75%.** It does not affect a determinism *agreement*
+  result, only a latency one.
+
 - **The hook's own log only reaches back to 14:44Z.** The 42 contaminated rows
   before that are attributed by signature identity, not by timing correlation.
   If someone wants a stronger claim for the early window, it cannot be had from

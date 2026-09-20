@@ -53,7 +53,7 @@ as a clean one.
 THE CONTAMINATION, AND WHY EXCLUSION IS DEFENSIBLE
 --------------------------------------------------
 `in_session_ms` over the 2026-09-20 corpus is sharply bimodal: 1,255 of 1,322
-successful `cc_*` rows below 1.5s, **zero rows between 1.5s and 18.5s**, and 67
+successful `cc_*` rows below 1.24s, **zero rows between 1.24s and 18.53s**, and 67
 rows in a tight band at 18.5-22.0s. A gap with no mass in it is not a tail; it
 is a second process. The classifier here therefore does not tune a threshold --
 it cuts inside a hole, and `is_contaminated` is invariant to where in the hole
@@ -174,6 +174,12 @@ def clean_baselines(rows: Iterable[dict[str, Any]],
     preamble, the tool round trip, and whatever fast hooks always fire. It is
     the subtrahend for the adjustment, not zero -- subtracting the whole
     residual would credit the arm with time it genuinely spent.
+
+    Deliberately keyed on `(arm, arm_config_id)` only, and so pooled across
+    `run_context` and `arm_dispatch`: this is a property of the configuration,
+    the clean distribution is tight (p95 under 0.62s everywhere), and a
+    per-context baseline would be estimated from very few rows in the thin
+    contexts. `summarise` reports per-context distributions; this does not.
     """
     buckets: dict[tuple[str, str], list[float]] = {}
     for row in rows:
@@ -234,6 +240,12 @@ def dispatch_walls(rows: Iterable[dict[str, Any]],
 
     Rows with `ok=False` contribute nothing: they have no timing, and a failed
     arm did not hold the decision open in any recoverable way.
+
+    **Concurrent-era rows only.** `dispatch_offset_ms` is written inside
+    `_dispatch`'s pool callable and is absent on serial rows, where it
+    defaults to 0 here -- so on a serial decision this returns a max where
+    the truth is a sum. Filter to `arm_dispatch == "concurrent"` before
+    calling, as the report does.
     """
     walls: dict[str, float] = {}
     for row in rows:

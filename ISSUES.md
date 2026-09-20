@@ -1931,9 +1931,12 @@ mode is the **`security-guidance` plugin's `Stop` hook**. It runs an LLM code
 review over the working-tree diff; on this machine those requests fail TLS
 certificate verification, so it burns a fixed retry ladder and gives up. **The
 hook's own log prints the elapsed time: 18.3s in 253 of 309 recorded firings**,
-with a tail to 20.4s that matches the rows' tail. In the window the log still
-covers, **25 of 25** contaminated rows have a hook completion 0.47-0.69s before
-the row's `evaluated_at`, against 44 of 388 clean rows. The earlier MCP
+with a tail to 20.4s that matches the rows' tail. `evaluated_at` is stamped
+after `_dispatch` returns, so the correlation has to be run at **decision**
+grain or it double-counts arms; run there, over `live` decisions in the window
+the log still covers, **20 of 20** contaminated decisions have a hook
+completion 0.47-0.69s before the decision's `evaluated_at`, against **3 of
+118** clean decisions (2.5%) where chance alone gives 1.6%. The earlier MCP
 diagnosis was already ruled out; the correct answer was a plugin-registered
 hook, as suspected, and it is a *`Stop`* hook as originally observed.
 
@@ -1956,7 +1959,7 @@ the arm, not the model, not the decision. Measured hourly rate over the window:
 | JEV-33 serial sum per capture | 20.1s | **19.7s** | survives — a sum of medians |
 | JEV-33 concurrent `dispatch_wall_ms` | 16.5s | **9.7s** | **withdrawn** |
 | JEV-33 "20.1s → 16.5s, ~1.2x" | 1.2x | **~2.0x** | **restated** |
-| JEV-33 "the ~6s above the floor is contention" | ~6s | ~0s | **withdrawn** |
+| JEV-33 "the ~6s above the floor is contention" | ~6s | **~0.2s** | **withdrawn** |
 | JEV-41 "wall-minus-API ~3.5s Haiku vs ~1.4s Opus" | 3.5 / 1.4s | **1.41 / 1.52s** | **ordering withdrawn** |
 | A5.3 spawn contention | ~170ms | ~180ms | survives |
 | `jev` sequential-vs-concurrent null | 565.7 / 564.6ms | unchanged | survives |
@@ -1988,14 +1991,21 @@ number, and the report says so rather than implying otherwise:
   loading the operator's settings and plugin manifests before it starts its own
   clock. Unresolvable from rows; bounded and disclosed.
 
-**Rejected: suppressing the hooks.** `claude -p` would honour a `--settings`
-override with an empty hook set, in the same spirit as the
-`--strict-mcp-config` the arm already passes. Not taken, for the reason this
-ticket names: a `cc_*` arm exists to represent Claude Code *as deployed*, and a
-real deployment carries the operator's hooks. Suppressing them buys a cleaner
-number by measuring something nobody runs — and it would create a fourth
-`arm_config_id` era boundary inside the window. `src/arms/claude_cli.py` is
-untouched.
+**Rejected: suppressing the hooks — and note the obvious fix does not work.**
+The hook is **plugin-registered** through `enabledPlugins`; the `hooks` block
+in the operator's settings is already empty, so a `--settings '{"hooks":{}}'`
+override — the move that mirrors the `--strict-mcp-config` the arm already
+passes — would change nothing. That is the same wrong turn the earlier MCP
+diagnosis took. The flag that *does* reach it is **`--bare`** ("skip hooks,
+LSP, plugin sync, attribution, auto-memory, background prefetches, keychain
+reads, and CLAUDE.md auto-discovery", from `claude --help`, zero spend). Not
+taken, and now for three reasons rather than one: it makes auth **strictly
+`ANTHROPIC_API_KEY` or `apiKeyHelper`** while the arm deliberately *pops*
+`ANTHROPIC_API_KEY` to force subscription auth, so it would silently move which
+billing surface is measured; it suppresses far more than the hook, making the
+arm much less representative of Claude Code as deployed; and it would create a
+fourth `arm_config_id` era boundary inside the window.
+`src/arms/claude_cli.py` is untouched.
 
 **What was built.**
 
@@ -2005,9 +2015,16 @@ untouched.
 | `src/latency_report.py` | writes `reports/jev43-wallclock.{md,json}`. **Not** a second `analyze.py`: it computes nothing about answers, labels, agreement, cost or thresholds |
 | `tests/test_latency.py` | 19 tests, every number hand-computed. The two that matter: **threshold invariance** across 2/5/10/15/18s (the robustness argument, in code rather than in prose), and **`summarise` never pools across `run_context`** — which was a real defect, caught because the JEV-16 determinism sweep appends `replay` rows to the very file this report reads |
 
-**Noticed, not repaired (not mine).** `data/runs/2026-09-20.jsonl` grew from
-2,005 to 2,006 rows mid-analysis: the JEV-16 determinism agent writing `replay`
-rows into the shared append-only file. Nothing is wrong with that, but any
+**For JEV-16, and it is not cosmetic.** The hook fired on the determinism
+sweep's own rows while this analysis ran: `replay` / `cc-haiku45-cli-v2-nothink`
+is **3 of 4 rows contaminated, 75%**, written at 17:26Z. That is independent
+real-time confirmation of the mechanism, and a warning — **any latency quoted
+from the determinism rows is contaminated at 75%**. An agreement result is
+unaffected.
+
+**Noticed, not repaired (not mine).** `data/runs/2026-09-20.jsonl` grew
+mid-analysis: the JEV-16 determinism agent writing `replay` rows into the
+shared append-only file. Nothing is wrong with that, but any
 report over `data/runs/` that does not split on `run_context` is silently
 pooling a live latency with a replay latency. Mine now does; `analyze.py` is
 frozen and was not inspected for it.

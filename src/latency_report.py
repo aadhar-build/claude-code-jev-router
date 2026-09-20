@@ -63,11 +63,19 @@ Four independent lines of evidence, none of which rests on the others:
   (19.3/19.7/20.4s) matches the rows' tail (19.5/19.8/21.5/21.9/22.0s).
 - **The gap.** Zero rows between 1.24s and 18.53s. A contention or load tail
   fills in; a discrete subprocess does not.
-- **Timing correlation.** Restricted to the window the hook's log still covers,
-  **25 of 25** contaminated rows have a hook completion 0.47-0.69s before the
-  row's `evaluated_at` — a tight, one-sided offset. Against 44 of 388 clean
-  rows for the same 0.4s-wide window, which is the operator's own interactive
-  session firing the same hook concurrently.
+- **Timing correlation, at decision grain.** `evaluated_at` is stamped after
+  `_dispatch` returns, so it is per **decision**, not per row — every arm in a
+  decision shares one value, and the test must be run at that grain or it
+  double-counts. Restricted to the window the hook's log still covers and to
+  `live` decisions: **20 of 20** contaminated decisions have a hook completion
+  0.47-0.69s before the decision's `evaluated_at`, a tight one-sided offset,
+  against **3 of 118** clean decisions (2.5%). Chance alone gives 1.6% at the
+  observed event density, so the clean matches are the operator's own
+  interactive session firing the same hook, and the contaminated ones are not
+  consistent with anything else. Decisions with two contaminated arms show two
+  completions in the preceding 4s, as they should. (The three `replay`
+  decisions the JEV-16 sweep wrote are excluded: `replay.py` stamps
+  `evaluated_at` per row, so the decision-grain alignment does not apply.)
 - **It is inside Claude Code's clock.** `Stop` fires before the CLI emits its
   result JSON, so the cost lands in `duration_ms` and not in `duration_api_ms`
   — exactly the signature observed.
@@ -155,12 +163,31 @@ and neither is separable from a row:
 
 ### Can the arm suppress the hooks?
 
-Yes — `claude -p` would honour a `--settings` override pointing at an empty
-hook set, in the same spirit as the `--strict-mcp-config '{"mcpServers":{}}'`
-the arm already passes. It is deliberately **not** proposed here, for the
-reason the ticket already names: a `cc_*` arm exists to represent Claude Code
-*as deployed*, and a real deployment carries the operator's hooks. Suppressing
-them buys a cleaner number by measuring something nobody runs. The chosen
+Note first what would **not** work. The hook is **plugin-registered**, through
+`enabledPlugins` in the operator's user settings; the `hooks` block in those
+settings is already empty. A `--settings` override supplying an empty `hooks`
+map — the obvious move, and the one that mirrors the `--strict-mcp-config
+'{"mcpServers":{}}'` the arm already passes — would change nothing. That is the
+same wrong turn the earlier MCP diagnosis took.
+
+The flag that does reach it is **`--bare`**, documented by the installed CLI as
+"Minimal mode: skip hooks, LSP, plugin sync, attribution, auto-memory,
+background prefetches, keychain reads, and CLAUDE.md auto-discovery" (read from
+`claude --help`; zero spend). It is **not** proposed, for two concrete reasons
+on top of the one the ticket names:
+
+1. **It would change the arm's auth model.** `--bare` makes Anthropic auth
+   "strictly `ANTHROPIC_API_KEY` or `apiKeyHelper`". `src/arms/claude_cli.py`
+   does the opposite on purpose — it *pops* `ANTHROPIC_API_KEY` to force
+   subscription auth. Adopting `--bare` would silently move which credential,
+   and therefore which billing surface, the arm measures.
+2. **It suppresses far more than the hook.** Skipping LSP, auto-memory,
+   prefetches and CLAUDE.md discovery makes the arm much less representative of
+   Claude Code as deployed — which is the whole reason a `cc_*` arm shells out
+   to the real CLI instead of calling the API directly.
+
+So the trade-off the ticket anticipated is real, and sharper than expected: the
+only lever that reaches this hook is a blunt one. The chosen
 answer is to measure the contamination, remove the identified mode, and bound
 the rest — which is what this report does. `src/arms/claude_cli.py` is
 untouched.
@@ -175,7 +202,7 @@ MOVES = """## Which published numbers move
 | per-arm serial medians | JEV-33, JEV-41 | 0.57 / 2.9 / 4.9 / 11.6s | 0.57 / 2.87 / 4.98 / 11.26s | survive, medians move by <0.15s |
 | concurrent `dispatch_wall_ms` | JEV-33 | 16.5s | **9.7s** | **does not survive** |
 | "realised gain 20.1s -> 16.5s, ~1.2x" | JEV-33 | 1.2x | **~2.0x** | **restate** |
-| "the ~6s above the slowest-arm floor is contention" | JEV-33 | ~6s contention | ~0s | **withdraw** |
+| "the ~6s above the slowest-arm floor is contention" | JEV-33 | ~6s contention | **~0.2s** | **withdraw** |
 | "wall-minus-API ~3.5s Haiku vs ~1.4s Opus" | JEV-41 | 3.5 / 1.4s | **1.41 / 1.52s** | **withdraw the ordering** |
 | Haiku median API / wall | JEV-41 | 8.1s / 11.6s (n=335) | 10.13s / 11.55s clean (n=401, v1) | survives — see note |
 | ~170ms spawn contention | A5.3 prep | ~170ms | **~180ms** | survives — computed on `total_ms - duration_ms`, which excludes the hook |
@@ -189,7 +216,9 @@ whole decision. Adjusted, the median is 9.7s; over the 116 concurrent decisions
 before the `cc_haiku45` config boundary it is 9.4s. Both are well inside the
 slowest arm's own latency, which is the substantive correction: **the wall sits
 at the slowest arm, and the "~6s of contention" above it was the operator's
-hook.** The realised gain restates as **19.7s -> ~9.7s, about 2.0x**.
+hook.** The contention that genuinely exists is the ~0.2s of extra spawn time
+in the table above, not 6s. The realised gain restates as **19.7s -> ~9.7s,
+about 2.0x**.
 
 Two cautions on that restatement. n=17 is small and `cc_haiku45`'s API time is
 heavy-tailed, so quote it with the n. And the full concurrent era must not be
