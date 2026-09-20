@@ -1,39 +1,42 @@
 {
   "schema": "baseline-v1",
   "ticket": "JEV-38",
-  "snapshot_at": "2026-09-20T14:47:47.012+00:00",
+  "pricing_version": "pricing-2026-09-20",
+  "snapshot_at": "2026-09-20T14:50:14.729+00:00",
   "project_root": "/Users/aadharagarwal/projects/JEV-experiments",
   "transcript_dir": "/Users/aadharagarwal/.claude/projects/-Users-aadharagarwal-projects-JEV-experiments",
-  "sessions_captured": 13,
+  "sessions_captured": 15,
   "sessions_appended_this_run": [
     "4ba49645-fb8d-4fb2-b496-c274f6ed1490",
-    "63725bcb-6e28-436c-98b2-0e8c3e45fa87",
-    "6e1f4f81-5e53-4955-bdf1-5d6c161cefb8",
-    "a1176b4f-fcae-46bb-b67b-35e6656032cc",
-    "b5d4c1a9-144f-4fbd-ade4-668a435cd09a"
+    "66793040-2323-4425-8518-1fb911d2da7a",
+    "a1176b4f-fcae-46bb-b67b-35e6656032cc"
   ],
   "sessions_unchanged_this_run": [
     "1d926ee0-e031-4e1b-843d-55096f168159",
     "20299ea6-2465-47e3-990e-214ceca98deb",
     "53bbfa19-2c93-404b-a982-367e5bd70895",
     "60096036-c4d8-4efd-9fdb-3814bc3dfee6",
+    "63725bcb-6e28-436c-98b2-0e8c3e45fa87",
+    "6e1f4f81-5e53-4955-bdf1-5d6c161cefb8",
     "6e46440d-715f-438f-8e95-9750be3f8801",
     "7b00a5bd-df0e-4158-b6fc-efdd56d3ad9d",
     "a215a9ad-51f8-4412-811d-3d158457c7f5",
+    "b5d4c1a9-144f-4fbd-ade4-668a435cd09a",
+    "d16e0fe1-5695-4626-8391-a42fc04812c7",
     "ddc79a40-62db-4803-9194-4f8486f51828"
   ],
-  "total_computed_cost_usd": 121.813723,
-  "total_delegated_cost_usd": 39.992048,
+  "total_computed_cost_usd": 125.582946,
+  "total_delegated_cost_usd": 42.569944,
   "total_delegated_tasks": 20,
   "total_human_prompts": 58,
-  "unpriced_requests": 61,
+  "unpriced_requests": 78,
   "unpriced_models": [
     "claude-opus-4-7"
   ],
   "unpriced_note": "Spend on a model absent from config/pricing.json is NOT included in total_computed_cost_usd. It is counted here so the gap is visible.",
   "window": {
     "first_activity_utc": "2026-09-19T19:58:40.512000+00:00",
-    "last_activity_utc": "2026-09-20T14:47:45.381000+00:00"
+    "last_activity_utc": "2026-09-20T14:50:13.297000+00:00"
   },
   "retention": {
     "setting": "cleanupPeriodDays",
@@ -59,7 +62,7 @@
     "method": "diff ~/.claude/history.jsonl (prompt index, project-filtered, reading only {timestamp, sessionId}) against transcripts on disk",
     "blind_spot": "the prompt index records only sessions that received a typed prompt; a reaped NON-interactive session (claude -p, advisor, hook-spawned) leaves no trace in it and is not counted. Treat the count as a lower bound, never as a proof of zero loss.",
     "indexed_sessions": 1,
-    "sessions_on_disk": 13
+    "sessions_on_disk": 15
   },
   "derived_numbers_only": "No third-party transcript content is copied into this folder. No prompt text, no message content, no subagent description. Only counts, costs, timings and file fingerprints."
 }

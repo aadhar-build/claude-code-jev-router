@@ -399,6 +399,7 @@ def session_row(path: Path, interactive_ids: set[str], snapshot_at: str) -> dict
         # Cost, with the reconciliation delta published rather than tuned away.
         # reported_cost_usd is null until the session ends: Claude Code writes
         # its cost-state line at session end, so a live session has none.
+        "pricing_version": cl.pricing()["version"],
         "computed_cost_usd": m.computed_cost_usd,
         "reported_cost_usd": m.reported_cost_usd,
         "cost_delta_pct": m.cost_delta_pct,
@@ -474,6 +475,7 @@ def snapshot() -> dict[str, Any]:
     manifest = {
         "schema": SCHEMA_VERSION,
         "ticket": "JEV-38",
+        "pricing_version": cl.pricing()["version"],
         "snapshot_at": snapshot_at,
         "project_root": str(paths.ROOT),
         "transcript_dir": str(project_dir()),
@@ -512,7 +514,7 @@ def snapshot() -> dict[str, Any]:
 # JEV-24a
 # ---------------------------------------------------------------------------
 
-def delegation_baseline() -> dict[str, Any]:
+def delegation_baseline(force: bool = False) -> dict[str, Any]:
     """The pre-rule delegation baseline: the fraction of spend that was
     delegated to subagents BEFORE the "delegate where possible" rule.
 
@@ -526,6 +528,14 @@ def delegation_baseline() -> dict[str, Any]:
     self-evident, so all three raw counts are frozen and the chosen denominator
     is named rather than implied.
     """
+    # FROZEN means frozen. The cost side is computed through
+    # config/pricing.json, so the day JEV-28 reconciles Fable's rates a re-run
+    # would silently move a number the pre-registration treats as fixed. The
+    # file is written once and thereafter refuses to be overwritten without
+    # --force, and it stamps the pricing version it was computed under.
+    if DELEGATION.exists() and not force:
+        return json.loads(DELEGATION.read_text())
+
     cut = _cut()
     per_session = []
     for path in transcripts():
@@ -583,6 +593,9 @@ def delegation_baseline() -> dict[str, Any]:
         "schema": "delegation-pre-rule-v1",
         "ticket": "JEV-24a",
         "frozen_at": store.utcnow(),
+        # Every cost below is computed through this pricing snapshot. A frozen
+        # number whose inputs can move is not frozen.
+        "pricing_version": cl.pricing()["version"],
         "cut": {
             "timestamp_utc": Q17B_CUT_UTC,
             "commit": Q17B_CUT_COMMIT,
@@ -650,11 +663,17 @@ def delegation_baseline() -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Persist the 'before' baseline (JEV-38/24a).")
     parser.add_argument("--snapshot", action="store_true", help="append changed sessions")
-    parser.add_argument("--delegation", action="store_true", help="freeze the JEV-24a baseline")
+    parser.add_argument("--delegation", action="store_true",
+                        help="freeze the JEV-24a baseline (once; refuses to overwrite)")
+    parser.add_argument("--force", action="store_true",
+                        help="re-freeze the JEV-24a baseline, overwriting it")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    # Snapshotting is the ROUTINE action and is the no-flag default. Freezing
+    # the delegation baseline is a one-shot and must be asked for by name, so
+    # that a routine re-snapshot can never rewrite a pre-registered number.
     if not (args.snapshot or args.delegation):
-        args.snapshot = args.delegation = True
+        args.snapshot = True
 
     if args.snapshot:
         manifest = snapshot()
@@ -675,7 +694,7 @@ def main() -> int:
             print(f"written         {SESSIONS}")
 
     if args.delegation:
-        record = delegation_baseline()
+        record = delegation_baseline(force=args.force)
         a, i = record["all_sessions"], record["interactive_sessions_only"]
         if args.json:
             print(json.dumps(record, indent=2))
@@ -688,7 +707,10 @@ def main() -> int:
                 print(f"  {'':<18} by spend      {t['delegation_rate_by_spend']}")
                 print(f"  {'':<18} by task count {t['delegation_rate_by_task_count']} "
                       f"({t['delegated_tasks']} tasks / {t['human_prompts']} prompts)")
-            print(f"  written           {DELEGATION}")
+            print(f"  pricing           {record['pricing_version']}")
+            print(f"  frozen_at         {record['frozen_at']}"
+                  f"{'  (already frozen; --force to recompute)' if not args.force else '  (RE-FROZEN)'}")
+            print(f"  file              {DELEGATION}")
     return 0
 
 

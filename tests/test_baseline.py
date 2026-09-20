@@ -213,6 +213,17 @@ class TestDelegationBaseline(unittest.TestCase):
         to 0.0 would shrink the denominator invisibly."""
         self.assertIn("unpriced_requests", self.rec["all_sessions"])
 
+    def test_the_pricing_snapshot_is_recorded(self):
+        """Every cost in the record is computed through config/pricing.json. A
+        frozen number whose inputs can move is not frozen -- JEV-28 is expected
+        to change Fable's rates."""
+        self.assertIn("pricing_version", self.rec)
+
+    def test_re_running_does_not_rewrite_the_frozen_record(self):
+        before = bl.DELEGATION.read_text()
+        bl.delegation_baseline()
+        self.assertEqual(bl.DELEGATION.read_text(), before)
+
     def test_the_window_is_recorded(self):
         w = self.rec["transcript_window"]
         self.assertEqual(w["cut_utc"], bl.Q17B_CUT_UTC)
