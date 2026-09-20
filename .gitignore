@@ -12,7 +12,9 @@
 data/
 spool/
 logs/
-reports/
+# reports/ is deliberately NOT ignored: reports are the publishable artifact,
+# and they carry aggregate statistics only -- never state blobs, which stay in
+# the gitignored data/states/ and are excluded from any export.
 
 # python
 __pycache__/
