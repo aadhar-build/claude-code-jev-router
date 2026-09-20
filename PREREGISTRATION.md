@@ -443,7 +443,7 @@ static `subagent_type → tier` rule** (A2.0.5).
 **The 60 was chosen by eye and a stopping rule chosen by eye is not a stopping
 rule.** It must be replaced by a number derived from the observed per-task cost
 variance in the existing transcript corpus, computed **before the first routed
-task runs**, and committed as a further amendment.
+task runs**, and committed as **Amendment 4**, which ratifies Amendments 2 and 3 in full.
 
 The derivation is specified now so that it cannot be tuned afterwards: estimate
 the per-delegated-task cost distribution from existing subagent transcripts by
@@ -524,3 +524,120 @@ Two disclosures attach to `cc_fable51`:
   and shape-dependent (cache-heavy, terse turns), which is why routing to it
   requires a second dimension — the `verbosity` question, JEV-25 — rather than a
   position on a one-dimensional complexity score.
+
+
+---
+
+# Amendment 3 — routing A/B operational specification — **PROPOSED**
+
+Not in force. Ratified together with Amendment 4 (the power-derived stopping
+rule), which is the last open clause of Amendment 2. Settled in the 2026-09-20
+grilling round on the specs.
+
+## A3.1 — Analysis population: intention-to-treat
+
+The routing hook must fail open, and failing open means **not** rewriting the
+model — which is the default, which is the control condition. A classifier
+outage therefore converts treatment tasks into control tasks silently.
+
+> **Primary analysis is intention-to-treat: every delegated task is analysed
+> under the routing arm the coin flip assigned, whatever actually ran.**
+
+A failed Jev call is a cost of deploying Jev and counts against the treatment.
+This is the only version that answers "should I deploy this?", because
+deployment includes the outages.
+
+**Per-protocol — analysis by `resolvedModel`, dropping tasks where the hook did
+not take effect — is secondary**, and the **hook failure rate is reported
+beside both**. A per-protocol figure published alone is a number that cannot be
+reproduced in production.
+
+## A3.2 — Routing choice set: all four tiers, including Fable
+
+Jev may assign any of `haiku45`, `sonnet5`, `opus5`, `fable51`.
+
+**This makes an unverified price a component of the primary outcome, and that
+must be closed before collection rather than disclosed afterwards.** Fable's
+rates come from documentation and its 2.5% cache-read multiplier contradicts the
+10% verified empirically for three other models. Since the primary outcome is
+net cost in USD, a wrong Fable rate is a wrong headline.
+
+> **Blocking prerequisite: Fable's pricing must be reconciled against a real
+> session's `cost-state` before the first routed task runs.** If it cannot be
+> reconciled, Fable is removed from the choice set and the amendment is revised
+> before collection, not after.
+
+**Second limitation, registered now.** Fable's advantage is shape-dependent —
+cache-heavy, terse turns — and a one-dimensional complexity score cannot express
+that. Until the `verbosity` question is live, any routing to Fable rests on a
+signal that cannot justify it. The writeup reports the share of tasks routed to
+Fable and states this explicitly.
+
+## A3.3 — The blinded grader
+
+**Grader model: `claude-fable-5-1`.** Fixed in advance so that a mid-study model
+change cannot be mistaken for a quality change.
+
+**Placement: out of band.** The grader runs in a separate session after
+collection closes, and is excluded from the A/B **structurally** by a guard on
+the routing hook — the same shape as the existing `JEV_ARM_SUBPROCESS` guard.
+An exclusion that must be remembered at analysis time is one that is eventually
+forgotten, and grading inside the collection window would let the grader's own
+delegations enter the experiment it is measuring.
+
+**Self-preference bias is a known hazard here and is checked, not assumed
+away.** Fable is both the grader and a routable tier, and language models
+reliably favour their own outputs. The check: the share of tasks graded highest
+is reported **by tier**, and if Fable-run tasks score systematically above
+others while the blind-integrity check also shows above-chance tier
+identification, the grader's verdict is reported as compromised rather than
+used.
+
+### The rubric, fixed before grading begins
+
+Four dimensions, each scored 1–5 against the task prompt alone. Fixed now so
+that criteria cannot drift once results are visible:
+
+| dimension | question |
+|---|---|
+| **completeness** | Was every part of the task carried out, or only the easy parts? |
+| **correctness** | Is what it reports actually true of the artifacts it claims to have produced? |
+| **evidence** | Are claims supported by something checkable, or asserted? |
+| **efficiency** | Did it reach the result without unnecessary work, or wander? |
+
+**Anti-drift commitments:**
+
+- The rubric text, the anchor descriptions for each 1–5 point, and the grader
+  model are **frozen at this commit** and quoted in the writeup.
+- Grading runs in **one batch**, not incrementally, so no early results can
+  reshape later judgements.
+- Task order is randomised and the grader is not told the arm ratio.
+- `resolvedModel`, `modelsUsed` and tier-identifying text are stripped from the
+  graded material.
+- A **10% double-graded sample** measures the grader's own consistency;
+  quadratic-weighted kappa between the two passes is reported. An inconsistent
+  grader is reported as inconsistent, never averaged into a verdict.
+- **Blind-integrity check**: on a held-out subset the grader is asked to name
+  the tier. Above chance means the blind failed and the measure is reported as
+  compromised.
+- Overall quality is the **unweighted mean of the four dimensions**. The
+  weighting is fixed now precisely because choosing it later, with the cost
+  result already visible, is the easiest way to manufacture "quality was
+  unchanged".
+
+## A3.4 — Gates the routing hook must pass before registration
+
+It is the study's first **actuator**: every hook until now only observed, and
+the worst case for an observer is a lost record. This one rewrites tool input.
+
+All existing gates apply — isolation, fail-open, kill switch, and the GATE 4
+future-leakage test — plus two written for this hook:
+
+1. **Input fidelity.** `updatedInput` replaces the *entire* tool input object.
+   The hook must echo `prompt`, `description` and `subagent_type` back
+   byte-identically while changing only `model`. Asserted, because a hook that
+   drops `subagent_type` spawns a subagent of the wrong type — which is
+   indistinguishable, in the results, from a routing quality effect.
+2. **Assignment ledger before spawn.** The assignment is durably recorded
+   *before* the subagent starts. A ledger written afterwards is missing exactly
+   when it matters most: when the task crashed.

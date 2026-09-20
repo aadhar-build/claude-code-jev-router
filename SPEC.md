@@ -85,7 +85,7 @@ Full reasoning for each in `PREREGISTRATION.md` §A2.0.
 | # | decision |
 |---|---|
 | Q8 | **Four baseline arms**: `cc_opus5`, `cc_sonnet5`, `cc_haiku45`, `cc_fable51`, plus `jev`. |
-| Q19 | **Fable stays, and `v2` gains a `verbosity` question.** Fable is *not* a cheap tier — at $10/$50 it is twice Opus — but its cache reads are half Opus's in absolute terms, so it wins only on cache-heavy *terse* turns. A one-dimensional complexity score cannot express that; routing to Fable needs a prediction of the turn's **shape**. |
+| Q19 | **Fable stays, and a `verbosity` question is added.** *(Recorded earlier as "`v2` gains" it — inaccurate: no `verbosity` question has ever been written, in v2 or anywhere. It is specified for `questions/agent_route/v1.json`, which does not exist yet either. JEV-25.)* Fable is *not* a cheap tier — at $10/$50 it is twice Opus — but its cache reads are half Opus's in absolute terms, so it wins only on cache-heavy *terse* turns. A one-dimensional complexity score cannot express that; routing to Fable needs a prediction of the turn's **shape**. |
 
 ---
 
@@ -214,10 +214,17 @@ items stay on disk; the larger run is deferred, not discarded.
 ## The routing state — and why JEV-18 and JEV-23 are different claims
 
 The unit of routing is the delegated task, so the state Jev classifies is the
-**`Agent` tool's `prompt`**, not the user's prompt. That was never written down,
-and the only question set that exists is `questions/user_prompt/v2.json`, where
-the `verbosity` question (Q19) also landed. Two surfaces were quietly sharing one
-specification.
+**`Agent` tool's `prompt`**, not the user's prompt. That was never written down.
+
+**Two corrections to the previous text, found by audit.** It claimed the
+`verbosity` question "landed in `questions/user_prompt/v2.json`" — **it did
+not**; v2 contains `complexity`, `needs_frontier` and `route`, and no
+`verbosity` question exists anywhere. And it described `complexity` as a
+`choice` over tiers — it is a **`score`**, deliberately, and the file states the
+reason: *"Anchors describe the WORK, never the model — naming models in the
+anchors would leak the policy into the measurement."* Tier selection is a policy
+applied in analysis (`_tier_mapping`), not a question put to the classifier.
+That separation is correct and `agent_route` must preserve it.
 
 **`agent_route` — a new surface.**
 
@@ -225,7 +232,7 @@ specification.
 |---|---|
 | hook | `PreToolUse` matched on `Agent` |
 | state | `tool_input.prompt` + `tool_input.subagent_type`, and nothing else |
-| questions | `questions/agent_route/v1.json` — `complexity` (choice, tier) and `verbosity` (score) |
+| questions | `questions/agent_route/v1.json` — `complexity` (**score**, 1–5, anchors describing the work and never naming a model) and `verbosity` (**score**, predicted output length). Tier selection stays a policy in `_tier_mapping`, applied in analysis |
 | output | `updatedInput` with `model` rewritten, everything else echoed unchanged |
 | outcome | `PostToolUse` on `Agent`: `resolvedModel`, `usage`, `totalDurationMs` |
 

@@ -478,8 +478,8 @@ same cost; nothing is discarded, only deferred.
 **Status:** blocked
 **Labels:** science, hooks
 **Blocked by:** JEV-24a (the pre-rule baseline is destroyed the moment this
-starts), and **JEV-27** (the power-derived stopping rule — the last unratified
-piece of Amendment 2).
+starts), **JEV-27** (the power-derived stopping rule), **JEV-28** (Fable pricing
+— it is now a component of the primary outcome), and **JEV-29** (the grader).
 
 **What to build:** The article's central experiment, per SPEC "The routing
 experiment". Per-turn routing is impossible (no hook sets a model, no
@@ -569,6 +569,51 @@ turns — below ~300 output tokens at 30k cache read, ~1,000 at 100k, ~3,000 at
 
 ---
 
+## JEV-28: Reconcile Fable pricing — it is now inside the primary outcome
+
+**Status:** ready-for-agent
+**Labels:** science, blocking, cost
+**Blocked by:** None — and it blocks JEV-23
+
+**What to build:** Fable is in the routing choice set, and the A/B's primary
+outcome is **net cost in USD**. So an unverified Fable rate is a wrong headline,
+not a footnote. Its rates come from documentation and its 2.5% cache-read
+multiplier contradicts the 10% verified empirically for three other models.
+
+This stopped being a disclosure and became a blocker the moment Fable became
+routable.
+
+- [ ] Run one real Fable session and reconcile the computed cost against its `cost-state.totalCostUSD`, to the same tolerance as the other three models
+- [ ] Publish the delta % as a methodological check, as was done for Haiku and Sonnet
+- [ ] **If it cannot be reconciled, remove Fable from the choice set** and revise Amendment 3 before collection, not after
+- [ ] Note the convenient overlap: the blinded grader runs on Fable, so JEV-29 produces a real Fable session anyway
+
+---
+
+## JEV-29: The blinded grader — build it, freeze it, prove the blind holds
+
+**Status:** ready-for-agent
+**Labels:** science, blocking
+**Blocked by:** None — and it blocks JEV-23
+
+**What to build:** The primary quality measure for the routing A/B, specified in
+`PREREGISTRATION.md` A3.3. It runs on `claude-fable-5-1`, out of band, after
+collection closes.
+
+The rubric is four dimensions (completeness, correctness, evidence, efficiency),
+each 1-5, unweighted mean. All of it frozen before any grading runs — criteria
+chosen after results are visible are not evidence.
+
+- [ ] Write the rubric with anchor descriptions for every 1-5 point, and freeze it at a commit quoted in the writeup
+- [ ] Strip `resolvedModel`, `modelsUsed` and tier-identifying text from graded material; randomise task order; do not disclose the arm ratio
+- [ ] Add the `JEV_GRADER` structural guard to the routing hook so grader delegations cannot enter the A/B
+- [ ] Grade in **one batch**, never incrementally
+- [ ] 10% double-graded sample; report quadratic-weighted kappa between passes
+- [ ] **Blind-integrity check**: ask the grader to name the tier on a held-out subset. Above chance = the blind failed, and the measure is reported as compromised
+- [ ] **Self-preference check**: Fable is both grader and routable tier. Report the score distribution by tier; systematic favour toward Fable-run tasks alongside a failed blind check means the verdict is not used
+
+---
+
 ## JEV-27: Power analysis for the routing A/B stopping rule
 
 **Status:** ready-for-agent
@@ -584,7 +629,7 @@ The derivation is specified in A2.4 so it cannot be tuned after the fact.
 - [ ] Estimate the per-delegated-task cost distribution by tier from existing subagent transcripts under `<session>/subagents/`
 - [ ] Take the minimum effect worth detecting from the break-even arithmetic already in the spec (37.5-44.4%)
 - [ ] Report N at 80% power, **clustered on session** — per-delegation randomisation within a session does not make the tasks independent
-- [ ] Commit the result as Amendment 3, which ratifies Amendment 2 in full
+- [ ] Commit the result as **Amendment 4**, which ratifies Amendments 2 and 3 in full
 - [ ] **If the required N exceeds what the window can produce, that is the finding.** The A/B runs anyway as a descriptive exercise and no inferential claim is made from it
 
 ---
