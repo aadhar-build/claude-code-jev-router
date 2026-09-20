@@ -371,7 +371,7 @@ Anthropic API key, and make the resulting confound impossible to miss.
 
 ## JEV-15: GATE 4 — the future-leakage test that does not exist
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** verification, blocking, science
 **Blocked by:** None (can start immediately). **Start it early anyway**: its last item parameterises the three existing gates on surface, which JEV-19, JEV-20 and JEV-34 all need before they can gate anything.
 
@@ -382,11 +382,54 @@ asserted in `PLAN.md`, `SPEC.md` and `FINDINGS.md` and verified nowhere.
 
 This applies to the already-live `pre_bash` surface. It should not wait for `stop`.
 
-- [ ] Fixture transcript; fire the hook; record `state_sha256_expected`
-- [ ] Append 20 more lines to the transcript; drain; assert the hash is UNCHANGED
-- [ ] Negative control: strip the offset, assert the capture is QUARANTINED not processed
-- [ ] Offline, `FakeArm` only, no network, no spend
-- [ ] Parameterise the three existing gates on surface — they are hardcoded to `pre_bash`
+- [x] Fixture transcript; fire the hook; record `state_sha256_expected`
+- [x] Append 20 more lines to the transcript; drain; assert the hash is UNCHANGED
+- [x] Negative control: strip the offset, assert the capture is QUARANTINED not processed
+- [x] Offline, `FakeArm` only, no network, no spend
+- [x] Parameterise the three existing gates on surface — they are hardcoded to `pre_bash`
+
+**Done 2026-09-20.** `./tests/gates.sh [surface]`, default `pre_bash`. **38
+assertions on `pre_bash`** (was 21), of which 10 are GATE 4. `tests/gate4_drain.py`
+is the drain step: it repoints every writable path in `paths` at a sandbox,
+drains through the **real** `worker.drain_once()` with `FakeArm` only, and
+reports what happened as JSON.
+
+**The gate has teeth, and proves it on every run.** `--mutate` wraps every entry
+of `state_builders.BUILDERS` in the exact decision-#7 violation — read
+`transcript_path` live, at worker time — and the gate asserts the hash it calls
+stable DOES move and that the leaked state DOES carry the later turns. A
+leakage test that cannot fail proves nothing, so the demonstration is part of the
+suite rather than a one-off. Verified additionally against two deliberately
+broken copies of the real source: a `build_pre_bash` that reads the transcript
+(2 failures), and a `build_stop` whose missing-offset refusal is replaced by a
+whole-file read (negative control, 2 failures).
+
+**`stop` is always exercised, whatever surface is passed.** On a payload-only
+surface the leakage assertion is true by construction; a gate that only ever
+tests the easy case is not a gate. GATE 4 **fails loudly** on a surface with no
+state builder (`agent_route` today) rather than skipping.
+
+**The gates no longer run against the live spool.** They used to
+`rm -f spool/ready/*.json` between assertions, `chmod 500` the live `spool/tmp`,
+move `spool/ready` and `logs/` aside, and write 501 filler files into the path a
+running worker drains — silent destruction of live captures, which is JEV-31/33's
+failure shape (a loss with no run row, no capture row and therefore no entry in
+the attrition count). Every hook invocation now runs with `CLAUDE_PROJECT_DIR`
+pointed at a throwaway root under `logs/`, and the last assertion greps the real
+`spool/` and `data/captures/` for the gate's own session id.
+
+**Three contradictions found, none fixed here.** (1) `docs/PLAN.md` decision #7
+says the spooler records `stat -f %z` as `transcript_bytes_at_capture` — it does
+not, and cannot: `capture.sh` parses no JSON. GATE 4 injects the offset the hook
+is unable to produce. That is JEV-19's blocker seen from the gate's side, and it
+means the `stop` leakage path is verified but **not reachable in production**.
+(2) `surfaces.json` → `state_source` is inert (JEV-31b) while `state_source` on
+every row comes from `state_builders.STATE_SOURCE`; GATE 4 asserts the row's
+value, i.e. the live one. (3) `paths.SURFACES` lists four surfaces, `CONTEXT.md`
+lists five — `agent_route` exists in the glossary and nowhere in code.
+
+**`tests/run_all.sh` does not call `gates.sh`** and was not changed (not this
+ticket's file). Now that the gates are sandboxed they are safe to add.
 
 ---
 
