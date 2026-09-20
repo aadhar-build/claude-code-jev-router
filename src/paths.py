@@ -35,6 +35,14 @@ RUNS = DATA / "runs"
 LABELS = DATA / "labels"
 FIXTURES = DATA / "fixtures"
 
+# JEV-38. The persisted "before" baseline: an append-only, IN-REPO record of
+# per-session derived metrics, snapshotted from transcripts that live outside
+# this folder under a retention policy we do not control. This is the one
+# directory under data/ that is committed to git, because it is the one thing
+# that must survive losing the folder. Derived numbers only -- never prompt
+# text, never message content.
+BASELINE = DATA / "baseline"
+
 # JEV-33. The backpressure-drop stream, written by hooks/capture.sh (NOT by
 # store.py) when the spool is too deep to accept another capture, and the
 # monotonic spool high-water mark, written by the worker. Both live under
@@ -48,6 +56,15 @@ SPOOL_WATERMARK = DATA / "spool_watermark.json"
 # write there. Fixtures used by tests are copied into FIXTURES.
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
 
+# Also outside ROOT and also READ-ONLY. Claude Code's own prompt index: one
+# line per prompt the user typed, carrying {timestamp, project, sessionId,
+# display}. JEV-38 reads ONLY the first three -- `display` is the prompt text
+# and is never read, never copied. It is the independent index against which
+# "how many sessions were already unrecoverable" can be answered at all: a
+# session_id that appears here with no transcript on disk is a session that
+# has been reaped.
+CLAUDE_HISTORY = Path.home() / ".claude" / "history.jsonl"
+
 WRITABLE_DIRS = [
     SPOOL_TMP,
     SPOOL_READY,
@@ -56,6 +73,7 @@ WRITABLE_DIRS = [
     RUNS,
     LABELS,
     FIXTURES,
+    BASELINE,
     DROPS,
     LOGS,
     REPORTS,

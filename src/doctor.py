@@ -31,7 +31,22 @@ USER_SETTINGS = Path.home() / ".claude" / "settings.json"
 PROJECT_LOCAL_SETTINGS = paths.ROOT / ".claude" / "settings.local.json"
 
 # Paths that source code is allowed to reference outside ROOT, read-only.
-ALLOWED_OUTSIDE_READS = {"CLAUDE_PROJECTS"}
+ALLOWED_OUTSIDE_READS = {"CLAUDE_PROJECTS", "CLAUDE_HISTORY"}
+
+# The only paths under data/ that may be tracked by git, listed exactly rather
+# than by prefix so that a new file cannot join the list by accident. Each is
+# aggregate or synthetic, carries no third-party content, and has a stated
+# reason to outlive the folder:
+#   canary-set-v1.json          a PRE-REGISTERED fixture; unauditable if untracked
+#   baseline/*                  JEV-38: derived per-session metrics whose SOURCE
+#                               lives outside this repo under a retention sweep
+#                               we do not control
+COMMITTABLE_DATA_PATHS = {
+    "data/fixtures/canary-set-v1.json",
+    "data/baseline/sessions.jsonl",
+    "data/baseline/manifest.json",
+    "data/baseline/delegation-pre-rule-v1.json",
+}
 
 results: list[tuple[str, str, str]] = []
 
@@ -134,12 +149,18 @@ def check_nothing_staged_secret() -> None:
     except (subprocess.CalledProcessError, FileNotFoundError):
         record("WARN", "git", "not a git repository yet")
         return
-    leaked = [f for f in tracked if f == ".env" or f.startswith(("data/", "spool/", "logs/"))
-              or f == ".claude/settings.local.json"]
+    leaked = [f for f in tracked
+              if f not in COMMITTABLE_DATA_PATHS
+              and (f == ".env" or f.startswith(("data/", "spool/", "logs/"))
+                   or f == ".claude/settings.local.json")]
     if leaked:
         record("FAIL", "git-tracked", f"should never be tracked: {', '.join(leaked)}")
     else:
-        record("PASS", "git-tracked", f"{len(tracked)} files tracked, none sensitive")
+        allowed = sorted(f for f in tracked if f in COMMITTABLE_DATA_PATHS)
+        detail = f"{len(tracked)} files tracked, none sensitive"
+        if allowed:
+            detail += f"; {len(allowed)} allowlisted under data/ ({', '.join(allowed)})"
+        record("PASS", "git-tracked", detail)
 
 
 def check_user_settings_untouched() -> None:

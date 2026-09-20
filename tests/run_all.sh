@@ -15,6 +15,9 @@ python3 "$ROOT/tests/test_validation.py" 2>&1 | tail -4 || exit 1
 echo "=== baseline: known answers from a real transcript ==="
 python3 "$ROOT/tests/test_session_metrics.py" 2>&1 | tail -4 || exit 1
 
+echo "=== baseline: the persisted 'before' record is append-only and idempotent ==="
+python3 "$ROOT/tests/test_baseline.py" 2>&1 | tail -4 || exit 1
+
 echo "--- canary: frozen set stability, drift flags, row-schema identity ---"
 python3 "$ROOT/tests/test_canary.py" 2>&1 | tail -4 || exit 1
 echo "=== doctor ==="

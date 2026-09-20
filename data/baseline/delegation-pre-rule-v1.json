@@ -1,0 +1,172 @@
+{
+  "schema": "delegation-pre-rule-v1",
+  "ticket": "JEV-24a",
+  "frozen_at": "2026-09-20T14:45:36.575+00:00",
+  "cut": {
+    "timestamp_utc": "2026-09-20T11:11:49Z",
+    "commit": "f890a3b9cddee9109638381968935d001bc14ffc",
+    "basis": "first durable record of Q17b: the commit that introduced the Q17b row into SPEC.md. The rule was answered at or before this instant, never after, so the cut cannot admit post-rule behaviour.",
+    "direction": "conservative: the rule was adopted at or before the cut, so nothing counted here can be post-rule behaviour"
+  },
+  "cut_note": "JEV-24a says 'sessions after that point are already post-rule'. On this corpus that unit does not work: the rule was adopted MID-SESSION inside 4ba49645, the only sustained work session the repo has, which spans 2026-09-19T19:58Z to the present. A session-level cut would either drop the entire real corpus or admit the post-rule half of it. The cut is therefore applied per billable REQUEST and per delegated TASK, by timestamp. This is a deviation from the ticket's literal wording and is recorded as one.",
+  "transcript_window": {
+    "first_request_utc": "2026-09-19T19:58:56.537000+00:00",
+    "last_pre_cut_request_utc": "2026-09-20T11:11:46.821000+00:00",
+    "cut_utc": "2026-09-20T11:11:49Z"
+  },
+  "denominators": {
+    "by_spend": "delegated_cost_usd / (main_session_cost_usd + delegated_cost_usd), over deduplicated billable requests timestamped before the cut. This is the measure A2.6 registers and is the PRIMARY figure.",
+    "by_task_count": "delegated_tasks / (delegated_tasks + human_prompts). A 'unit of work' has no canonical count in a transcript; a typed human prompt is the closest available analogue of a unit of work that was NOT delegated. The raw counts are frozen beside the ratio so any other denominator can be recomputed."
+  },
+  "all_sessions": {
+    "sessions": 9,
+    "unpriced_requests": 6,
+    "unpriced_models": [
+      "claude-opus-4-7"
+    ],
+    "unpriced_note": "requests on a model absent from config/pricing.json contribute 0 to both numerator and denominator of the by-spend rate. They are counted here rather than hidden.",
+    "main_session_cost_usd": 56.95676,
+    "delegated_cost_usd": 11.039621,
+    "total_cost_usd": 67.996381,
+    "delegated_tasks": 7,
+    "human_prompts": 37,
+    "delegation_rate_by_spend": 0.162356,
+    "delegation_rate_by_task_count": 0.159091
+  },
+  "interactive_sessions_only": {
+    "sessions": 1,
+    "unpriced_requests": 0,
+    "unpriced_models": [],
+    "unpriced_note": "requests on a model absent from config/pricing.json contribute 0 to both numerator and denominator of the by-spend rate. They are counted here rather than hidden.",
+    "main_session_cost_usd": 56.95676,
+    "delegated_cost_usd": 11.039621,
+    "total_cost_usd": 67.996381,
+    "delegated_tasks": 7,
+    "human_prompts": 37,
+    "delegation_rate_by_spend": 0.162356,
+    "delegation_rate_by_task_count": 0.159091
+  },
+  "per_session": [
+    {
+      "session_id": "1d926ee0-e031-4e1b-843d-55096f168159",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
+      "session_id": "20299ea6-2465-47e3-990e-214ceca98deb",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 6,
+      "unpriced_requests_pre_cut": 6,
+      "unpriced_models_pre_cut": [
+        "claude-opus-4-7"
+      ],
+      "main_cost_usd": 0.0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": "2026-09-20T05:37:39.335000+00:00",
+      "last_request_utc": "2026-09-20T05:39:15.694000+00:00"
+    },
+    {
+      "session_id": "4ba49645-fb8d-4fb2-b496-c274f6ed1490",
+      "kind": "interactive",
+      "requests_pre_cut": 478,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 56.95676,
+      "delegated_cost_usd": 11.039621,
+      "delegated_tasks": 7,
+      "human_prompts": 37,
+      "first_request_utc": "2026-09-19T19:58:56.537000+00:00",
+      "last_request_utc": "2026-09-20T11:11:46.821000+00:00"
+    },
+    {
+      "session_id": "53bbfa19-2c93-404b-a982-367e5bd70895",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
+      "session_id": "60096036-c4d8-4efd-9fdb-3814bc3dfee6",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
+      "session_id": "6e46440d-715f-438f-8e95-9750be3f8801",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
+      "session_id": "7b00a5bd-df0e-4158-b6fc-efdd56d3ad9d",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
+      "session_id": "a215a9ad-51f8-4412-811d-3d158457c7f5",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
+      "session_id": "ddc79a40-62db-4803-9194-4f8486f51828",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    }
+  ],
+  "external_validity_note": "PREREGISTRATION A2.6 registers this as the anchor for the confound: the 'delegate where possible' rule deliberately raises the delegation rate, improving power and lowering external validity. This is the rate before that reshaping. A2.5 asks for the analysis with and without this experiment's own infrastructure work -- on this corpus essentially ALL the work is infrastructure work on this experiment, so the 'without' variant is empty and the split offered instead is interactive versus tool-invoked sessions.",
+  "limitations": "The pre-cut window is roughly 15 hours of a single-author, single-repo corpus. It is a point estimate from one session, not a sample. It bounds nothing and must be reported as an anchor, not as a population rate."
+}

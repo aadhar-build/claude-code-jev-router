@@ -1,0 +1,61 @@
+{
+  "schema": "baseline-v1",
+  "ticket": "JEV-38",
+  "snapshot_at": "2026-09-20T14:45:35.652+00:00",
+  "project_root": "/Users/aadharagarwal/projects/JEV-experiments",
+  "transcript_dir": "/Users/aadharagarwal/.claude/projects/-Users-aadharagarwal-projects-JEV-experiments",
+  "sessions_captured": 9,
+  "sessions_appended_this_run": [
+    "4ba49645-fb8d-4fb2-b496-c274f6ed1490",
+    "a215a9ad-51f8-4412-811d-3d158457c7f5"
+  ],
+  "sessions_unchanged_this_run": [
+    "1d926ee0-e031-4e1b-843d-55096f168159",
+    "20299ea6-2465-47e3-990e-214ceca98deb",
+    "53bbfa19-2c93-404b-a982-367e5bd70895",
+    "60096036-c4d8-4efd-9fdb-3814bc3dfee6",
+    "6e46440d-715f-438f-8e95-9750be3f8801",
+    "7b00a5bd-df0e-4158-b6fc-efdd56d3ad9d",
+    "ddc79a40-62db-4803-9194-4f8486f51828"
+  ],
+  "total_computed_cost_usd": 118.170591,
+  "total_delegated_cost_usd": 36.348916,
+  "total_delegated_tasks": 20,
+  "total_human_prompts": 58,
+  "unpriced_requests": 34,
+  "unpriced_models": [
+    "claude-opus-4-7"
+  ],
+  "unpriced_note": "Spend on a model absent from config/pricing.json is NOT included in total_computed_cost_usd. It is counted here so the gap is visible.",
+  "window": {
+    "first_activity_utc": "2026-09-19T19:58:40.512000+00:00",
+    "last_activity_utc": "2026-09-20T14:45:35.814000+00:00"
+  },
+  "retention": {
+    "setting": "cleanupPeriodDays",
+    "default_days": 30,
+    "configured_value": null,
+    "effective_days": 30,
+    "covers_subagent_transcripts": true,
+    "when_cleanup_runs": "retention sweep at CLI startup (skipped by --bare)",
+    "claude_code_version": "2.1.278",
+    "established_on": "2026-09-20",
+    "sources": [
+      "https://code.claude.com/docs/en/data-usage.md#data-retention -- 'Claude Code clients store session transcripts locally in plaintext under ~/.claude/projects/ for 30 days by default to enable session resumption. Adjust the period with cleanupPeriodDays.'",
+      "https://code.claude.com/docs/en/claude-directory.md#automatic-cleanup-in-claude-code -- default 30 days, minimum 1 day; the cleanup table lists projects/<project>/<session>/subagents/ explicitly, so subagent transcripts are swept on the same clock.",
+      "https://code.claude.com/docs/en/settings-reference.md"
+    ],
+    "what_this_means_for_the_study": "The 'before' baseline's source data is deleted 30 days after a session's files were last touched, by a third party's sweep, on a clock this repo does not control. data/baseline/ is the only copy that survives that. It is committed for exactly that reason."
+  },
+  "already_unrecoverable": {
+    "determinable": true,
+    "count": 0,
+    "is_lower_bound": true,
+    "missing_session_ids": [],
+    "method": "diff ~/.claude/history.jsonl (prompt index, project-filtered, reading only {timestamp, sessionId}) against transcripts on disk",
+    "blind_spot": "the prompt index records only sessions that received a typed prompt; a reaped NON-interactive session (claude -p, advisor, hook-spawned) leaves no trace in it and is not counted. Treat the count as a lower bound, never as a proof of zero loss.",
+    "indexed_sessions": 1,
+    "sessions_on_disk": 9
+  },
+  "derived_numbers_only": "No third-party transcript content is copied into this folder. No prompt text, no message content, no subagent description. Only counts, costs, timings and file fingerprints."
+}
