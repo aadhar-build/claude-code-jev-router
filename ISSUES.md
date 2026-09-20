@@ -1580,15 +1580,20 @@ the sandbox's switch. 40 assertions, all passing, unchanged set.
 
 1. `tests/audit_live_writes.sh` — a static scan that ENUMERATES `tests/*.sh` and
    fails the suite if any line aims a destructive verb (`rm`/`mv`/`cp`/`chmod`/
-   `chown`/`ln`/`truncate`) or an output redirect at `$ROOT/spool`, `$ROOT/data`,
-   `$ROOT/logs` or `$ROOT/.jev-disabled`, or sets `CLAUDE_PROJECT_DIR=$ROOT`.
+   `chown`/`ln`/`truncate`/`touch`) or an output redirect at `$ROOT/spool`,
+   `$ROOT/data`, `$ROOT/logs` or `$ROOT/.jev-disabled`, or sets
+   `CLAUDE_PROJECT_DIR=$ROOT`, or `mkdir`s at the kill switch (any entry there
+   means OFF, JEV-40). `touch` counts because of the kill switch specifically:
+   it deletes nothing and still loses every capture fired while it is set.
    Read-only references stay legal — `gates.sh` greps the live spool precisely to
    prove it left no trace there — so the rule is verb-based, not path-based.
    `mkdir`/`mktemp` are not destructive verbs, because creating the sandbox under
    `logs/` is the sanctioned pattern and flagging it would train exemptions. It
    runs FIRST in `run_all.sh`, before any test executes. Its own mutation test is
    in `test_hook_mutations.sh`: pointed at the pre-fix `test_hook.sh` recovered
-   from git, it must reject the file and name lines 18, 58, 85 and 121.
+   from git at a PINNED commit — `HEAD` is now the fixed file, so pinning is
+   what stops the proof inverting into a permanent false failure — and it must
+   reject that file and name lines 18, 38, 58, 85 and 121.
 
 2. `tests/lib/live_guard.sh` — a runtime tripwire run after EVERY test, naming
    the test that moved the window. A plain directory diff is useless here because
@@ -1642,6 +1647,7 @@ decision #7 / `transcript_bytes_at_capture` finding filed alongside JEV-42 in th
 same report belongs to JEV-19 and is not addressed here.
 
 ---
+
 ## JEV-43: `cc_*` wall-clock is contaminated by the operator's own user-level hooks
 
 **Status:** ready-for-agent

@@ -134,20 +134,28 @@ DETECTED=$( { grep -rl "hooktest-99999" "$DECOY/spool" 2>/dev/null; \
 # than a synthetic one.
 echo
 echo "  --- audit_live_writes.sh against the pre-fix test_hook.sh ---"
+# PINNED, not HEAD. Once the fix is committed, HEAD:tests/test_hook.sh is the
+# SANDBOXED file, which the scanner passes -- and this proof would invert into
+# a permanent false failure. b523902 is the last commit carrying the
+# destructive test_hook.sh, and the line numbers below are that file's.
+PREFIX_COMMIT="b523902695ac"
 OLD="$SANDBOX/old"
 mkdir -p "$OLD"
-if git -C "$ROOT" show HEAD:tests/test_hook.sh > "$OLD/test_hook.sh" 2>/dev/null; then
+if git -C "$ROOT" show "$PREFIX_COMMIT:tests/test_hook.sh" > "$OLD/test_hook.sh" 2>/dev/null; then
   if "$ROOT/tests/audit_live_writes.sh" "$OLD" >"$OUT" 2>&1; then
     bad "the scanner passed the file that destroyed live captures"
   else
     ok "the scanner REJECTS the pre-fix test_hook.sh"
     for expect in \
-      'test_hook.sh:18' 'test_hook.sh:58' 'test_hook.sh:85' 'test_hook.sh:121'; do
+      'test_hook.sh:18' 'test_hook.sh:38' 'test_hook.sh:58' 'test_hook.sh:85' \
+      'test_hook.sh:121'; do
       grep -q "$expect" "$OUT" && ok "  names $expect" || bad "  did not name $expect"
     done
   fi
 else
-  echo "  --    HEAD:tests/test_hook.sh unavailable; scanner mutation test skipped"
+  # Not a skip. A proof that quietly opts out when its fixture is missing is
+  # precisely the failure this file exists to argue against.
+  bad "$PREFIX_COMMIT:tests/test_hook.sh could not be read -- the scanner has no mutation test"
 fi
 
 # And the negative direction: a read-only reference to the live spool -- which

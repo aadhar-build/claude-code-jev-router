@@ -13,14 +13,19 @@
 # rather than a convention.
 #
 # WHAT COUNTS AS A VIOLATION
-#   1. a destructive verb (rm / mv / cp / chmod / chown / ln / truncate) or an
-#      output redirect, aimed at $ROOT/spool, $ROOT/data, $ROOT/logs or
-#      $ROOT/.jev-disabled
+#   1. a destructive verb (rm / mv / cp / chmod / chown / ln / truncate /
+#      touch) or an output redirect, aimed at $ROOT/spool, $ROOT/data,
+#      $ROOT/logs or $ROOT/.jev-disabled. `touch` is in that list because of
+#      the kill switch: `touch "$ROOT/.jev-disabled"` deletes nothing and
+#      still loses every capture that fires while it is set, and a test killed
+#      before its `rm -f` leaves collection off indefinitely.
+#   1b. `mkdir` aimed at $ROOT/.jev-disabled -- the hooks treat ANY entry at
+#      that path as OFF (JEV-40), so `mkdir` there is the same outage.
 #   2. CLAUDE_PROJECT_DIR set to $ROOT -- that is what points a live hook at
 #      the real spool, and it is how a capture lands there even with no rm in
 #      sight
 #
-# `mkdir` and `mktemp` are deliberately NOT destructive verbs: creating a fresh
+# Elsewhere `mkdir` and `mktemp` are deliberately NOT destructive verbs: a fresh
 # throwaway directory under the gitignored logs/ is exactly the sanctioned
 # sandbox pattern (gates.sh does it), and flagging it would train people to add
 # exemptions.
@@ -52,7 +57,10 @@ import os, re, sys
 tests = sys.argv[1]
 
 LIVE = re.compile(r'\$\{?ROOT\}?"?/(spool|data|logs)\b|\$\{?ROOT\}?"?/\.jev-disabled')
-VERB = re.compile(r'(?:^|[\s;&|(])(rm|mv|cp|chmod|chown|ln|truncate)\s')
+VERB = re.compile(r'(?:^|[\s;&|(])(rm|mv|cp|chmod|chown|ln|truncate|touch)\s')
+# The kill switch is the one path where creating an entry IS the damage.
+SWITCH = re.compile(r'\$\{?ROOT\}?"?/\.jev-disabled')
+MKDIR = re.compile(r'(?:^|[\s;&|(])mkdir\s')
 REDIR = re.compile(r'(?<![0-9<>])>>?\s*"?\$\{?ROOT')
 CPD = re.compile(r'CLAUDE_PROJECT_DIR=\{?"?\$\{?ROOT\}?')
 EXEMPT = re.compile(r'#\s*jev-live-ok:')
@@ -76,6 +84,8 @@ for name in sorted(os.listdir(tests)):
         why = None
         if CPD.search(line):
             why = "points a hook at the LIVE project root (CLAUDE_PROJECT_DIR=$ROOT)"
+        elif SWITCH.search(line) and MKDIR.search(line):
+            why = "mkdir at the live kill switch -- ANY entry there means OFF (JEV-40)"
         elif LIVE.search(line) and (VERB.search(line) or REDIR.search(line)):
             why = "destructive write to the live spool/ data/ logs/ or kill switch"
         if why is None:
