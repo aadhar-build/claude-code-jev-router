@@ -143,7 +143,7 @@ ever be differenced against, so it starts collecting on day 0.
 
 ## JEV-07: Pre-registration
 
-**Status:** blocked
+**Status:** done
 **Labels:** science, blocking
 **Blocked by:** JEV-04, JEV-05
 
@@ -151,14 +151,16 @@ ever be differenced against, so it starts collecting on day 0.
 record is collected. Blocked on 4 and 5 deliberately: you can only honestly
 pre-register metrics you have already demonstrated you can compute.
 
-- [ ] Primary metric and directional hypothesis stated per surface
-- [ ] Secondary metrics explicitly marked as secondary
-- [ ] Stopping rule is calendar-based; N is explicitly not a stopping criterion
-- [ ] Exclusions decided in advance: sidechains, failed runs, canary and synthetic rows
-- [ ] The synthetic/live split stated, and which claims rest on which
-- [ ] Pricing snapshot date recorded
-- [ ] States plainly that Phase 1 makes no accuracy or calibration claim
-- [ ] Committed; its git hash is the citation used in the writeup
+- [x] Primary metric and directional hypothesis stated per surface
+- [x] Secondary metrics explicitly marked as secondary
+- [x] Stopping rule is calendar-based; N is explicitly not a stopping criterion
+- [x] Exclusions decided in advance: sidechains, failed runs, canary and synthetic rows
+- [x] The synthetic/live split stated, and which claims rest on which
+- [x] Pricing snapshot date recorded
+- [x] States plainly that Phase 1 makes no accuracy or calibration claim
+- [x] Committed; its git hash is the citation used in the writeup
+- [x] Records which hypotheses the day-0 spike settled BEFORE collection — notably the falsified determinism hypothesis — so a reader can see which questions were open at which point
+- [x] States what would falsify the headline, and that 'inconclusive at this sample size' is the most probable outcome
 
 ---
 
