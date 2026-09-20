@@ -166,18 +166,22 @@ pre-register metrics you have already demonstrated you can compute.
 
 ## JEV-08: Go live on pre_bash
 
-**Status:** blocked
+**Status:** done
 **Labels:** hooks, verification, blocking
 **Blocked by:** JEV-07
 
 **What to build:** The first real capture from a real session -- gated behind
 three verification tests that must all pass before the hook is enabled.
 
-- [ ] Hook registered in `.claude/settings.local.json` for `pre_bash` only, with `$CLAUDE_PROJECT_DIR`-anchored paths
-- [ ] Isolation gate: a control directory produces nothing; the worktree-subagent case is exercised and its spool destination recorded; `settings.local.json` confirmed gitignored
-- [ ] Fail-open gate: bogus key, unreachable host and a read-only spool all leave the session unaffected and the hook exiting 0
-- [ ] Kill-switch gate: `.jev-disabled` produces zero activity
-- [ ] A real session in this repo produces exactly one capture with a matching `session_id`
+- [x] Hook registered in `.claude/settings.local.json` for `pre_bash` only, with `$CLAUDE_PROJECT_DIR`-anchored paths
+- [x] Isolation gate: a control directory produces nothing; the worktree-subagent case is exercised and its spool destination recorded; `settings.local.json` confirmed gitignored
+- [x] Fail-open gate: bogus key, unreachable host and a read-only spool all leave the session unaffected and the hook exiting 0
+- [x] Kill-switch gate: `.jev-disabled` produces zero activity
+- [x] A real session in this repo produces a capture with a matching `session_id`
+- [x] `tests/gates.sh` runs all three gates as one adversarial suite: 21 assertions, all passing
+- [x] Live payload confirms the assumed schema (`session_id`, `prompt_id`, `tool_use_id`, `cwd`, `permission_mode`, `transcript_path`, `effort`); `agent_id`/`agent_type` are absent on a main-session call, so `is_sidechain` correctly reads false
+- [x] Registration is picked up MID-SESSION — no restart needed
+- [x] First live decisions drained end to end: 3/3 arms ok
 
 ---
 
