@@ -1,5 +1,9 @@
 """A small HTTP client with decomposed timings.
 
+Named `timed_http` rather than `http`: `src/arms` lands on sys.path, and a
+module called `http` there shadows the standard library package of that name
+for everything else in the process.
+
 Standard library only, deliberately. The alternative is a dependency whose
 connection pooling would hide exactly the thing being measured: this study cares
 about DNS, TCP and TLS setup separately from server time, because the vendor's
@@ -16,8 +20,6 @@ import json
 import socket
 import ssl
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 from urllib.parse import urlparse
 

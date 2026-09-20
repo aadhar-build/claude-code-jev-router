@@ -50,6 +50,9 @@ def load_arm_module(kind: str):
     if kind == "anthropic":
         from arms import claude
         return claude
+    if kind == "claude_cli":
+        from arms import claude_cli
+        return claude_cli
     raise ValueError(f"unknown arm kind: {kind}")
 
 

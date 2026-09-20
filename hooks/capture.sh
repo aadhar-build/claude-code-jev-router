@@ -24,6 +24,13 @@ else
   exec 2>/dev/null
 fi
 
+# Recursion guard. The cc_* arms shell out to `claude -p`, which starts a real
+# Claude Code session -- one that would load this project's hooks and capture
+# its own decisions straight back into the dataset. The worker exports this to
+# every arm subprocess; env vars are inherited, so the guard holds however deep
+# the spawn goes.
+[ -n "$JEV_ARM_SUBPROCESS" ] && exit 0
+
 ROOT="${CLAUDE_PROJECT_DIR:-}"
 [ -n "$ROOT" ] || exit 0
 [ -d "$ROOT" ] || exit 0

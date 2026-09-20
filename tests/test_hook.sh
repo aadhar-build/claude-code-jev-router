@@ -83,6 +83,14 @@ after=$(count)
 [ "$before" = "$after" ]   && ok "backpressure: stops writing past the cap" || bad "wrote past cap ($before -> $after)"
 reset
 
+# --- recursion guard --------------------------------------------------------
+# The cc_* arms spawn `claude -p`. Without this guard that session would fire
+# these hooks and feed its own decisions back into the dataset.
+reset
+(cd "$ROOT" && echo "$PAYLOAD" | JEV_ARM_SUBPROCESS=1 CLAUDE_PROJECT_DIR="$ROOT" "$HOOK" pre_bash); rc=$?
+[ "$rc" -eq 0 ]      && ok "arm subprocess: exits 0" || bad "arm subprocess exit $rc"
+[ "$(count)" = "0" ] && ok "arm subprocess: captures nothing (no feedback loop)" || bad "captured from an arm subprocess"
+
 # --- missing logs/ (fail-open on a fresh checkout) ---------------------------
 # logs/ is gitignored, so it is absent on a clone. If the stderr redirect ran
 # before the trap was installed, the hook would exit non-zero here.

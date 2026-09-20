@@ -30,7 +30,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from arms import http  # noqa: E402
+from arms import timed_http  # noqa: E402
 from arms.base import ArmConfig, ArmError, Run, Usage  # noqa: E402
 
 import paths  # noqa: E402
@@ -99,7 +99,7 @@ def evaluate(state: str, questions: dict[str, Any], config: ArmConfig) -> Run:
         "state": state,
         "questions": to_wire(questions),
     }
-    body, timing = http.post_json(
+    body, timing = timed_http.post_json(
         config.endpoint or ENDPOINT,
         payload,
         {"Authorization": f"Bearer {api_key}"},

@@ -47,6 +47,24 @@
       "kind": "fake",
       "timeout_s": 0.0,
       "role": "test_double"
+    },
+    "cc_opus5": {
+      "arm_config_id": "cc-opus5-cli-v1",
+      "kind": "claude_cli",
+      "model": "claude-opus-5",
+      "effort": "low",
+      "timeout_s": 180.0,
+      "role": "deployment_realism",
+      "_comment": "Claude Code on the subscription. Measures the shipped harness -- ~5.2K-token preamble, a tool round trip and a process spawn -- not the model as a classifier. Reported separately from opus5; never the headline."
+    },
+    "cc_haiku45": {
+      "arm_config_id": "cc-haiku45-cli-v1",
+      "kind": "claude_cli",
+      "model": "claude-haiku-4-5",
+      "effort": "low",
+      "timeout_s": 180.0,
+      "role": "deployment_realism",
+      "_comment": "As cc_opus5, on Haiku."
     }
   },
   "enabled": [
