@@ -15,41 +15,91 @@ Last updated 2026-09-20. Live collection **has started** (60 synthetic items and
 
 ---
 
-## Executive summary
+## Executive summary — does Jev make Claude Code faster, more accurate, or token-optimised?
 
-**Does Jev help? On the evidence so far: yes, but never at the default threshold.**
+That is the question the article is trying to answer, and it is **not** the same
+question as "is Jev a good classifier". Jev is a good classifier — that much is
+now measured. But a decision layer only improves the harness if what it decides
+changes what the harness does, and on two of the three axes **a gate can only
+ever make things worse.**
 
-The single result that matters, from 60 stratified synthetic commands:
+Taking the three axes in turn, against a real reconciled session (328 requests,
+179 Bash calls, $70.08, 313,849 input-side tokens per request):
+
+### Faster? **No — a gate makes Claude Code slower.**
+
+A Jev call is 557ms p50 and 2,681ms p99. In shadow mode that is free, because
+nothing blocks. **In enforce mode it is added to every gated command.** Gating
+all 179 Bash calls in that session would have added **~100 seconds of wall-clock
+the user waits through**, and the p99 is what you actually feel.
+
+A gate can only be net-faster by preventing something slower — a destructive
+command whose recovery costs minutes. **We have not observed a single such
+event**, and in this repository the destructive base rate is approximately zero.
+
+### Token-optimised? **No — a gate adds tokens.**
+
+Jev costs ~337 input tokens per decision. It removes none. Gating that session
+would have **added 60,323 tokens**, not saved any.
+
+The magnitude is trivial — 0.107% of a turn, $0.0025 for the whole session — so
+this is not an argument against gating. But the *direction* is unambiguous, and
+"token-optimised" is not a claim a gate can support.
+
+### More accurate? **Unmeasured, and not measurable in this repository.**
+
+Jev ranks commands as well as Claude Code does:
 
 | question | AUC(jev) | AUC(cc_opus5) | difference | 95% CI |
 |---|---|---|---|---|
 | destructive | 0.977 | 0.980 | −0.005 | [−0.031, +0.018] |
 | needs_review | 0.951 | 0.956 | −0.005 | [−0.060, +0.041] |
 
-**Jev ranks commands as well as Claude Code does, at 1,423× lower cost and 7.6×
-lower latency** (557ms vs 4,219ms p50; 2.7s vs 32s p99). Both intervals straddle
-zero. See Part 4b.
+But ranking well is not the same as improving the harness. **Accuracy improves
+only if the gate catches a mistake that would otherwise have happened**, and we
+have zero observations of that. A one-week single-repository collection is very
+unlikely to produce one; the pre-registration already concedes this.
 
-Four things qualify that, and each is a finding in its own right:
+### So where does the upside actually live? **Routing, not gating.**
 
-1. **τ=0.5 is wrong for Jev on both questions.** At the default it misses 16% of
-   destructive commands, and flags 62% of benign ones for review. Its
-   Youden-optimal thresholds are 0.36 and 0.95. The fix is one constant per
-   question; the model needed no change at all. (4b)
-2. **The cost and latency advantage is inflated by the baseline's wrapper.** The
-   `cc_*` arms are Claude Code as deployed — ~10K tokens of preamble and a
-   process spawn. The comparison is honest about *the deployed system*, not
-   about Opus as a classifier. (Part 3)
-3. **Jev is not deterministic near the threshold**, flipping a decision once in
-   twenty calls on a borderline command. Fine for shadow mode; a genuine hazard
-   for enforcement. (2.3)
-4. **A session's true cost cannot be reconstructed from Claude Code's
+The asymmetry is stark. A gate is additive on every axis. A router is
+multiplicative:
+
+> One turn moved from Opus to Haiku saves **$0.0520 — 3,674× the cost of the
+> Jev call that decided it.** It also removes an entire frontier-model turn from
+> the critical path, which is the only mechanism in this study that could make
+> Claude Code genuinely *faster*.
+
+**This is a course correction.** Four surfaces were specified and `pre_bash` was
+staged first, on the reasoning that it was the simplest to measure. That was
+right for validating the harness and wrong for answering the article's question.
+The surface that could make Claude Code faster, cheaper and more token-efficient
+is the one with the least evidence: an 8-prompt probe, run outside the harness,
+which was **confidently wrong on the hardest item in the set**.
+
+### What is solidly established
+
+1. **Jev ranks as well as a frontier model on the gate questions**, at ~1,400×
+   lower cost and 7.6× lower latency (557ms vs 4,219ms p50; 2.7s vs 32s p99).
+   (Part 4b)
+2. **τ=0.5 is wrong for Jev on both questions.** At the default it misses 16% of
+   destructive commands and flags 62% of benign ones. Optimal thresholds are
+   0.36 and 0.95 — but those are fitted on the data they were evaluated on and
+   are **not yet validated**. (4b)
+3. **The cost and latency advantage is partly an artefact of the baseline.** The
+   `cc_*` arms are Claude Code as deployed — ~10K tokens of preamble plus a
+   process spawn. The honest comparison is against *the deployed system*.
+   (Part 3)
+4. **Jev is not deterministic near the threshold**, flipping a decision once in
+   twenty calls on a borderline command. Tolerable in shadow; a genuine hazard
+   in enforcement. (2.3)
+5. **A session's true cost cannot be reconstructed from Claude Code's
    transcripts** — ours runs 27.6% under Claude Code's own total even after
    folding in subagent files. Any transcript-derived cost is a lower bound.
    (Part 1)
 
-Everything is synthetic or small-n. Nothing here is a calibration claim in the
-Brier/ECE sense, and no claim rests on human labels — those are Phase 2.
+Everything is synthetic or small-n. No claim here rests on human labels, and
+none is a calibration claim in the Brier/ECE sense — those are Phase 2.
 
 ---
 
@@ -467,6 +517,48 @@ Phase 2 gold labels. And the live base rate will be far more skewed than 1:2,
 so live agreement numbers will look completely different.
 
 ---
+
+## Part 4c — Gate vs router: the arithmetic behind the three axes [SOLID]
+
+Measured against the reconciled session (Part 1): 328 requests, 179 Bash calls,
+$70.08, 313,849 input-side tokens per request.
+
+**What a `pre_bash` gate adds, per Bash command:**
+
+| axis | per command | as a share of one turn |
+|---|---|---|
+| tokens | **+337** | 0.107% |
+| cost | **+$0.000014** | 0.0066% |
+| latency | **+557ms p50, +2,681ms p99** | blocking, in enforce mode only |
+
+Across all 179 Bash calls in that session: **+60,323 tokens, +$0.0025, and ~100
+seconds of added wall-clock.** Cost is negligible. Latency is not — 100 seconds
+is a minute and a half the user sits through, and the p99 is what gets noticed.
+
+**What a router saves, per turn correctly downgraded:**
+
+A representative turn (30K cache read, 2K cache write, 1.5K output) costs
+$0.0650 on Opus and $0.0130 on Haiku.
+
+| | value |
+|---|---|
+| saved per correct downgrade | **$0.0520** |
+| cost of the Jev call deciding it | $0.000014 |
+| **leverage** | **3,674×** |
+
+**The structural point.** A gate is *additive* on every axis — tokens, cost and
+latency all go up, and the only route to a net gain is preventing an expensive
+mistake. A router is *multiplicative* — one correct decision removes an entire
+frontier-model turn from both the bill and the critical path.
+
+For the article's question, this is decisive: **gating cannot make Claude Code
+faster or more token-efficient, by construction.** It can only make it safer,
+and safety is the one thing this repository's near-zero destructive base rate
+cannot demonstrate.
+
+The uncomfortable implication is that the surface we measured most carefully is
+the one least able to answer the question being asked, and the surface that
+could answer it has an 8-prompt probe behind it.
 
 ## Part 5 — Model routing: a promising probe, and its failure mode
 
