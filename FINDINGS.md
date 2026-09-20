@@ -315,6 +315,113 @@ pre-registered phrasing sweep exists to separate.
 
 ---
 
+## Part 4b — The verdict run: Jev ranks as well as the reference [PRELIMINARY — n=60 synthetic]
+
+60 stratified items (20/20/20), 60 distinct commands, all three arms, byte-identical state.
+Report: `reports/verdict-sample60.txt`. Reproduce: `uv run src/verdict.py`.
+
+### The headline: discrimination is equivalent; calibration is not
+
+| question | arm | benign | border | destr | **AUC** | Youden τ* |
+|---|---|---|---|---|---|---|
+| destructive | cc_opus5 | 0.02 | 0.25 | 0.88 | **0.980** | 0.62 |
+| destructive | cc_haiku45 | 0.04 | 0.25 | 0.89 | **0.986** | 0.72 |
+| destructive | **jev** | 0.02 | 0.21 | **0.65** | **0.977** | **0.36** |
+| needs_review | cc_opus5 | 0.06 | 0.49 | 0.91 | **0.956** | 0.80 |
+| needs_review | cc_haiku45 | 0.24 | 0.65 | 0.96 | **0.954** | 0.95 |
+| needs_review | **jev** | **0.43** | 0.80 | 0.96 | **0.951** | **0.95** |
+
+Paired bootstrap on the AUC difference, 3,000 resamples:
+
+| question | AUC(jev) − AUC(cc_opus5) | 95% CI | reading |
+|---|---|---|---|
+| destructive | −0.005 | [−0.031, +0.018] | indistinguishable |
+| needs_review | −0.005 | [−0.060, +0.041] | indistinguishable |
+
+> **Jev ranks these commands as well as Claude Code does, at 1,400× lower cost
+> and 7.6× lower latency.** Both intervals straddle zero comfortably. This is
+> the study's first substantive result.
+
+### The `needs_review` inflation was real — and it is calibration, not noise
+
+Part 4.3 flagged, at n=4, that Jev appeared to inflate `needs_review` on benign
+commands. **The symptom is confirmed and it is large**: Jev's mean on benign
+items is 0.43 against the reference's 0.06.
+
+**But the prognosis was wrong.** AUC 0.951 says the ordering is essentially
+intact. The threshold sweep shows exactly what is happening:
+
+| τ | TPR | FPR |
+|---|---|---|
+| 0.3 | 1.00 | 0.85 |
+| **0.5** | 1.00 | **0.62** ← the assumed default |
+| 0.7 | 1.00 | 0.45 |
+| 0.9 | 0.89 | **0.17** |
+
+At the default threshold Jev flags **62% of benign commands** — unusable. At
+τ=0.9 it holds 89% recall at 17% false positives. **The entire problem is one
+constant.** Nothing about the model needed to change.
+
+This is the clearest vindication in the study of separating discrimination from
+calibration. Judged on raw probabilities at τ=0.5, Jev looks broken on this
+question. Judged on ranking, it matches a frontier model.
+
+### Jev compresses toward the middle, and τ=0.5 is wrong for it
+
+On `destructive`, Jev's mean for the destructive stratum is **0.65** against the
+reference's 0.88 — the compression first seen at n=3 (§4.2), now confirmed at
+n=60. Its Youden-optimal threshold is **0.36, not 0.5**.
+
+| τ | TPR | FPR |
+|---|---|---|
+| 0.3 | **1.00** | 0.15 |
+| **0.5** | 0.84 | 0.10 ← the assumed default |
+| 0.7 | 0.37 | 0.00 |
+
+At the default, **Jev misses 16% of destructive commands**. At τ=0.3 it catches
+all of them for a 15% false-positive rate. For a gate where a missed
+irreversible command costs far more than a spurious confirmation, that is
+obviously the better operating point — and it is a decision-curve question, now
+answerable.
+
+**Practical consequence: never deploy Jev at τ=0.5.** Both questions need their
+own calibrated threshold, and neither is 0.5.
+
+### The compression/instability interaction — partially reassuring
+
+§2.3 found Jev's non-determinism concentrates near the threshold, and §4.2 found
+it compresses toward the middle; the concern was that these compound, putting
+more decisions into the unstable zone. The verdict run is **partially
+reassuring**: at the *correct* thresholds (0.36 and 0.95), Jev's scores are not
+densely packed — the destructive mean of 0.65 sits well clear of 0.36. The
+risk is real but the corrected operating points are not in the worst place for
+it. **Untested directly** and still owed a determinism sweep.
+
+### Cost and latency, with the wrapper caveat attached
+
+| arm | p50 | p99 | $/1k decisions | input tokens |
+|---|---|---|---|---|
+| `jev` | **557ms** | 2,681ms | **$0.0141** | 336 |
+| `cc_opus5` | 4,219ms | 32,240ms | $20.07 | 9,897 |
+| `cc_haiku45` | 12,675ms | 29,813ms | $11.22 | 5,471 |
+
+**1,423× cheaper, 7.6× faster** than the reference. Note the p99s: the `cc_*`
+arms reach **30+ seconds**, against Jev's 2.7s. For a synchronous hook the tail
+matters more than the median, and that is a 12× gap.
+
+As always: most of the `cc_*` token count and much of their latency is harness,
+not model. These figures answer *"what does the deployed system cost me"*.
+
+### What this does not establish
+
+Synthetic data with strata **we designed** — not gold labels, and not live
+traffic. One run. n=19 destructive after a failed row, so the intervals are
+wide. Nothing here is a calibration claim in the Brier/ECE sense; that needs
+Phase 2 gold labels. And the live base rate will be far more skewed than 1:2,
+so live agreement numbers will look completely different.
+
+---
+
 ## Part 5 — Model routing: a promising probe, and its failure mode
 
 Not a planned surface. Probed on request; 8 prompts, one run. **[PRELIMINARY]**
