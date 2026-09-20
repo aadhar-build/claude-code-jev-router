@@ -1,7 +1,7 @@
 {
   "schema": "delegation-pre-rule-v1",
   "ticket": "JEV-24a",
-  "frozen_at": "2026-09-20T14:45:36.575+00:00",
+  "frozen_at": "2026-09-20T14:47:47.577+00:00",
   "cut": {
     "timestamp_utc": "2026-09-20T11:11:49Z",
     "commit": "f890a3b9cddee9109638381968935d001bc14ffc",
@@ -19,7 +19,7 @@
     "by_task_count": "delegated_tasks / (delegated_tasks + human_prompts). A 'unit of work' has no canonical count in a transcript; a typed human prompt is the closest available analogue of a unit of work that was NOT delegated. The raw counts are frozen beside the ratio so any other denominator can be recomputed."
   },
   "all_sessions": {
-    "sessions": 9,
+    "sessions": 13,
     "unpriced_requests": 6,
     "unpriced_models": [
       "claude-opus-4-7"
@@ -115,6 +115,32 @@
       "last_request_utc": null
     },
     {
+      "session_id": "63725bcb-6e28-436c-98b2-0e8c3e45fa87",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
+      "session_id": "6e1f4f81-5e53-4955-bdf1-5d6c161cefb8",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
       "session_id": "6e46440d-715f-438f-8e95-9750be3f8801",
       "kind": "tool_invoked",
       "requests_pre_cut": 0,
@@ -141,7 +167,33 @@
       "last_request_utc": null
     },
     {
+      "session_id": "a1176b4f-fcae-46bb-b67b-35e6656032cc",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
       "session_id": "a215a9ad-51f8-4412-811d-3d158457c7f5",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 0,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": null,
+      "last_request_utc": null
+    },
+    {
+      "session_id": "b5d4c1a9-144f-4fbd-ade4-668a435cd09a",
       "kind": "tool_invoked",
       "requests_pre_cut": 0,
       "unpriced_requests_pre_cut": 0,

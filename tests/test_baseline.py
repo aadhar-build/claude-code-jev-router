@@ -72,7 +72,10 @@ class TestSnapshotIsIdempotent(unittest.TestCase):
         unchanged = set(second["sessions_unchanged_this_run"])
         self.assertEqual(appended & unchanged, set())
         self.assertEqual(n2 - n1, len(appended))
-        self.assertEqual(first["sessions_captured"], second["sessions_captured"])
+        # A brand-new session can start between the two calls, so the corpus can
+        # only grow, never shrink. Asserting equality here made the test fail on
+        # correct behaviour.
+        self.assertGreaterEqual(second["sessions_captured"], first["sessions_captured"])
 
     def test_a_changed_fingerprint_appends_exactly_one_row(self):
         if not bl.transcripts():
