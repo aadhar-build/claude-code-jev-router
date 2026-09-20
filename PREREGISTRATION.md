@@ -215,86 +215,167 @@ certainly say "inconclusive".
 
 ---
 
-# Amendment 2 — the routing A/B — **PROPOSED, NOT RATIFIED**
+# Amendment 2 — the routing A/B — **RATIFIED except A2.4**
 
-**Status: DRAFT.** This amendment is *not* in force. It must be ratified — and
-the open question in §A2.0 answered — **before the first routed task runs**.
-Nothing below may be cited as a pre-registered commitment until that happens,
-and if a routed task runs before ratification, the A/B is reported as
-exploratory rather than pre-registered.
+**Status: ratified 2026-09-20**, with one exception stated immediately so it
+cannot be overlooked: **A2.4's stopping rule is still a placeholder** (60 tasks,
+chosen by eye). A stopping rule chosen by eye is not a stopping rule. It must be
+replaced with a number derived from the observed per-task cost variance **before
+the first routed task runs**. Until then this amendment is not in force, and a
+task run before that point makes the A/B exploratory rather than
+pre-registered.
 
 **Why it exists.** The study's thesis moved from "is Jev a good classifier?" to
 "does routing make Claude Code cheaper?" The original registration above covers
-only `pre_bash` PABAK. **The headline experiment is currently unregistered** —
-which is the single most damaging gap a reviewer could find in a paper whose
-methodological argument is that it pre-registered everything.
+only `pre_bash` PABAK. The headline experiment was unregistered — which is the
+most damaging gap a reviewer could find in a paper whose methodological argument
+is that it pre-registered everything.
 
-## A2.0 — The open questions that block ratification
+## A2.0 — The five design questions, and how they were answered
 
-**Five, not one.** Q10, Q11 and Q12 below were asked in the grilling and never
-answered — what appears in this amendment as "the outcome is net cost including
-rework" and "quality is friction proxies plus escalation rate" is a
-*recommendation*, not a ratified decision. Q9 was likewise never answered. And a
-fifth question was never asked at all.
+Four of these (Q9–Q12) were asked during the 2026-09-20 grilling and never
+reached the owner; the round was overtaken and the interview moved on. The
+fifth was never asked. All five were put again and answered on 2026-09-20.
 
-### A2.0.1 — Q9: the unit of randomisation
+| # | question | answer |
+|---|---|---|
+| **Q9** | unit of randomisation | **per delegation** — coin flip at every `Agent` spawn |
+| **Q10** | quality measurement | **blinded grader**, with friction proxies retained as secondary |
+| **Q11** | primary outcome | **raw net cost**; rework-adjusted cost demoted to secondary |
+| **Q12** | concurrent with the `pre_bash` window | **yes**, with the `is_sidechain` split reported |
+| **Q13** | control arm | **the current default** (`inherit`, i.e. Opus on every task) |
 
-**Not decided.** It was asked (grilling Q9) and
-never answered, and the recommendation offered at the time — randomise per
-*turn* — was subsequently invalidated: a turn is not a routable unit, because no
-mechanism exists to change the model for one turn of a running session. Q9 must
-be re-answered as **per-delegation randomisation**, and the paired-comparison
-argument that justified per-turn randomisation does not survive the move: two
-delegated tasks within one session are different tasks, so assignment is no
-longer a within-subject comparison over identical context.
+### A2.0.1 — Q9: per-delegation randomisation, and what it does not give us
 
-### A2.0.2 — Q10, Q11, Q12: unratified
+Randomisation is a coin flip at each `Agent` spawn. Per-session assignment would
+need dozens of sessions to balance and the window does not contain them;
+blocking on `subagent_type` would balance the assignment of an experiment using
+the very signal the classifier is deciding on, which is circular.
 
-The outcome definition (net cost including rework), the quality composite
-(friction proxies plus escalation rate) and the decision to run concurrently
-with the `pre_bash` window are all recommendations that were offered and never
-confirmed. They are written below as if settled because that is the form a
-pre-registration takes — but **they are not settled**, and ratifying this
-amendment means ratifying them.
+**Two limitations, recorded now rather than discovered in review.**
 
-### A2.0.3 — What is the control arm? (never asked)
+1. **This is not the paired comparison per-turn randomisation would have been.**
+   Two delegated tasks in one session are different tasks. Within-session
+   assignment removes the between-session confound (same repository, same hour,
+   same broad workload) but it does not put the two arms on identical inputs.
+2. **Carryover is real and is not removed by randomisation.** A poor result from
+   a cheaply-routed task pollutes the orchestrator's context for tasks that
+   follow, some of which will land in the other arm. The contamination therefore
+   runs **treatment → control**, which biases *against* the treatment. That is
+   the safe direction, and it is why this is acceptable rather than fatal. It is
+   disclosed in the writeup, and it means a **null result is weaker evidence
+   than a positive one** here: a positive survives the bias, a null may be
+   caused by it.
 
-As drafted, A2.1's control is "the model tier fixed at the current default".
-The default for a subagent is `inherit`, so the control is **Opus 5 on every
-task**, and the finding would be "Jev-routing beats always-using-the-most-
-expensive-model". Nobody disputes that. It is the same strawman this study
-already caught once, when Haiku was added beside Opus precisely because
-Opus-as-hook-gate was not a baseline anyone would deploy.
+### A2.0.2 — Q10: a blinded grader is the primary quality measure
 
-The competitor that actually threatens the thesis is a **two-line static rule**:
-map `subagent_type` to a tier — `Explore`→haiku, `Plan`→opus,
-`general-purpose`→sonnet — and route on that, with no classifier at all. If Jev
-does not beat the static rule, the classifier adds nothing and the honest
-finding is that routing helps but *Jev* does not. If it does beat it, that is
-the paper.
+The author is not blind to arm assignment, and interruption counts and
+permission denials are behaviours the author produces. They are kept — they are
+free — but they cannot carry a quality verdict.
 
-**Recommendation to be ratified or overridden:** static rule as the **primary
-control**, current default carried as a **descriptive third arm** so the
-"versus Claude Code as deployed" number still exists. This makes it a three-arm
-design, which feeds directly into the power analysis A2.4 already owes — a
-three-arm comparison at 60 tasks is very unlikely to resolve anything.
+**Primary quality measure: a blinded grader.** A separate session scores each
+delegated task's output against its task prompt, **never seeing which tier
+ran it**. Registered now, because a grading procedure specified after seeing
+results is not evidence:
 
-Everything below is conditional on these answers.
+- The grader receives the task prompt and the output, with `resolvedModel`,
+  `modelsUsed` and any tier-identifying text stripped.
+- Task order is randomised; the grader is not told the arm ratio.
+- The rubric is fixed before grading begins and does not change once grading
+  starts.
+- A sample is **double-graded** to measure the grader's own consistency; an
+  inconsistent grader is reported as such rather than averaged.
+- **Leakage is expected and must be checked, not assumed away.** Output style
+  can identify a model tier. The check: the grader is asked to guess the tier on
+  a held-out subset; if it guesses well above chance, the blind failed and the
+  measure is reported as compromised.
+
+Friction proxies remain, labelled secondary and labelled unblinded.
+
+### A2.0.3 — Q11: raw net cost is primary
+
+> **Primary outcome: raw net cost in USD per delegated task**, treatment vs
+> control.
+
+Rework-adjusted cost — charging an escalated task for the run it replaced — is
+**secondary**. The reason is mechanical, not philosophical: the adjustment needs
+a link from an escalation to the run it replaces, and nothing in the harness
+produces that link. The candidate is a convention (a `replaces: <agentId>` line
+in the re-delegating prompt, parsed by the hook), and it is not enforceable. A
+**missed** link silently converts an escalation into a cheap new task, which
+biases the treatment arm **in its own favour** — the one direction the study
+cannot afford.
+
+So: raw net cost is computable from transcripts with no convention and no
+judgement call, and is therefore primary. The rework adjustment is
+pre-registered as a secondary that is reported **only if** the convention's
+compliance rate is itself measured and stated. Escalation is reported as an
+**unadjusted count** regardless.
+
+### A2.0.4 — Q12: concurrent, and what it costs `pre_bash`
+
+The A/B runs concurrently with the `pre_bash` collection window. Sequential
+collection would be cleaner and would probably mean the A/B never runs: 30
+sessions by the 2026-10-20 hard stop is already a stretch, and the A/B is the
+headline.
+
+**The cost is accepted in advance, not discovered later.** Delegation moves
+`pre_bash` captures into subagent sessions, where §4 excludes them from the
+headline. The most likely outcome for the `pre_bash` primary metric is
+**inconclusive by rule** under A1.1. That was written to make such an outcome an
+honest result rather than a failure, and it is reported as one. See A2.7.
+
+### A2.0.5 — Q13: the control is the default, and the objection is on the record
+
+**Control = the current default**, which for a subagent is `inherit` — Opus on
+every task.
+
+**The owner's reasoning, which is the stronger argument for it:** Opus-on-
+everything is what most people actually run for everyday work, so it is the
+realistic counterfactual, and a result measured against it is a result about the
+world rather than about a rule we invented for the paper.
+
+**The objection, recorded because it does not go away by being outvoted.** A
+two-line static rule — `subagent_type → tier`, no classifier at all — would
+capture much of the available saving. Measuring only against the default
+conflates two claims: *routing helps* and *Jev helps*. A reader who suspects the
+second is doing no work is entitled to, and this design cannot separate them by
+randomisation.
+
+**Mitigation, registered now, and it costs nothing.** Every delegated task
+records both Jev's assignment and its `subagent_type`, so the assignment a
+static rule *would* have made is computable offline for every task. Two figures
+go in the writeup:
+
+1. **Agreement between Jev's assignment and the static rule.** If Jev agrees
+   with two lines of `if` on, say, 95% of tasks, the classifier is adding
+   approximately nothing, and **that is stated plainly as a headline caveat**
+   whatever the cost result says.
+2. **Where they disagree**, the distribution of Jev's assignment by
+   `subagent_type` — which shows what, if anything, the classifier is seeing
+   that the static rule cannot.
+
+This does not recover a randomised comparison and is not presented as one. It
+bounds the claim: if the classifier is redundant, the data says so.
 
 ## A2.1 — What is being compared
 
-| arm | assignment |
-|---|---|
-| treatment | model tier for each delegated task chosen by `jev` from the task prompt |
-| control | model tier fixed at the current default |
+| arm | assignment | role |
+|---|---|---|
+| treatment | model tier for each delegated task chosen by `jev` from the task prompt | |
+| control | **the current default** — `inherit`, i.e. Opus on every task | Q13 |
+
+The control is the realistic counterfactual: Opus-on-everything is what an
+ordinary user runs. The objection to it — that it cannot separate "routing
+helps" from "Jev helps" — and the offline mitigation that partly answers it are
+in A2.0.5.
 
 **Mechanism, verified 2026-09-20.** A `PreToolUse` hook matched on the `Agent`
 tool returns `permissionDecision: "allow"` together with `updatedInput`, which
 replaces the tool input before the subagent spawns; the `Agent` tool's input
 carries a `model` field. Jev is therefore **in the loop on live traffic**, not
-inferred. This matters for the registration because a counterfactual treatment
-and an applied treatment are different studies, and the difference must be fixed
-before data rather than after.
+inferred. A counterfactual treatment and an applied treatment are different
+studies, and which one this is must be fixed before data rather than after.
 
 **The treatment must be verified, not assumed.** Every delegated task records the
 model reported by the subagent's own transcript, and a mismatch against the
@@ -304,69 +385,77 @@ produce a null result caused by a bug.
 
 ## A2.2 — Primary outcome
 
-> **Net cost in USD per delegated task, including rework**, treatment vs control,
-> with a 95% bootstrap CI clustered on `session_id`.
+> **Raw net cost in USD per delegated task**, treatment vs control, with a 95%
+> bootstrap CI clustered on `session_id`.
 
-"Including rework" is what stops the treatment winning by being recklessly cheap:
-when a task is escalated, the arm is charged the **full cost of the escalated
-run plus the wasted cost of the run it replaced**.
+**Directional hypothesis: cost per delegated task is lower in the treatment
+arm.** A superiority test; one primary outcome, so no multiplicity correction.
 
-**Definition of escalation — fixed now, because it is the term most open to
-post-hoc redefinition.** An escalation is recorded when, within the same session,
-a delegated task is **re-delegated with substantially the same objective to a
-higher tier**, linked to the `agentId` of the run it replaces. It is *not*
-recovered afterwards by matching prompts, which would be a judgement call made
-with the outcome already visible.
+Computed from the subagent's own transcript under `<session>/subagents/`, with
+the cost formula already reconciled against `cost-state` — **not** from
+`PostToolUse`, which on a background launch (the default since v2.1.198) returns
+`resolvedModel` and no usage fields at all.
 
-**UNRESOLVED — and ratification blocks on it.** That definition names a link
-field with no producer. The `Agent` tool input has no `replaces` field; the
-orchestrator would have to declare the link, which is a model judgement made
-after seeing the first run's output, and the orchestrator is the same model in
-both arms. The primary outcome currently depends on data nothing generates.
+**Why "raw" and not "including rework".** See A2.0.3: the rework adjustment
+needs an escalation→predecessor link that nothing in the harness produces, and
+a missed link biases the treatment arm in its own favour. Raw net cost needs no
+convention and no judgement call.
 
-The candidate mechanism, to be ratified or replaced: a **convention** that a
-re-delegating prompt opens with a `replaces: <agentId>` line, required by the
-orchestrator's standing instruction and parsed by the `PreToolUse` hook that
-already reads `tool_input.prompt`. Its weaknesses are stated rather than
-discovered later — compliance is not enforceable, a missed line silently
-converts an escalation into a cheap new task and **biases the treatment arm in
-its own favour**, and the rate of missed links is itself unmeasurable by the
-same mechanism. If no better answer is found, the honest fallback is to demote
-net-cost-including-rework to secondary and make **raw net cost** the primary
-outcome, with escalation reported as an unadjusted count.
+**Definition of escalation, fixed now because it is the term most open to
+post-hoc redefinition.** An escalation is a delegated task **re-delegated with
+substantially the same objective to a higher tier within the same session**. It
+is reported as an **unadjusted count per arm**, and it is *never* recovered
+afterwards by matching prompts, which would be a judgement made with the outcome
+already visible.
 
-**Directional hypothesis: net cost per delegated task in the treatment arm is
-lower than in the control arm.** A superiority test, one primary outcome, no
-multiplicity correction needed because there is exactly one.
+**Rework-adjusted cost is a pre-registered secondary**, reported only if the
+`replaces: <agentId>` prompt convention is in force *and* its compliance rate is
+measured and stated alongside. Without that rate, the adjusted figure is not
+reported at all.
 
 ## A2.3 — Secondary outcomes
 
-**The author is not blind to arm assignment.** Interruption counts and permission
-denials are behavioural measures produced by the same person who wants a
-particular answer; they are cheap and worth collecting, and they carry
-expectation bias that no amount of care removes at n=1. They are reported as
-weak evidence and never as a quality verdict.
+**Quality — blinded grader (primary quality measure, per Q10).** Specified in
+full in A2.0.2: stripped outputs, randomised order, fixed rubric, a
+double-graded sample for grader consistency, and an explicit blind-integrity
+check in which the grader is asked to guess the tier — if it guesses above
+chance, the measure is reported as compromised.
 
-All labelled secondary, none headline-eligible: escalation rate; friction proxies
-(user interruptions, permission denials, error `tool_result` rows); wall-clock per
-delegated task; token counts by class; per-tier assignment distribution.
+**Friction proxies — secondary and unblinded.** User interruptions, permission
+denials, error `tool_result` rows. The author is not blind to arm assignment and
+these are behaviours the author produces; the expectation bias is not removable
+at n=1. Reported as weak evidence, never as a quality verdict.
 
-**Quality is measured by friction proxies and escalation rate only.** Self-rating
-is excluded by design: an unblinded author scoring their own experiment at n=1 is
-the weakest evidence available, and its absence is a feature to be stated, not a
-limitation to be apologised for.
+**Self-rating is excluded by design.** An unblinded author scoring their own
+experiment at n=1 is the weakest evidence available, and its absence is a
+feature to be stated rather than a limitation to apologise for.
 
-## A2.4 — Stopping rule
+Also secondary, none headline-eligible: escalation rate; rework-adjusted cost
+(conditional, above); wall-clock per delegated task; token counts by class;
+per-tier assignment distribution; **agreement between Jev's assignment and the
+static `subagent_type → tier` rule** (A2.0.5).
 
-> **60 delegated tasks with a recorded outcome, or 2026-10-20, whichever comes
-> first.**
+## A2.4 — Stopping rule — **STILL OPEN, and it blocks ratification**
 
-Fixed in advance and blind to the statistic. No interim analysis of the primary
+> *(placeholder)* 60 delegated tasks with a recorded outcome, or 2026-10-20,
+> whichever comes first.
+
+**The 60 was chosen by eye and a stopping rule chosen by eye is not a stopping
+rule.** It must be replaced by a number derived from the observed per-task cost
+variance in the existing transcript corpus, computed **before the first routed
+task runs**, and committed as a further amendment.
+
+The derivation is specified now so that it cannot be tuned afterwards: estimate
+the per-delegated-task cost distribution from existing subagent transcripts by
+tier, take the minimum effect size worth detecting from the break-even
+arithmetic already in the spec, and report the N at 80% power — clustered on
+session, since per-delegation randomisation within a session does not make the
+tasks independent. **If the required N exceeds what the window can produce, that
+is reported as the finding**, the A/B runs anyway as a descriptive exercise, and
+no inferential claim is made from it.
+
+Once fixed: blind to the statistic, and no interim analysis of the primary
 outcome before the stopping condition is met.
-
-*(The 60 is a placeholder pending a power analysis on the observed per-task cost
-variance. It must be replaced with a derived number before ratification — a
-stopping rule chosen by eye is not a stopping rule.)*
 
 ## A2.5 — Exclusions
 

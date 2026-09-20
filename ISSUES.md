@@ -477,22 +477,22 @@ same cost; nothing is discarded, only deferred.
 
 **Status:** blocked
 **Labels:** science, hooks
-**Blocked by:** JEV-24a (the pre-rule baseline is destroyed the moment this starts),
-grilling **Q9** (unanswered — the unit of randomisation), and ratification of
-`PREREGISTRATION.md` **Amendment 2** (currently PROPOSED).
+**Blocked by:** JEV-24a (the pre-rule baseline is destroyed the moment this
+starts), and **JEV-27** (the power-derived stopping rule — the last unratified
+piece of Amendment 2).
 
 **What to build:** The article's central experiment, per SPEC "The routing
 experiment". Per-turn routing is impossible (no hook sets a model, no
 per-request override exists), so the unit is the **delegated task**.
 
-**Two blockers here are not tickets, which is why they are named in the status
-line.** Q9 was asked and never answered; the recommendation it carried
-(randomise per turn) was invalidated by the mechanism constraint and cannot be
-silently reused. And the headline experiment currently has no pre-registration —
-Amendment 2 is drafted but explicitly not in force.
+**Design settled 2026-09-20** (`PREREGISTRATION.md` §A2.0): randomise **per
+delegation**; control is **the current default** (`inherit` = Opus on every
+task); primary outcome is **raw net cost**; quality is a **blinded grader**;
+runs **concurrently** with the `pre_bash` window.
 
-- [ ] **Answer Q9** — unit of randomisation, re-posed as per-delegation
-- [ ] **Ratify Amendment 2**, including replacing its placeholder stopping rule (60 tasks) with a power-derived number
+- [ ] Coin flip per `Agent` spawn; record the assignment on the capture
+- [ ] Blinded grader per task: stripped output, randomised order, fixed rubric, double-graded sample, and the blind-integrity check (grader guesses the tier; above chance = compromised)
+- [ ] Report **agreement between Jev's assignment and a static `subagent_type -> tier` rule** — if Jev agrees with two lines of `if`, the classifier is adding nothing and that is the headline caveat
 - [ ] **The mechanism is now known and verified**: a `PreToolUse` hook matched on the `Agent` tool returns `permissionDecision: "allow"` plus `updatedInput` with `tool_input.model` rewritten. Jev is genuinely in the loop, not counterfactual
 - [ ] Echo `prompt`, `description` and `subagent_type` back unchanged — `updatedInput` replaces the **entire** input object, and a dropped field would look like a routing effect
 - [ ] **Assert the assignment took effect**: `PostToolUse` on `Agent` returns `resolvedModel`; it must equal the assigned tier per task, or the treatment arm is silently the control arm. An `availableModels` allowlist or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` can override the hook
@@ -566,6 +566,26 @@ turns — below ~300 output tokens at 30k cache read, ~1,000 at 100k, ~3,000 at
 - [ ] Two-dimensional routing policy: complexity picks the capability tier, verbosity picks between same-tier models with different cost shapes
 - [ ] Validate against the realised-output-token label — free, derived from the turn that followed
 - [ ] **Do not publish any Fable cost figure** until one real Fable session is reconciled against `cost-state`; its 2.5% cache multiplier contradicts the 10% verified for three other models
+
+---
+
+## JEV-27: Power analysis for the routing A/B stopping rule
+
+**Status:** ready-for-agent
+**Labels:** science, blocking
+**Blocked by:** None — and it blocks JEV-23
+
+**What to build:** The one piece of `PREREGISTRATION.md` Amendment 2 that is
+still unratified. A2.4's "60 delegated tasks" was chosen by eye, and a stopping
+rule chosen by eye is not a stopping rule.
+
+The derivation is specified in A2.4 so it cannot be tuned after the fact.
+
+- [ ] Estimate the per-delegated-task cost distribution by tier from existing subagent transcripts under `<session>/subagents/`
+- [ ] Take the minimum effect worth detecting from the break-even arithmetic already in the spec (37.5-44.4%)
+- [ ] Report N at 80% power, **clustered on session** — per-delegation randomisation within a session does not make the tasks independent
+- [ ] Commit the result as Amendment 3, which ratifies Amendment 2 in full
+- [ ] **If the required N exceeds what the window can produce, that is the finding.** The A/B runs anyway as a descriptive exercise and no inferential claim is made from it
 
 ---
 

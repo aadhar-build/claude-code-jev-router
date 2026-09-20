@@ -25,36 +25,45 @@ A/B — is **still open**.
 Recorded here because several answered decisions reverse earlier choices in this
 spec, and the reversals are themselves results.
 
-### Open — must be answered before the routing A/B starts
+### Answered 2026-09-20 — the round that never reached the owner
 
-| # | question | status |
+Q9–Q12 were asked in Round 3 and **never answered**; the round was overtaken by
+a sub-agent report and the interview moved on to Round 4. An earlier version of
+this spec presented them as settled decisions, which they were not. They were
+put again, together with a fifth question (Q13) that had never been asked at
+all, and answered.
+
+| # | question | answer |
 |---|---|---|
-| **Q9** | **What is the unit of randomisation, and how is it kept unconfounded?** Offered: (a) per session, coin flip at session start; (b) per turn, within session; (c) per session blocked by task type. The recommendation was **(b) per turn**, because within a session both arms see the same task mix, repository and hour, which is the one place n=1 helps. | **OPEN — and the recommendation is now void.** Q17 established that a turn is not a routable unit; the only routable unit is the delegated task. Q9 must be re-asked as **per-delegation randomisation**, and (b)'s pairing argument has to be re-earned: two delegated tasks in one session are *not* the same task, so the paired-comparison logic that justified (b) does not carry over unchanged. |
-| **Q10** | Quality measured by friction proxies + escalation rate, as a pre-registered composite; explicitly not self-rating. | **UNRATIFIED** (recommendation only) |
-| **Q11** | Primary outcome: net cost including rework. | **UNRATIFIED** (recommendation only) |
-| **Q12** | Routing A/B runs concurrently with the `pre_bash` window; arm recorded on every capture. | **UNRATIFIED** (recommendation only) |
+| **Q9** | unit of randomisation | **per delegation** — coin flip at every `Agent` spawn. Not a paired comparison, and carryover runs treatment→control, so a null result is weaker evidence here than a positive one |
+| **Q10** | quality measurement | **blinded grader** as the primary quality measure, with an explicit blind-integrity check; friction proxies retained as secondary and labelled unblinded |
+| **Q11** | primary outcome | **raw net cost**. Rework-adjusted cost is demoted to a conditional secondary because the escalation→predecessor link has no producer and a missed link biases the treatment in its own favour |
+| **Q12** | concurrent with `pre_bash` | **yes.** The accepted cost is that the `pre_bash` primary metric most likely returns *inconclusive by rule* |
+| **Q13** | control arm | **the current default** (`inherit` = Opus on every task) — the realistic counterfactual, since Opus-on-everything is what an ordinary user runs |
 
-### Framing
+**The objection to Q13 stands on the record.** Measuring only against the
+default conflates *routing helps* with *Jev helps*: a two-line static
+`subagent_type → tier` rule would capture much of the saving with no classifier
+at all. This design cannot separate the two by randomisation. The registered
+mitigation costs nothing — the static rule's assignment is computable offline
+for every task, so the writeup reports **how often Jev agrees with two lines of
+`if`**, and if that agreement is high, it is stated as a headline caveat
+whatever the cost result says.
 
-| # | decision |
-|---|---|
-| Q1 | **Thesis: "routing is where harness savings live."** Not "is Jev a good classifier" — that question is answered (it is) and it turned out not to be the interesting one. |
-| Q2 | **Audience: rigorous single-author case study / preprint.** Pre-registration hash cited, every CI clustered, falsification conditions explicit. Not a benchmark — not honestly reachable at n=1. |
-| Q3 | **Budget: ~1 week.** Land routing properly; do not attempt Phase 2 gold labels. |
-| Q6 | **Let the pre-registered `pre_bash` week run to completion** rather than shortening or dropping it when the thesis moved to routing. Breaking one's own pre-registration is the first thing a reviewer looks for; an "inconclusive" pre-registered result strengthens the methodology section rather than weakening it. *Partly superseded by Q14, which replaced the seven-day rule with a cluster-count rule — the commitment not to abandon the gating experiment stands.* |
-| Q18 | **Thesis narrowed, not pivoted:** "routing *delegated tasks* is where the savings live." The mechanism constraint (below) bounds it. |
+Full reasoning for each in `PREREGISTRATION.md` §A2.0.
 
 ### The routing experiment
 
 | # | decision |
 |---|---|
 | Q5 | **A/B with actual routing**, not shadow-mode inference. |
-| **Q9** | **unit of randomisation — OPEN, see above.** Nothing else in this table is safe to build on until it is settled. |
+| Q9 | **Randomise per delegation** — coin flip at every `Agent` spawn. |
+| Q13 | **Control arm is the current default** (`inherit` = Opus on every task), chosen for external validity. See the objection above. |
 | Q17 | **Unit of routing is the delegated task, not the turn** — forced by the mechanism constraint, which still holds for turns. The *selection* mechanism is amended: the three listed here (`CLAUDE_CODE_SUBAGENT_MODEL`, `--agents`, frontmatter) are all static per-session or per-agent-type, so none of them lets Jev decide anything per task. The mechanism that does is a **`PreToolUse` hook on the `Agent` tool rewriting `tool_input.model` via `updatedInput`** — see *Four things a reader should be told plainly* §1. |
 | Q17b | **Adopt a global "delegate to a subagent where possible" working rule**, to increase the share of spend that is routable. *See the confound note below.* |
-| Q10 *(UNRATIFIED)* | **Quality measured by friction proxies + escalation rate**, pre-registered as a composite. Explicitly NOT self-rating: unblinded self-assessment at n=1 on one's own experiment is the weakest available evidence. |
-| Q11 *(UNRATIFIED)* | **Primary outcome: net cost including rework** — an escalated turn is charged at its full cost plus the wasted one, so the treatment arm pays for its own mistakes and cannot win by being recklessly cheap. |
-| Q12 *(UNRATIFIED)* | **Runs concurrently with the `pre_bash` window.** Arm assignment must be recorded on every `pre_bash` capture so the analysis can condition on it — routing changes which model generates the commands, so the capture stream is no longer stationary. |
+| Q10 | **Quality measured by a blinded grader** (primary), with friction proxies and escalation rate as unblinded secondaries. Explicitly NOT self-rating. |
+| Q11 | **Primary outcome: raw net cost per delegated task.** Net-of-rework was the original recommendation and is now a conditional secondary — the link it needs has no producer, and a missed link flatters the treatment. |
+| Q12 | **Runs concurrently with the `pre_bash` window.** Arm assignment must be recorded on every `pre_bash` capture so the analysis can condition on it — routing changes which model generates the commands, so the capture stream is no longer stationary. |
 | Q16 | **Aggressive thresholds.** Break-even is 37.5–44.4%; the economics have slack. |
 
 ### Statistical discipline
@@ -553,7 +562,7 @@ board — counts, not a second list:
 |---|---|
 | done | JEV-01…08, 14, 21 |
 | in-progress | JEV-09, 10, 11 |
-| **ready now** (no unmet blockers) | **JEV-15, 16, 17, 22, 24a, 26** |
+| **ready now** (no unmet blockers) | **JEV-15, 16, 17, 22, 24a, 26, 27** |
 | blocked | JEV-12, 13, 18, 19, 20, 23, 24b, 25 |
 
 Two of the four ready tickets gate almost everything else:
@@ -570,9 +579,10 @@ Two of the four ready tickets gate almost everything else:
   in none. It applies to the *already-live* surface, so it is overdue rather than
   upcoming.
 
-**JEV-23 (the routing A/B) carries a prerequisite that is not a ticket:** Q9 must
-be answered and Amendment 2 ratified. A blocker that lives outside the board is
-the kind that gets missed, so it is named here as well.
+**JEV-23 (the routing A/B) is now design-complete** — all five open questions
+were answered on 2026-09-20 — and blocked on exactly two things: **JEV-24a**
+(the pre-rule baseline, which the A/B destroys) and **JEV-27** (the
+power-derived stopping rule, the last unratified clause of Amendment 2).
 
 ## Out of Scope
 
