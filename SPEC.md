@@ -110,12 +110,18 @@ compares fixed tiers and Jev's contribution is counterfactual — inferred from 
 shadow classification that never touched anything. With it, the treatment arm is
 **actually Jev-routed**, which is the experiment the thesis claims to be running.
 
-*What comes free with it.* The matching `PostToolUse` on `Agent` returns
-`resolvedModel`, `modelsUsed`, `totalTokens`, `usage`, `totalDurationMs` and
-`totalToolUseCount`. That is the outcome measurement stream for the A/B, per
-task, from the harness itself rather than reconstructed from transcripts — and
-`resolvedModel` is exactly the field the verification assertion in *Testing
-Decisions* §5 needs.
+*What comes free with it — less than it first appears.* The matching
+`PostToolUse` on `Agent` returns `resolvedModel`, which is exactly the field the
+verification assertion in *Testing Decisions* §5 needs. **The outcome fields do
+not come free.** Since v2.1.198 subagents run in the **background by default**,
+and a background launch returns `status: "async_launched"` with no usage fields
+at all — `usage`, `totalTokens`, `totalDurationMs` and `totalToolUseCount` are
+present only on a `completed` (foreground) response. So the verification
+assertion survives on the default path and the **outcome measurement does not**.
+Cost and timing per delegated task must come from the subagent's own transcript
+under `<session>/subagents/` — which this study already reads for cost
+reconciliation — or from a `SubagentStop` hook. Assuming otherwise would have
+produced an A/B whose primary outcome was silently missing on most tasks.
 
 *Four caveats, none fatal, all to be handled in JEV-23:*
 
@@ -135,6 +141,10 @@ Decisions* §5 needs.
    returns `updatedInput` for the same call, which one wins is not something we
    have confirmed from source. Only one such hook will be registered; noted so
    that a future second one is not added casually.
+5. **It needs the `JEV_ARM_SUBPROCESS` recursion guard**, for the same reason
+   `capture.sh` does: the `cc_*` arms spawn `claude -p` inside this repository,
+   and a routing hook without the guard would classify — and rewrite the model
+   of — delegations made by the study's own measurement subprocesses.
 
 **Verified 2026-09-20 against `code.claude.com/docs/en/hooks.md`** (the `Agent`
 tool input table, the `PreToolUse` decision-control table, and the
@@ -311,6 +321,7 @@ selected by a rule that re-derives itself as data accumulates. See Part 4d.
 | | state |
 |---|---|
 | `pre_bash` surface | **live**, 16 live + 60 synthetic captures |
+| `agent_route` surface | **specified 2026-09-20, not built.** The mechanism is verified; the hook, question set and state builder do not exist |
 | Jev vs Claude Code discrimination | **measured** — AUC 0.977 vs 0.980, indistinguishable |
 | Enforce overhead | **measured** — 624ms p50 / 929ms p99, ~69ms irreducible |
 | Threshold validation | **measured** — neither fitted constant survives |

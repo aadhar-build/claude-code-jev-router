@@ -229,9 +229,17 @@ only `pre_bash` PABAK. **The headline experiment is currently unregistered** —
 which is the single most damaging gap a reviewer could find in a paper whose
 methodological argument is that it pre-registered everything.
 
-## A2.0 — The open question that blocks ratification
+## A2.0 — The open questions that block ratification
 
-**The unit of randomisation is not decided.** It was asked (grilling Q9) and
+**Five, not one.** Q10, Q11 and Q12 below were asked in the grilling and never
+answered — what appears in this amendment as "the outcome is net cost including
+rework" and "quality is friction proxies plus escalation rate" is a
+*recommendation*, not a ratified decision. Q9 was likewise never answered. And a
+fifth question was never asked at all.
+
+### A2.0.1 — Q9: the unit of randomisation
+
+**Not decided.** It was asked (grilling Q9) and
 never answered, and the recommendation offered at the time — randomise per
 *turn* — was subsequently invalidated: a turn is not a routable unit, because no
 mechanism exists to change the model for one turn of a running session. Q9 must
@@ -240,7 +248,38 @@ argument that justified per-turn randomisation does not survive the move: two
 delegated tasks within one session are different tasks, so assignment is no
 longer a within-subject comparison over identical context.
 
-Everything below is conditional on that answer.
+### A2.0.2 — Q10, Q11, Q12: unratified
+
+The outcome definition (net cost including rework), the quality composite
+(friction proxies plus escalation rate) and the decision to run concurrently
+with the `pre_bash` window are all recommendations that were offered and never
+confirmed. They are written below as if settled because that is the form a
+pre-registration takes — but **they are not settled**, and ratifying this
+amendment means ratifying them.
+
+### A2.0.3 — What is the control arm? (never asked)
+
+As drafted, A2.1's control is "the model tier fixed at the current default".
+The default for a subagent is `inherit`, so the control is **Opus 5 on every
+task**, and the finding would be "Jev-routing beats always-using-the-most-
+expensive-model". Nobody disputes that. It is the same strawman this study
+already caught once, when Haiku was added beside Opus precisely because
+Opus-as-hook-gate was not a baseline anyone would deploy.
+
+The competitor that actually threatens the thesis is a **two-line static rule**:
+map `subagent_type` to a tier — `Explore`→haiku, `Plan`→opus,
+`general-purpose`→sonnet — and route on that, with no classifier at all. If Jev
+does not beat the static rule, the classifier adds nothing and the honest
+finding is that routing helps but *Jev* does not. If it does beat it, that is
+the paper.
+
+**Recommendation to be ratified or overridden:** static rule as the **primary
+control**, current default carried as a **descriptive third arm** so the
+"versus Claude Code as deployed" number still exists. This makes it a three-arm
+design, which feeds directly into the power analysis A2.4 already owes — a
+three-arm comparison at 60 tasks is very unlikely to resolve anything.
+
+Everything below is conditional on these answers.
 
 ## A2.1 — What is being compared
 
@@ -275,17 +314,38 @@ run plus the wasted cost of the run it replaced**.
 **Definition of escalation — fixed now, because it is the term most open to
 post-hoc redefinition.** An escalation is recorded when, within the same session,
 a delegated task is **re-delegated with substantially the same objective to a
-higher tier**. Recorded prospectively as a logged event at the moment of
-re-delegation, with the `decision_id` of the run it replaces — *not* recovered
-afterwards by matching prompts, which would be a judgement call made with the
-outcome already visible. A re-delegation with no recorded predecessor is a new
-task, not an escalation.
+higher tier**, linked to the `agentId` of the run it replaces. It is *not*
+recovered afterwards by matching prompts, which would be a judgement call made
+with the outcome already visible.
+
+**UNRESOLVED — and ratification blocks on it.** That definition names a link
+field with no producer. The `Agent` tool input has no `replaces` field; the
+orchestrator would have to declare the link, which is a model judgement made
+after seeing the first run's output, and the orchestrator is the same model in
+both arms. The primary outcome currently depends on data nothing generates.
+
+The candidate mechanism, to be ratified or replaced: a **convention** that a
+re-delegating prompt opens with a `replaces: <agentId>` line, required by the
+orchestrator's standing instruction and parsed by the `PreToolUse` hook that
+already reads `tool_input.prompt`. Its weaknesses are stated rather than
+discovered later — compliance is not enforceable, a missed line silently
+converts an escalation into a cheap new task and **biases the treatment arm in
+its own favour**, and the rate of missed links is itself unmeasurable by the
+same mechanism. If no better answer is found, the honest fallback is to demote
+net-cost-including-rework to secondary and make **raw net cost** the primary
+outcome, with escalation reported as an unadjusted count.
 
 **Directional hypothesis: net cost per delegated task in the treatment arm is
 lower than in the control arm.** A superiority test, one primary outcome, no
 multiplicity correction needed because there is exactly one.
 
 ## A2.3 — Secondary outcomes
+
+**The author is not blind to arm assignment.** Interruption counts and permission
+denials are behavioural measures produced by the same person who wants a
+particular answer; they are cheap and worth collecting, and they carry
+expectation bias that no amount of care removes at n=1. They are reported as
+weak evidence and never as a quality verdict.
 
 All labelled secondary, none headline-eligible: escalation rate; friction proxies
 (user interruptions, permission denials, error `tool_result` rows); wall-clock per

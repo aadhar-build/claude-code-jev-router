@@ -475,9 +475,11 @@ Amendment 2 is drafted but explicitly not in force.
 - [ ] **The mechanism is now known and verified**: a `PreToolUse` hook matched on the `Agent` tool returns `permissionDecision: "allow"` plus `updatedInput` with `tool_input.model` rewritten. Jev is genuinely in the loop, not counterfactual
 - [ ] Echo `prompt`, `description` and `subagent_type` back unchanged — `updatedInput` replaces the **entire** input object, and a dropped field would look like a routing effect
 - [ ] **Assert the assignment took effect**: `PostToolUse` on `Agent` returns `resolvedModel`; it must equal the assigned tier per task, or the treatment arm is silently the control arm. An `availableModels` allowlist or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` can override the hook
-- [ ] Outcome stream comes from the same `PostToolUse` payload — `resolvedModel`, `modelsUsed`, `totalTokens`, `usage`, `totalDurationMs`, `totalToolUseCount` — rather than reconstructed from transcripts
+- [ ] **Outcomes do NOT come from `PostToolUse`.** Subagents run in the background by default since v2.1.198, and an `async_launched` response carries `resolvedModel` but no usage fields. The verification assertion works; the cost and timing measurement must come from the subagent transcript under `<session>/subagents/` or a `SubagentStop` hook
 - [ ] **Fail open, and measure the cost of not failing**: this hook is synchronous on the critical path of every subagent spawn, the one place in the study where a Jev call is not free. Measure the added spawn latency in the A/B rather than assuming the ~624ms/48s ratio holds
 - [ ] Build `questions/agent_route/v1.json` and the `agent_route` state builder (payload-only: `prompt` + `subagent_type`)
+- [ ] Apply the `JEV_ARM_SUBPROCESS` recursion guard — the `cc_*` arms spawn `claude -p` in this repo, and an unguarded routing hook would rewrite the model of the study's own measurement subprocesses
+- [ ] **Decide the control arm before anything runs** (`PREREGISTRATION.md` A2.0.3): the current default is `inherit`, i.e. Opus on every task, which is a strawman. The competitor that matters is a two-line static `subagent_type -> tier` rule with no classifier in it
 - [ ] Randomise assignment per delegation; record `routing_arm` and `routing_context` on every capture including `pre_bash`
 - [ ] Primary outcome: **net cost including rework** — an escalated task charged at full cost plus the wasted one
 - [ ] Escalation logged **prospectively at the moment of re-delegation**, with the `decision_id` it replaces — never reconstructed afterwards by prompt matching
@@ -508,7 +510,8 @@ moment the rule takes effect, or the A/B starts, the pre-rule baseline is
 unrecoverable. It is split out here as its own ticket precisely so that it
 cannot be scheduled after the thing that erases it.
 
-- [ ] Compute pre-rule delegation rate by task count and by spend, over the existing transcript corpus
+- [ ] **Cut the corpus at a fixed timestamp: the moment Q17b was answered, 2026-09-20.** Sessions after that point are already post-rule. "The existing corpus" is not a definition — this session has used subagents heavily since the rule was adopted, so an uncut corpus silently includes the behaviour the baseline is supposed to precede
+- [ ] Compute pre-rule delegation rate by task count and by spend, over the corpus up to that cut
 - [ ] Freeze the result into `data/fixtures/` as a derived number with the transcript window recorded
 - [ ] Report it in the writeup as the external-validity anchor for the confound
 
