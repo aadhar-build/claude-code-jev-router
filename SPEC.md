@@ -1089,10 +1089,18 @@ board — counts, not a second list:
 
 | state | tickets |
 |---|---|
-| done | JEV-01…08, 14, 21 |
-| in-progress | JEV-09, 10, 11 |
-| **ready now** (no unmet blockers) | **JEV-15, 16, 17, 22, 24a, 26, 27** |
-| blocked | JEV-12, 13, 18, 19, 20, 23, 24b, 25 |
+| done | JEV-01…08, 11, 13 *(superseded)*, 14, 21, 26 |
+| in-progress | JEV-09, 10 |
+| **ready now** (no unmet blockers) | **JEV-15, 16, 22, 24a, 27, 28, 29, 30, 31, 31b, 32, 33, 34, 37** |
+| blocked | JEV-12, 17, 18, 19, 20, 23, 24b, 25, 35, 36 |
+
+**The routing work is three tickets, not one.** JEV-34 builds `agent_route` in
+shadow — it decides and records, and rewrites nothing. JEV-35 turns it into an
+actuator behind two new gates. JEV-36 is the outcome measurement. Only then does
+JEV-23 run the experiment. They were split because bundling them left **no point
+at which the surface was verifiable before it began changing which model the
+work ran on**, and because one ticket covering all three does not fit a single
+context window.
 
 Two of the four ready tickets gate almost everything else:
 
@@ -1103,6 +1111,12 @@ Two of the four ready tickets gate almost everything else:
   measures something that ceases to exist the moment the delegation rule or the
   A/B starts. It was previously a checkbox inside JEV-24, which was blocked by
   JEV-23 — an ordering inversion that would have destroyed the measurement.
+- **Four tickets describe losses invisible to the count built to catch them** —
+  JEV-31 (claimed spool files are never reaped), JEV-32 (analysis reads current
+  config against older rows), JEV-33 (backpressure drops captures silently) and
+  JEV-30 (a config change that appears to take effect and does not). Each
+  produces attrition that never reaches the attrition figure the
+  pre-registration commits to reporting.
 - **JEV-15 (GATE 4, future-leakage)** verifies the study's most load-bearing
   methodological claim, which is currently asserted in three documents and tested
   in none. It applies to the *already-live* surface, so it is overdue rather than

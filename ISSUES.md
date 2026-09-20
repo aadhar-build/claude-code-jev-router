@@ -228,7 +228,7 @@ degenerate to provide on its own.
 
 ## JEV-11: Enforce-overhead bench and drift canary
 
-**Status:** in-progress
+**Status:** done
 **Labels:** metrics, science
 **Blocked by:** JEV-08
 
@@ -264,21 +264,20 @@ step that makes publishing safe.
 
 ---
 
-## JEV-13: Remaining three surfaces
+## JEV-13: Remaining three surfaces — **SUPERSEDED**
 
-**Status:** blocked
-**Labels:** hooks
-**Blocked by:** JEV-08, plus roughly one week of pre_bash data analysed end to end
+**Status:** done
+**Labels:** hooks, superseded
+**Blocked by:** —
 
-**What to build:** Registration of the other three surfaces, held deliberately
-until the analysis path is proven on one -- otherwise you collect thousands of
-records you cannot use.
+**Superseded 2026-09-20 by JEV-18, JEV-19 and JEV-20**, which stage the three
+surfaces individually with the priority order reversed — routing first, because
+Part 4c established that gating is additive on every axis. This ticket bundled
+all three, which is not a vertical slice and could never be verified as a whole.
 
-- [ ] `stop`, `user_prompt` and `post_edit` capture hooks registered
-- [ ] **Blocker found during JEV-03, resolve before building this.** `build_stop` requires `transcript_bytes_at_capture`, but `capture.sh` does no JSON parsing by design, so it cannot `stat` a path it never reads. Decision #7's mechanism has no implementation route as currently written. Two options: give `stop` its own hook line that extracts the path with a single `sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p'` and calls `stat -f %z`, then re-time it against the 10ms budget; or find a different truncation marker. `build_stop` already refuses to run without the offset, so the leakage guard holds either way — the surface simply cannot be enabled until this is settled
-- [ ] `stop` state built from the transcript truncated at `transcript_bytes_at_capture`, never the tail
-- [ ] Each capture records its `state_source`
-- [ ] Per-surface switches verified independently
+Its one piece of irreplaceable content — the `stop` capture blocker discovered
+during JEV-03 — **has been migrated into JEV-19** rather than lost with the
+ticket. Nothing else here is unique.
 
 ---
 
@@ -340,7 +339,7 @@ reporting a green result on absent data. `replay.py --determinism N` has never r
 
 ## JEV-17: Replace the fitted thresholds with a rule
 
-**Status:** ready-for-agent
+**Status:** blocked
 **Labels:** science
 **Blocked by:** JEV-16 (a dead-zone rule depends on the flip-rate result)
 
@@ -359,7 +358,13 @@ as data accumulates.
 
 **Status:** blocked
 **Labels:** hooks, science
-**Blocked by:** JEV-15, plus the mechanism work in `SPEC.md` *Surface plans* §0
+**Blocked by:** JEV-15
+
+*(The old second blocker — "the mechanism work in `SPEC.md` *Surface plans* §0" —
+is removed. That mechanism question was answered by JEV-26: per-turn routing is
+impossible and per-task routing works. Nothing about `user_prompt` waits on it,
+because `user_prompt` is payload-only and shadow-only and depends on no
+mechanism at all.)*
 
 **What to build:** Per `SPEC.md` *Surface plans* §2. Sequenced FIRST, reversing the
 original order: Part 4c established that gating is additive on every axis and
@@ -388,6 +393,8 @@ Strongest economics, thinnest evidence.
 **Status:** blocked
 **Labels:** hooks, science
 **Blocked by:** JEV-18
+
+**THE BLOCKER, migrated from JEV-13 when that ticket was superseded.** Found during JEV-03; resolve before building anything else here. `build_stop` requires `transcript_bytes_at_capture`, but `capture.sh` does no JSON parsing by design, so it cannot `stat` a path it never reads. Decision #7's mechanism has no implementation route as currently written. Two options: give `stop` its own hook line that extracts the path with a single `sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p'` and calls `stat -f %z`, then re-time it against the 10ms budget; or find a different truncation marker. `build_stop` already refuses to run without the offset, so the leakage guard holds either way — the surface simply cannot be enabled until this is settled
 
 **What to build:** Per `SPEC.md` *Surface plans* §1. **STEP 0 FIRST, before any
 code**: register `capture_only` with the unmodified hook, run one session, and
@@ -482,13 +489,16 @@ same cost; nothing is discarded, only deferred.
 
 **Status:** blocked
 **Labels:** science, hooks
-**Blocked by:** JEV-24a (the pre-rule baseline is destroyed the moment this
-starts), **JEV-27** (the power-derived stopping rule), **JEV-28** (Fable pricing
-— it is now a component of the primary outcome), and **JEV-29** (the grader).
+**Blocked by:** JEV-34 (the surface), JEV-35 (the actuator and its gates),
+JEV-36 (outcome measurement), JEV-24a (the pre-rule baseline this destroys),
+JEV-27 (the stopping rule), JEV-28 (Fable pricing, now inside a primary
+outcome), JEV-29 (the grader).
 
-**What to build:** The article's central experiment, per SPEC "The routing
-experiment". Per-turn routing is impossible (no hook sets a model, no
-per-request override exists), so the unit is the **delegated task**.
+**Rescoped 2026-09-20.** This ticket previously carried the whole of building
+the `agent_route` surface *and* running the experiment on it. That is not a
+vertical slice — it is three, and there was no point in the middle at which
+anything could be verified before the hook began changing which model your work
+ran on. The build is now JEV-34/35/36; **this ticket is the experiment only.**
 
 **Design settled 2026-09-20** (`PREREGISTRATION.md` §A2.0): randomise **per
 delegation**; control is **the current default** (`inherit` = Opus on every
@@ -564,7 +574,11 @@ practical, raising the share of spend that is routable at all.
 
 **Status:** blocked
 **Labels:** questions, science
-**Blocked by:** JEV-18
+**Blocked by:** JEV-34
+
+*(Was JEV-18. The `verbosity` question belongs to `questions/agent_route/v1.json`
+— the surface that routes — not to `user_prompt`, which is a shadow
+counterfactual. Re-pointed 2026-09-20.)*
 
 **What to build:** Fable is cheaper than Opus only on cache-heavy **terse**
 turns — below ~300 output tokens at 30k cache read, ~1,000 at 100k, ~3,000 at
@@ -574,6 +588,58 @@ turns — below ~300 output tokens at 30k cache read, ~1,000 at 100k, ~3,000 at
 - [ ] Two-dimensional routing policy: complexity picks the capability tier, verbosity picks between same-tier models with different cost shapes
 - [ ] Validate against the realised-output-token label — free, derived from the turn that followed
 - [ ] **Do not publish any Fable cost figure** until one real Fable session is reconciled against `cost-state`; its 2.5% cache multiplier contradicts the 10% verified for three other models
+
+---
+
+## JEV-26: Correct the refuted mechanism claim in FINDINGS.md
+
+**Status:** done
+**Labels:** science, publication, blocking
+**Blocked by:** None
+
+**What to build:** `FINDINGS.md` Part 5c states that Claude Code cannot route at
+all — that no hook accepts a `model` field and the harness has nowhere to put a
+routing decision. **Half of that is now refuted against primary source**: a
+`PreToolUse` hook on the `Agent` tool can rewrite `tool_input.model` through
+`updatedInput`, so Jev can route delegated tasks on live traffic.
+
+This is publication raw material with a false claim in it, and the claim is
+load-bearing — it is the reason the thesis was narrowed. Correcting it is
+blocking on any writeup.
+
+- [x] Rewrite Part 5c: per-**turn** routing is impossible (session-scoped switches only; `PreModelSwitch` cannot redirect); per-**task** routing is available via `PreToolUse` on `Agent`
+- [x] Record the correction as a dated finding rather than a silent edit — being wrong about the mechanism, and finding out by checking, is itself the most useful thing in the section
+- [x] Re-check every other document that repeats the claim — `SPEC.md`, `SPEC.md` *Surface plans* §0/§2/§4 all corrected; a paraphrase sweep over every `.md` found no further hits
+- [x] Cite the source: `code.claude.com/docs/en/hooks.md`, Claude Code v2.1.278, verified 2026-09-20
+
+**Done 2026-09-20.** The correction is recorded as a dated finding rather than a
+silent edit, and the superseded text is kept verbatim beside it. The finding
+worth publishing is *how* the error happened: it was a category error, not a
+misreading. `model` is not a hook output key — that reading was correct — it is
+an `Agent` tool *input* key, and `updatedInput`, which the superseded text
+itself lists among the available outputs a few lines above its own conclusion,
+replaces the entire tool input. The evidence sat inside the section that drew
+the wrong conclusion from it.
+
+---
+
+## JEV-27: Power analysis for the routing A/B stopping rule
+
+**Status:** ready-for-agent
+**Labels:** science, blocking
+**Blocked by:** None — and it blocks JEV-23
+
+**What to build:** The one piece of `PREREGISTRATION.md` Amendment 2 that is
+still unratified. A2.4's "60 delegated tasks" was chosen by eye, and a stopping
+rule chosen by eye is not a stopping rule.
+
+The derivation is specified in A2.4 so it cannot be tuned after the fact.
+
+- [ ] Estimate the per-delegated-task cost distribution by tier from existing subagent transcripts under `<session>/subagents/`
+- [ ] Take the minimum effect worth detecting from the break-even arithmetic already in the spec (37.5-44.4%)
+- [ ] Report N at 80% power, **clustered on session** — per-delegation randomisation within a session does not make the tasks independent
+- [ ] Commit the result as **Amendment 4**, which ratifies Amendments 2 and 3 in full
+- [ ] **If the required N exceeds what the window can produce, that is the finding.** The A/B runs anyway as a descriptive exercise and no inferential claim is made from it
 
 ---
 
@@ -594,6 +660,7 @@ routable.
 - [ ] Run one real Fable session and reconcile the computed cost against its `cost-state.totalCostUSD`, to the same tolerance as the other three models
 - [ ] Publish the delta % as a methodological check, as was done for Haiku and Sonnet
 - [ ] **If it cannot be reconciled, remove Fable from the choice set** and revise Amendment 3 before collection, not after
+- [ ] Record a second reconciliation datapoint found by the canary: the gateway reports `marketCost` 0.000013692/call, i.e. $0.000575 for 42 calls, against $0.000592 computed from `pricing.json` — **+3.0%**. Small, but this project reconciles to the cent, so it belongs in `FINDINGS.md` Appendix B beside the other deltas
 - [ ] Note the convenient overlap: the blinded grader runs on Fable, so JEV-29 produces a real Fable session anyway
 
 ---
@@ -619,6 +686,36 @@ chosen after results are visible are not evidence.
 - [ ] 10% double-graded sample; report quadratic-weighted kappa between passes
 - [ ] **Blind-integrity check**: ask the grader to name the tier on a held-out subset. Above chance = the blind failed, and the measure is reported as compromised
 - [ ] **Self-preference check**: Fable is both grader and routable tier. Report the score distribution by tier; systematic favour toward Fable-run tasks alongside a failed blind check means the verdict is not used
+
+---
+
+## JEV-30: The worker reads config once, and nothing says so
+
+**Status:** ready-for-agent
+**Labels:** defect, science, blocking
+**Blocked by:** None
+
+**What happened, on live data.** The running worker started at **15:49:55**.
+`config/arms.json` gained `cc_sonnet5` to its `enabled` list at **15:55:26** —
+six minutes later. The worker loads config once at startup and has been running
+on the stale three-arm set ever since, so **every row collected in that window
+silently omits `cc_sonnet5`**. Nothing warned, nothing failed, and the omission
+is invisible in the data: the rows look complete because `arm_order` records the
+three arms the process knew about.
+
+This is the same shape as the `question_set` field that looks like configuration
+and is inert (JEV-31): a config change that appears to take effect and does not.
+
+**The data consequence has to be recorded, not just fixed.** The collection
+window now contains a configuration boundary. Rows before a restart carry a
+different arm set from rows after it, and the analysis must condition on that or
+report it.
+
+- [ ] Log the resolved arm set, config version and config file mtime at worker startup — the operator should be able to see what the process actually loaded
+- [ ] Fail loudly, or at minimum warn on every drain cycle, if a config file's mtime is newer than the process start time
+- [x] **Boundary recorded.** The worker was restarted at **2026-09-20T12:07:24Z**. Rows before that timestamp carry a three-arm `arm_order` (`cc_opus5`, `cc_haiku45`, `jev`) and **no `cc_sonnet5`**; rows after carry four. Verified on the first post-restart row at 12:07:43Z. The analysis must condition on this or report it — the `pre_bash` primary metric is `jev` vs `cc_opus5`, both present on both sides, so the headline is unaffected
+- [x] One stranded capture reaped from `spool/claimed/` before the restart (JEV-31), so the restart did not lose it
+- [ ] Decide and document whether a mid-window config change requires a restart, a new `arms_config_version` on every row, or is forbidden outright during a collection window
 
 ---
 
@@ -738,85 +835,117 @@ session will reach 500.
 
 ---
 
-## JEV-30: The worker reads config once, and nothing says so
+## JEV-34: `agent_route` in shadow — the surface, deciding nothing
 
 **Status:** ready-for-agent
-**Labels:** defect, science, blocking
-**Blocked by:** None
+**Labels:** hooks, science
+**Blocked by:** None (can start immediately)
 
-**What happened, on live data.** The running worker started at **15:49:55**.
-`config/arms.json` gained `cc_sonnet5` to its `enabled` list at **15:55:26** —
-six minutes later. The worker loads config once at startup and has been running
-on the stale three-arm set ever since, so **every row collected in that window
-silently omits `cc_sonnet5`**. Nothing warned, nothing failed, and the omission
-is invisible in the data: the rows look complete because `arm_order` records the
-three arms the process knew about.
+**What to build:** The routing surface, observing only. A `PreToolUse` hook
+matched on the `Agent` tool builds state from the delegated task, asks Jev which
+tier it would need, and **records the answer without rewriting anything**. The
+model that runs is whatever would have run anyway.
 
-This is the same shape as the `question_set` field that looks like configuration
-and is inert (JEV-31): a config change that appears to take effect and does not.
+This exists as a separate ticket so there is a point at which the surface is
+verifiable *before* it can change what model your work runs on. Shipping the
+classifier and the actuator together means the first time anything is observed
+is also the first time something is altered.
 
-**The data consequence has to be recorded, not just fixed.** The collection
-window now contains a configuration boundary. Rows before a restart carry a
-different arm set from rows after it, and the analysis must condition on that or
-report it.
+**GATE 4 is satisfied by construction here and the gate should still assert it.**
+State is the hook payload and nothing else — no transcript read, no byte offset,
+no truncation marker — so the future-leakage question that makes `stop` hard
+cannot arise. "Impossible by construction" is a claim about code that changes.
 
-- [ ] Log the resolved arm set, config version and config file mtime at worker startup — the operator should be able to see what the process actually loaded
-- [ ] Fail loudly, or at minimum warn on every drain cycle, if a config file's mtime is newer than the process start time
-- [x] **Boundary recorded.** The worker was restarted at **2026-09-20T12:07:24Z**. Rows before that timestamp carry a three-arm `arm_order` (`cc_opus5`, `cc_haiku45`, `jev`) and **no `cc_sonnet5`**; rows after carry four. Verified on the first post-restart row at 12:07:43Z. The analysis must condition on this or report it — the `pre_bash` primary metric is `jev` vs `cc_opus5`, both present on both sides, so the headline is unaffected
-- [x] One stranded capture reaped from `spool/claimed/` before the restart (JEV-31), so the restart did not lose it
-- [ ] Decide and document whether a mid-window config change requires a restart, a new `arms_config_version` on every row, or is forbidden outright during a collection window
+**Demoable:** spawn a subagent; a routing decision appears in the data with a
+tier and a probability; `resolvedModel` is unchanged.
+
+- [ ] `questions/agent_route/v1.json` — `complexity` as a **score** with anchors describing the WORK, never naming a model, preserving the separation `user_prompt/v2.json` already argues for; tier selection stays a policy applied in analysis
+- [ ] State builder: `tool_input.prompt` + `tool_input.subagent_type`, payload-only
+- [ ] `agent_route` added to `config/surfaces.json` and to the surface list in `paths` — currently a second source of truth (JEV-31b)
+- [ ] The `JEV_ARM_SUBPROCESS` recursion guard, for the same reason `capture.sh` has it: the `cc_*` arms spawn `claude -p` in this repo
+- [ ] Fail open on every path, exit 0 always, hard timeout — it is synchronous on the spawn critical path
+- [ ] Measure the latency it adds to a subagent spawn, live. This is the one place in the study where a Jev call is not free
+- [ ] GATE 4 extended to `agent_route`, asserting the state cannot contain anything created after the spawn
+- [ ] Parameterise the three existing gates on surface — they are hardcoded to `pre_bash`
 
 ---
 
-## JEV-27: Power analysis for the routing A/B stopping rule
+## JEV-35: Make the routing hook an actuator — behind two new gates
 
-**Status:** ready-for-agent
-**Labels:** science, blocking
-**Blocked by:** None — and it blocks JEV-23
+**Status:** blocked
+**Labels:** hooks, science, blocking
+**Blocked by:** JEV-34
 
-**What to build:** The one piece of `PREREGISTRATION.md` Amendment 2 that is
-still unratified. A2.4's "60 delegated tasks" was chosen by eye, and a stopping
-rule chosen by eye is not a stopping rule.
+**What to build:** The hook stops observing and starts deciding. It returns
+`permissionDecision: "allow"` together with `updatedInput`, with `model`
+rewritten to the tier Jev chose.
 
-The derivation is specified in A2.4 so it cannot be tuned after the fact.
+**This is the study's first actuator.** Every hook until now only watched, and
+the worst case for an observer is a lost record. The existing gates — isolation,
+fail-open, kill switch, GATE 4 — all apply, plus two written for this one
+(`PREREGISTRATION.md` A3.4).
 
-- [ ] Estimate the per-delegated-task cost distribution by tier from existing subagent transcripts under `<session>/subagents/`
-- [ ] Take the minimum effect worth detecting from the break-even arithmetic already in the spec (37.5-44.4%)
-- [ ] Report N at 80% power, **clustered on session** — per-delegation randomisation within a session does not make the tasks independent
-- [ ] Commit the result as **Amendment 4**, which ratifies Amendments 2 and 3 in full
-- [ ] **If the required N exceeds what the window can produce, that is the finding.** The A/B runs anyway as a descriptive exercise and no inferential claim is made from it
+**Demoable:** an `Explore` task assigned haiku reports `resolvedModel` haiku.
+
+- [ ] **Input-fidelity gate.** `updatedInput` replaces the ENTIRE tool input object, so `prompt`, `description` and `subagent_type` must be echoed back byte-identically. Asserted — a hook that drops `subagent_type` spawns a subagent of the wrong type, which is indistinguishable in the results from a routing quality effect
+- [ ] **Assignment-ledger-before-spawn gate.** The assignment is durably recorded *before* the subagent starts. A ledger written afterwards is missing exactly when it matters most: when the task crashed
+- [ ] Verify against `resolvedModel`, not against what was requested — an `availableModels` allowlist or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` overrides the hook, and a silently ignored assignment makes the treatment arm identical to the control arm
+- [ ] **Fail open means fall back to the default, which IS the control arm.** Record that it happened; A3.1 charges it to the treatment under intention-to-treat
+- [ ] Choice set `{haiku45, sonnet5, opus5, fable51}` per A3.2 — Fable blocked on JEV-28
+- [ ] The `JEV_GRADER` guard, so the blinded grader's own delegations cannot enter the experiment measuring them
+- [ ] Kill switch verified on this hook specifically: `.jev-disabled` must stop it routing, not merely stop it logging
 
 ---
 
-## JEV-26: Correct the refuted mechanism claim in FINDINGS.md
+## JEV-36: A/B outcome measurement — both primaries, per delegated task
 
-**Status:** done
-**Labels:** science, publication, blocking
+**Status:** blocked
+**Labels:** analysis, science, blocking
+**Blocked by:** JEV-35
+
+**What to build:** The measurement the experiment reports. Two co-primary
+outcomes per delegated task — **raw net cost** and **net wall-clock** — with
+clustered intervals, computed from data the harness actually produces.
+
+**It cannot come from `PostToolUse`.** Subagents run in the background by
+default since v2.1.198, and an `async_launched` response carries `resolvedModel`
+and no usage, token or timing fields at all. Cost and duration come from the
+subagent's own transcript under `<session>/subagents/`, or from a `SubagentStop`
+hook.
+
+**Demoable:** a table of ten delegated tasks with both primaries, their
+intervals, and the arm each was assigned.
+
+- [ ] Per-task cost via the existing reconciled formula; per-task **task duration** AND **blocking duration** recorded separately (A3.5) — a background subagent can get objectively faster while the human waits exactly as long, and if the two diverge that divergence is the finding
+- [ ] Charge the hook's own spawn latency to the treatment arm, measured not assumed
+- [ ] **Intention-to-treat** population primary, per-protocol secondary, hook-failure rate reported beside both (A3.1)
+- [ ] Report the correlation between the two primaries — cheaper tiers are faster tiers, so this is largely one effect in two units
+- [ ] **Agreement between Jev's assignment and a static `subagent_type -> tier` rule**, computed offline. The ADR commits to this: if Jev agrees with two lines of `if`, the classifier is adding nothing and that is a headline caveat whatever the cost says
+- [ ] Escalation counted unadjusted; rework-adjusted cost only if the `replaces:` convention's compliance rate is measured and stated
+- [ ] Attrition by arm — a tier that fails more often would otherwise look cheaper
+
+---
+
+## JEV-37: The canary is pre-registered as daily and has no scheduler
+
+**Status:** ready-for-agent
+**Labels:** science, ops
 **Blocked by:** None
 
-**What to build:** `FINDINGS.md` Part 5c states that Claude Code cannot route at
-all — that no hook accepts a `model` field and the harness has nowhere to put a
-routing decision. **Half of that is now refuted against primary source**: a
-`PreToolUse` hook on the `Agent` tool can rewrite `tool_input.model` through
-`updatedInput`, so Jev can route delegated tasks on live traffic.
+**What to build:** A way for the drift canary to actually run daily. The
+pre-registration commits to a **daily** fixed-state check; `src/canary.py`
+exists and works, and nothing runs it. It currently fires when someone
+remembers, which is not a daily check and should not be reported as one.
 
-This is publication raw material with a false claim in it, and the claim is
-load-bearing — it is the reason the thesis was narrowed. Correcting it is
-blocking on any writeup.
+The spec rules out launchd and any auto-start mechanism deliberately — "the
+experiment is running" should be an observable state — so the scheduler is the
+operator's, outside the folder. That constraint is fine; the gap is that no
+wrapper, no instruction and no record of whether it ran exists.
 
-- [x] Rewrite Part 5c: per-**turn** routing is impossible (session-scoped switches only; `PreModelSwitch` cannot redirect); per-**task** routing is available via `PreToolUse` on `Agent`
-- [x] Record the correction as a dated finding rather than a silent edit — being wrong about the mechanism, and finding out by checking, is itself the most useful thing in the section
-- [x] Re-check every other document that repeats the claim — `SPEC.md`, `SPEC.md` *Surface plans* §0/§2/§4 all corrected; a paraphrase sweep over every `.md` found no further hits
-- [x] Cite the source: `code.claude.com/docs/en/hooks.md`, Claude Code v2.1.278, verified 2026-09-20
-
-**Done 2026-09-20.** The correction is recorded as a dated finding rather than a
-silent edit, and the superseded text is kept verbatim beside it. The finding
-worth publishing is *how* the error happened: it was a category error, not a
-misreading. `model` is not a hook output key — that reading was correct — it is
-an `Agent` tool *input* key, and `updatedInput`, which the superseded text
-itself lists among the available outputs a few lines above its own conclusion,
-replaces the entire tool input. The evidence sat inside the section that drew
-the wrong conclusion from it.
+- [ ] A one-line wrapper the operator can put in their own cron, reading the exit codes (0 clean / 1 drift / 2 baselined / 3 incomplete / 4 flip within the tau jitter band)
+- [ ] Record each sweep's date so a **missed day is visible**. A gap in the canary record is itself drift evidence lost, and it must not be silently smoothed over
+- [ ] Report the sweep calendar in the writeup: how many days of the window were actually covered, out of how many
+- [ ] Decide and document what a missed day means for the drift claim — the honest answer is probably that drift can only be bounded over the days actually sampled
 
 ---
 
