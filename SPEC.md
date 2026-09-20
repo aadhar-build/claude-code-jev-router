@@ -63,7 +63,7 @@ spec, and the reversals are themselves results.
 |---|---|---|
 | Q13, Q20 | **Degenerate-interval guard**: <30 clusters OR zero width → inconclusive by rule; cluster count always printed | **IMPLEMENTED** — `stats.Interval`, Amendment A1.1 |
 | Q14 | **Stopping rule amended** from 7 calendar days to 30 distinct sessions or 2026-10-20 | **IMPLEMENTED** — Amendment A1.2 |
-| Q15 | **Run all 360 synthetic items through all arms** to close the threshold overfit (gap 0.097 at n=59 → ~0.020 at n=300) | **pending, and the scope has changed since the decision** — see *Cost note on Q15* below |
+| Q15 | **Overridden 2026-09-20: 60 items, not 360.** The scope had changed under the decision — Q8's fifth arm turned it into 1,440 calls and 4.1 hours. Cut to completing the five-arm matrix on the existing 60. **The threshold-overfit gap does not close and becomes a stated limitation.** | **DECIDED** — JEV-22 |
 
 ### Scope of publication
 
@@ -178,29 +178,29 @@ two experiments shared a collection window and how that was handled.
 
 ---
 
-## Cost note on Q15 — the scope changed after the decision was taken
+## Cost note on Q15 — resolved 2026-09-20
 
 Q15 (run all 360 synthetic items through all arms) was agreed when there were
-**four** arms. Q8 made it **five**. The arithmetic that follows is the reason
-this ticket is still `ready-for-agent` and not running:
+**four** arms. Q8 made it **five**, and the arithmetic changed underneath the
+decision:
 
-| | Jev only | all five arms |
-|---|---|---|
-| wall clock, serial | ~4 minutes | **~4.1 hours** |
-| subscription calls | 0 | **1,440** |
-| metered spend | ~$0.005 | $0 (subscription) |
+| | Jev only | five arms x 360 | **five arms x 60 (chosen)** |
+|---|---|---|---|
+| wall clock, serial | ~4 minutes | ~4.1 hours | **~20 minutes** |
+| subscription calls | 0 | 1,440 | **120** |
 
-The binding cost is not dollars, it is **subscription quota in the same week as
-the routing A/B**, which needs the same quota and is the headline experiment.
-Two honest options, and this is a decision for the owner, not a default:
+The binding cost was never dollars — it is **subscription quota in the same week
+as the routing A/B**, which is the headline experiment and needs the same quota.
 
-- **(a) Jev-only on all 360**, four baseline arms on the existing 60. Closes the
-  threshold-overfit question — which is a question about *Jev's* operating point,
-  not about the baselines — at ~1% of the cost. Recommended.
-- **(b) All five on all 360**, accepting that the routing A/B waits a week.
+**Decision: 60.** `cc_sonnet5` and `cc_fable51` have never run on anything, so
+the 120 calls complete a clean five-arm matrix on items already collected, with
+the same `state_sha256` and therefore direct pairing against the existing rows.
 
-Until this is answered, the threshold-overfit gap (0.097) stands as a stated
-limitation rather than a closed question.
+**Its cost, stated rather than buried: the threshold-overfit question does not
+close.** The optimism gap stays at 0.097 at n=59 instead of falling to ~0.020 at
+n=300. It becomes a limitation the writeup declares, and the weight shifts to
+JEV-17's rule-based operating point — which is what a rule is for. The 300 unrun
+items stay on disk; the larger run is deferred, not discarded.
 
 ## The routing state — and why JEV-18 and JEV-23 are different claims
 

@@ -432,23 +432,44 @@ live analysis ran.
 
 ---
 
-## JEV-22: Run the full synthetic set to close the threshold overfit
+## JEV-22: Complete the five-arm matrix on the existing 60 synthetic items
 
 **Status:** ready-for-agent
 **Labels:** science
 **Blocked by:** None
 
-**What to build:** The optimism gap falls from 0.097 at n=59 to ~0.020 at n=300.
-The set holds 360 items; only 60 have ever been run.
+**SCOPE CUT 2026-09-20, by the owner: 60 items, not 360.** Grilling Q15 chose
+the full 360-item run. That decision was taken when there were four arms; Q8
+made it five, which turned it into 1,440 subscription calls and 4.1 hours
+serial, competing for the same quota as the routing A/B in the same week. The
+owner cut it to 60.
 
-> **SCOPE CHANGED SINCE THE DECISION.** This was agreed when there were four
-> arms. Fable makes it five: **4.1 hours serial and 1,440 subscription calls**,
-> against ~4 minutes and $0.005 for Jev alone. Confirm before running — it
-> competes directly with the routing A/B for subscription quota in the same week.
+**What this leaves to do — and it is not nothing.** `cc_sonnet5` and
+`cc_fable51` have **never run, on anything**. Verified against `data/runs/`:
+every existing row is `jev`, `cc_opus5` or `cc_haiku45`. The two arms added by
+Q8 exist only in `config/arms.json`. So the work is to fill the gap and complete
+a clean 5 x 60 matrix on the items already run.
 
-- [ ] Decide scope: all five arms (4.1h, 1,440 calls) vs Jev-only (4 min, pennies)
-- [ ] Re-derive the threshold RULE (not constant) on the larger set
-- [ ] Report the n=300 optimism gap against the n=59 figure
+| | |
+|---|---|
+| items | the existing 60 synthetic, unchanged — same `state_sha256`, so the new arms are directly paired with the old |
+| new calls | **120** (60 x 2 arms) |
+| wall clock | ~20 minutes serial |
+| metered spend | $0 — subscription |
+
+**What this ticket no longer delivers, stated plainly.** The threshold-overfit
+question does **not** close. The optimism gap stays at **0.097 at n=59**; it
+would have fallen to ~0.020 at n=300. That gap becomes a **stated limitation in
+the writeup**, not a resolved question, and JEV-17's rule-based operating point
+has to carry the weight instead — which is what it was designed for. The 300
+unrun synthetic items remain on disk and the run remains available later at the
+same cost; nothing is discarded, only deferred.
+
+- [ ] Run the 60 existing synthetic items through `cc_sonnet5` and `cc_fable51` only
+- [ ] Assert `state_sha256` matches the existing rows item-for-item — the pairing is the whole value of reusing these 60
+- [ ] Report the five-arm discrimination table (AUC per arm) as the synthetic section
+- [ ] **Publish no Fable cost figure** — its rates are unreconciled and its 2.5% cache-read multiplier contradicts the 10% verified for three other models. Latency and agreement are reportable; cost is not
+- [ ] Record the optimism gap of 0.097 as an explicit limitation wherever a threshold is quoted
 
 ---
 
