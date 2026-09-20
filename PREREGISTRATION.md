@@ -249,6 +249,14 @@ Everything below is conditional on that answer.
 | treatment | model tier for each delegated task chosen by `jev` from the task prompt |
 | control | model tier fixed at the current default |
 
+**Mechanism, verified 2026-09-20.** A `PreToolUse` hook matched on the `Agent`
+tool returns `permissionDecision: "allow"` together with `updatedInput`, which
+replaces the tool input before the subagent spawns; the `Agent` tool's input
+carries a `model` field. Jev is therefore **in the loop on live traffic**, not
+inferred. This matters for the registration because a counterfactual treatment
+and an applied treatment are different studies, and the difference must be fixed
+before data rather than after.
+
 **The treatment must be verified, not assumed.** Every delegated task records the
 model reported by the subagent's own transcript, and a mismatch against the
 assigned tier is a hard failure, not a dropped row. An assignment that is

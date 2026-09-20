@@ -50,7 +50,7 @@ spec, and the reversals are themselves results.
 |---|---|
 | Q5 | **A/B with actual routing**, not shadow-mode inference. |
 | **Q9** | **unit of randomisation — OPEN, see above.** Nothing else in this table is safe to build on until it is settled. |
-| Q17 | **Unit of routing is the delegated task, not the turn** — forced by the mechanism constraint. Model selected per subagent via `CLAUDE_CODE_SUBAGENT_MODEL` / `--agents` / frontmatter. |
+| Q17 | **Unit of routing is the delegated task, not the turn** — forced by the mechanism constraint, which still holds for turns. The *selection* mechanism is amended: the three listed here (`CLAUDE_CODE_SUBAGENT_MODEL`, `--agents`, frontmatter) are all static per-session or per-agent-type, so none of them lets Jev decide anything per task. The mechanism that does is a **`PreToolUse` hook on the `Agent` tool rewriting `tool_input.model` via `updatedInput`** — see *Four things a reader should be told plainly* §1. |
 | Q17b | **Adopt a global "delegate to a subagent where possible" working rule**, to increase the share of spend that is routable. *See the confound note below.* |
 | Q10 *(UNRATIFIED)* | **Quality measured by friction proxies + escalation rate**, pre-registered as a composite. Explicitly NOT self-rating: unblinded self-assessment at n=1 on one's own experiment is the weakest available evidence. |
 | Q11 *(UNRATIFIED)* | **Primary outcome: net cost including rework** — an escalated turn is charged at its full cost plus the wasted one, so the treatment arm pays for its own mistakes and cannot win by being recklessly cheap. |
@@ -82,12 +82,64 @@ spec, and the reversals are themselves results.
 
 ## Four things a reader should be told plainly
 
-**1. The mechanism is the binding constraint, not the classifier.** No hook event
-accepts a `model` field; `PreModelSwitch` can veto a switch Claude initiates but
-never start one. There is no per-request model override in the SDK or headless.
-**Per-turn routing inside an interactive session is impossible today.** The
-classifier is cheap, fast and good enough — and the harness has nowhere to put
-the answer. See `FINDINGS.md` Part 5c.
+**1. The mechanism is the binding constraint — but it binds more narrowly than
+we first wrote, and the correction is a finding in its own right.**
+
+The earlier claim was "no hook event accepts a `model` field; the harness has
+nowhere to put the answer." The first half is now **refuted against primary
+source**, and the second half was too strong.
+
+*What is still true.* **Per-turn routing inside an interactive session remains
+impossible.** Every model-switching mechanism is session-scoped (`/model`,
+`--model`, `ANTHROPIC_MODEL`, SDK `set_model`) — they change the model from that
+point forward, not for one turn. `PreModelSwitch` fires only on a switch someone
+else initiates and can `allow`, `deny` or `ask`; the documentation states
+explicitly that it does **not** accept `updatedInput`, so it cannot redirect a
+switch to a different model, let alone start one.
+
+*What is false.* A `PreToolUse` hook matched on the **`Agent`** tool can return
+`permissionDecision: "allow"` together with **`updatedInput`**, which replaces
+the tool's input before it runs — and the `Agent` tool's input includes a
+`model` field. So a hook can read `tool_input.prompt`, ask Jev which tier the
+task needs, and rewrite `model` on the way through. **Jev can be in the loop,
+deciding, on live traffic.** This is a genuine routing mechanism, and the study
+had written it off.
+
+*Why this changes the experiment and not just the prose.* Without it, the A/B
+compares fixed tiers and Jev's contribution is counterfactual — inferred from a
+shadow classification that never touched anything. With it, the treatment arm is
+**actually Jev-routed**, which is the experiment the thesis claims to be running.
+
+*What comes free with it.* The matching `PostToolUse` on `Agent` returns
+`resolvedModel`, `modelsUsed`, `totalTokens`, `usage`, `totalDurationMs` and
+`totalToolUseCount`. That is the outcome measurement stream for the A/B, per
+task, from the harness itself rather than reconstructed from transcripts — and
+`resolvedModel` is exactly the field the verification assertion in *Testing
+Decisions* §5 needs.
+
+*Four caveats, none fatal, all to be handled in JEV-23:*
+
+1. **`updatedInput` replaces the entire input object.** `prompt`, `description`
+   and `subagent_type` must be echoed back unchanged or the delegation is
+   corrupted. A hook that silently drops a field would look like a routing effect.
+2. **`resolvedModel` can differ from the requested `model`** — an
+   `availableModels` allowlist or a `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` session
+   setting overrides the hook. This is precisely why the assertion is written
+   against `resolvedModel` and not against what we asked for.
+3. **This hook is synchronous on the critical path of every subagent spawn.** It
+   is the one place in the study where a Jev call is not free. At the measured
+   ~624ms p50 enforce overhead against a subagent run measured in tens of
+   seconds, the ratio is favourable — but it must be *measured in the A/B*, not
+   assumed, and it must fail open.
+4. **Multi-hook precedence is unverified.** If more than one `PreToolUse` hook
+   returns `updatedInput` for the same call, which one wins is not something we
+   have confirmed from source. Only one such hook will be registered; noted so
+   that a future second one is not added casually.
+
+**Verified 2026-09-20 against `code.claude.com/docs/en/hooks.md`** (the `Agent`
+tool input table, the `PreToolUse` decision-control table, and the
+`PreModelSwitch` section), on Claude Code v2.1.278. `FINDINGS.md` Part 5c states
+the superseded version and must be corrected before publication.
 
 **2. The "delegate where possible" rule is a confound, and must be disclosed.**
 Adopting it changes how the work is done in order to make more of it routable.
@@ -139,6 +191,48 @@ Two honest options, and this is a decision for the owner, not a default:
 
 Until this is answered, the threshold-overfit gap (0.097) stands as a stated
 limitation rather than a closed question.
+
+## The routing state — and why JEV-18 and JEV-23 are different claims
+
+The unit of routing is the delegated task, so the state Jev classifies is the
+**`Agent` tool's `prompt`**, not the user's prompt. That was never written down,
+and the only question set that exists is `questions/user_prompt/v2.json`, where
+the `verbosity` question (Q19) also landed. Two surfaces were quietly sharing one
+specification.
+
+**`agent_route` — a new surface.**
+
+| | |
+|---|---|
+| hook | `PreToolUse` matched on `Agent` |
+| state | `tool_input.prompt` + `tool_input.subagent_type`, and nothing else |
+| questions | `questions/agent_route/v1.json` — `complexity` (choice, tier) and `verbosity` (score) |
+| output | `updatedInput` with `model` rewritten, everything else echoed unchanged |
+| outcome | `PostToolUse` on `Agent`: `resolvedModel`, `usage`, `totalDurationMs` |
+
+**GATE 4 is satisfied by construction here, and that is worth stating rather
+than assuming.** The state is the hook payload and only the hook payload. There
+is no transcript read, no byte offset, no truncation marker — so the
+future-leakage question that makes `stop` hard does not arise at all. `stop` is
+the surface where leakage is a real risk; `agent_route` is the surface where it
+is structurally impossible. The gate should still assert it, because "impossible
+by construction" is a claim about code that changes.
+
+**The two tickets make different claims, and merging them would overclaim.**
+
+| | JEV-18 (`user_prompt`) | JEV-23 (`agent_route`) |
+|---|---|---|
+| mode | shadow | live intervention |
+| state | the user's prompt | the delegated task's prompt |
+| claim | *"if per-turn routing existed, here is what it would have saved"* | *"here is what routing delegated tasks did save"* |
+| evidence | counterfactual, unfalsifiable by design | measured, with a control arm |
+
+JEV-18's claim is the weaker one and must be labelled as such wherever it
+appears: it is a **potential-savings estimate against a mechanism that does not
+exist**, and no amount of data makes it more than that. JEV-23's claim is the
+headline. If only one gets done in the budget, it is JEV-23.
+
+---
 
 ## Interaction: Q17b × the `pre_bash` primary metric
 
@@ -448,7 +542,7 @@ board — counts, not a second list:
 |---|---|
 | done | JEV-01…08, 14, 21 |
 | in-progress | JEV-09, 10, 11 |
-| **ready now** (no unmet blockers) | **JEV-15, 16, 17, 22, 24a** |
+| **ready now** (no unmet blockers) | **JEV-15, 16, 17, 22, 24a, 26** |
 | blocked | JEV-12, 13, 18, 19, 20, 23, 24b, 25 |
 
 Two of the four ready tickets gate almost everything else:

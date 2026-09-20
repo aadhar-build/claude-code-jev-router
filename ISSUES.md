@@ -359,6 +359,14 @@ as data accumulates.
 **What to build:** Per `docs/PLAN-SURFACES.md` §2. Sequenced FIRST, reversing the
 original order: Part 4c established that gating is additive on every axis and
 **routing is the only surface that can make Claude Code faster or cheaper.**
+
+**Scope correction — this ticket produces a weaker claim than JEV-23, and must
+say so.** Per-turn routing has no mechanism (verified: every model switch is
+session-scoped, and `PreModelSwitch` cannot redirect one). So `user_prompt`
+routing can only ever be a **counterfactual**: "if per-turn routing existed,
+here is what it would have saved." That estimate is unfalsifiable by design and
+no amount of data promotes it. JEV-23 (`agent_route`) is the measurable version
+and is the headline. If the budget takes only one, it takes JEV-23.
 Strongest economics, thinnest evidence.
 
 - [ ] `questions/user_prompt/v2.json` adding a `complexity` score (v1 is frozen; never edit it)
@@ -464,8 +472,12 @@ Amendment 2 is drafted but explicitly not in force.
 
 - [ ] **Answer Q9** — unit of randomisation, re-posed as per-delegation
 - [ ] **Ratify Amendment 2**, including replacing its placeholder stopping rule (60 tasks) with a power-derived number
-- [ ] Model selected per subagent by whichever mechanism the verification in SPEC establishes as real
-- [ ] **Assert the assignment took effect**: the subagent transcript's own reported model must equal the assigned tier, per task, or the treatment arm is silently the control arm
+- [ ] **The mechanism is now known and verified**: a `PreToolUse` hook matched on the `Agent` tool returns `permissionDecision: "allow"` plus `updatedInput` with `tool_input.model` rewritten. Jev is genuinely in the loop, not counterfactual
+- [ ] Echo `prompt`, `description` and `subagent_type` back unchanged — `updatedInput` replaces the **entire** input object, and a dropped field would look like a routing effect
+- [ ] **Assert the assignment took effect**: `PostToolUse` on `Agent` returns `resolvedModel`; it must equal the assigned tier per task, or the treatment arm is silently the control arm. An `availableModels` allowlist or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` can override the hook
+- [ ] Outcome stream comes from the same `PostToolUse` payload — `resolvedModel`, `modelsUsed`, `totalTokens`, `usage`, `totalDurationMs`, `totalToolUseCount` — rather than reconstructed from transcripts
+- [ ] **Fail open, and measure the cost of not failing**: this hook is synchronous on the critical path of every subagent spawn, the one place in the study where a Jev call is not free. Measure the added spawn latency in the A/B rather than assuming the ~624ms/48s ratio holds
+- [ ] Build `questions/agent_route/v1.json` and the `agent_route` state builder (payload-only: `prompt` + `subagent_type`)
 - [ ] Randomise assignment per delegation; record `routing_arm` and `routing_context` on every capture including `pre_bash`
 - [ ] Primary outcome: **net cost including rework** — an escalated task charged at full cost plus the wasted one
 - [ ] Escalation logged **prospectively at the moment of re-delegation**, with the `decision_id` it replaces — never reconstructed afterwards by prompt matching
@@ -526,10 +538,33 @@ practical, raising the share of spend that is routable at all.
 turns — below ~300 output tokens at 30k cache read, ~1,000 at 100k, ~3,000 at
 300k. A one-dimensional complexity score cannot express that.
 
-- [ ] Add `verbosity` to `questions/user_prompt/v2.json`: predict how much output this request will produce
+- [ ] Add `verbosity` to **`questions/agent_route/v1.json`** — the routing state is the *delegated task's* prompt, not the user's. It was previously specified against `questions/user_prompt/v2.json`, which is the shadow counterfactual surface, not the one that routes
 - [ ] Two-dimensional routing policy: complexity picks the capability tier, verbosity picks between same-tier models with different cost shapes
 - [ ] Validate against the realised-output-token label — free, derived from the turn that followed
 - [ ] **Do not publish any Fable cost figure** until one real Fable session is reconciled against `cost-state`; its 2.5% cache multiplier contradicts the 10% verified for three other models
+
+---
+
+## JEV-26: Correct the refuted mechanism claim in FINDINGS.md
+
+**Status:** ready-for-agent
+**Labels:** science, publication, blocking
+**Blocked by:** None
+
+**What to build:** `FINDINGS.md` Part 5c states that Claude Code cannot route at
+all — that no hook accepts a `model` field and the harness has nowhere to put a
+routing decision. **Half of that is now refuted against primary source**: a
+`PreToolUse` hook on the `Agent` tool can rewrite `tool_input.model` through
+`updatedInput`, so Jev can route delegated tasks on live traffic.
+
+This is publication raw material with a false claim in it, and the claim is
+load-bearing — it is the reason the thesis was narrowed. Correcting it is
+blocking on any writeup.
+
+- [ ] Rewrite Part 5c: per-**turn** routing is impossible (session-scoped switches only; `PreModelSwitch` cannot redirect); per-**task** routing is available via `PreToolUse` on `Agent`
+- [ ] Record the correction as a dated finding rather than a silent edit — being wrong about the mechanism, and finding out by checking, is itself the most useful thing in the section
+- [ ] Re-check every other document that repeats the claim (`SPEC.md` is done; `docs/PLAN-SURFACES.md` §0 is not)
+- [ ] Cite the source: `code.claude.com/docs/en/hooks.md`, Claude Code v2.1.278, verified 2026-09-20
 
 ---
 
