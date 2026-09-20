@@ -42,12 +42,12 @@ Three standing rules for any agent picking up a ticket:
 
 | wave | tickets | why these together |
 |---|---|---|
-| **1** | **33**, **38 + 24a** (one agent), **15**, **37** | Nothing blocks any of them, and they touch four disjoint areas: the drain loop, the transcript corpus, the gate suite, the canary wrapper. 38 and 24a share one agent because they read the same corpus and are exposed to the same retention risk — reading it twice is wasted work on data that may not survive |
-| **2** | **30 + 31** (one agent), **31b**, **32**, **16** | 30 and 31 wait only because JEV-33 is rewriting the file they live in. 16 is the wave's single `data/runs/` writer |
-| **3** | **22**, **34**, **27**, **39** | 34 unblocks once 15 has parameterised the gates; 27 unblocks once 38 has persisted the cost distribution. 22 is the wave's single data writer, and it produces the Fable session JEV-28 needs as a by-product |
-| **4** | **28**, **29**, **17**, **10** | 17 unblocks once 16 has the flip rate. 28 consumes what 22 produced. 10 is the wave's single data writer |
-| **5** | **35**, **25**, **12**, *(spare)* | 35 and 25 both follow 34. 12 follows 10. The fourth slot is deliberately empty — 35 turns the routing hook into an actuator, the first time anything in this study changes what runs, and that deserves attention rather than a crowded wave |
-| **6** | **36**, **24b**, **18**, **09** | 36 follows 35. 18 is the window's next surface registration, and it is here rather than in wave 5 because 35 already registered one |
+| **1** | **33**, **38 + 24a** (one agent), **15**, **40** | Nothing blocks any of them, and they touch disjoint areas: the drain loop, the transcript corpus, the gate suite, the kill switch. 38 and 24a share an agent because they read the same corpus and face the same retention risk. **40 is here rather than later so a way back to vanilla exists before anything is built on top of it** |
+| **2** | **30 + 31** (one agent), **31b**, **16**, **37** | 30 and 31 wait only because JEV-33 is rewriting the file they live in. 16 is the wave's single `data/runs/` writer |
+| **3** | **22**, **34**, **27**, **32** | 34 unblocks once 15 has parameterised the gates; 27 unblocks once 38 has persisted the cost distribution. 22 is the single data writer, and produces the Fable session JEV-28 needs as a by-product |
+| **4** | **28**, **29**, **17**, **10** | 17 unblocks once 16 has the flip rate. 28 consumes what 22 produced. 10 is the single data writer |
+| **5** | **35**, **25**, **12**, **39** | 35 turns the routing hook into an actuator — it requires both 34 (the surface) and 40 (a proven way back). 12 follows 10 |
+| **6** | **36**, **24b**, **18**, **09** | 36 follows 35. 18 is the window's next surface registration, held back because 35 already registered one |
 | **7** | **23**, **19** | The experiment itself, plus the next surface in the one-at-a-time queue |
 | **8** | **20** | Last surface |
 
@@ -60,6 +60,13 @@ It is urgent because **its source data lives outside this folder, in
 written down.** Routing can be built next month; a rotated transcript cannot be
 recovered at any price. The same exposure applies to JEV-24a, which is why they
 share an agent.
+
+**JEV-40 comes before anything that changes behaviour.** Everything built so
+far only watches, so the existing kill switch has never had to mean more than
+"stop recording". From JEV-35 onward it has to mean "stop deciding, and let the
+default happen exactly as it would have" — a stronger claim that has never been
+asserted, because nothing has ever rewritten a tool input before. Building the
+actuator first and the way back second is the wrong order.
 
 **JEV-33 is the throughput blocker.** Until it lands, the spool grows during
 every working session, and past 500 files the hook fails open and drops captures
@@ -949,7 +956,11 @@ tier and a probability; `resolvedModel` is unchanged.
 
 **Status:** blocked
 **Labels:** hooks, science, blocking
-**Blocked by:** JEV-34
+**Blocked by:** JEV-34, **JEV-40**
+
+*JEV-40 is a hard gate, not a nicety. This is the first ticket that changes what
+actually runs, and a way back to vanilla must exist and be proven **before** it
+lands, not after.*
 
 **What to build:** The hook stops observing and starts deciding. It returns
 `permissionDecision: "allow"` together with `updatedInput`, with `model`
@@ -1083,6 +1094,57 @@ this disk only; the *statistics* mostly do not.
 - [ ] Fix the overwriting ones: `canary.txt` should be dated like the others
 - [ ] Decide the cadence and write it into the pre-registration, so the snapshot series is not itself a post-hoc choice
 - [ ] The snapshot must print `INCONCLUSIVE BY RULE` where the A1.1 guard applies, rather than a bare interval — an interim number read without its guard is exactly what the guard exists to prevent
+
+---
+
+## JEV-40: One master switch, and a proof that OFF means vanilla
+
+**Status:** ready-for-agent
+**Labels:** safety, blocking, hooks
+**Blocked by:** None — and it blocks JEV-35
+
+**What to build:** A single switch that returns this machine to stock Claude
+Code, and a gate that proves it did.
+
+**What already works.** `.jev-disabled` is checked on line one of both
+`capture.sh` and `inline_shadow_bash.sh`, is `$CLAUDE_PROJECT_DIR`-anchored, is
+asserted in four test files, and is surfaced by `run-collection.sh status` and
+`doctor.py`. Hook registration lives only in the gitignored
+`.claude/settings.local.json`, inside the folder, so deleting the folder removes
+the hooks. Nothing is ever written to `~/.claude/settings.json` and nothing
+outside the folder is written at all.
+
+**Why that is no longer enough.** The switch was designed when every hook was an
+**observer**, where OFF simply means "stop recording". JEV-35 makes a hook an
+**actuator**, and OFF then has to mean something stronger: *stop deciding, and
+let the default happen exactly as it would have.* Those are not the same claim.
+A hook that exits early still ran; what matters is whether the tool input it
+leaves behind is byte-identical to the one Claude Code would have produced
+untouched. That has never been asserted, because until now nothing rewrote it.
+
+- [ ] **One switch, all surfaces.** Every current and future hook checks it on line one, anchored, before anything else — and a test that **enumerates the registered hooks and fails if any one of them lacks the check**, so a new surface cannot be added without it
+- [ ] **Prove OFF equals vanilla, do not assert it.** With the switch on, capture a subagent spawn's tool input and assert it is **byte-identical** to the same spawn with the hooks unregistered entirely. An actuator that "exits early" is not the same as one that never ran, and only the byte comparison can tell them apart
+- [ ] **A documented teardown** — one command, printed by `doctor.py`, that unregisters the hooks and states plainly what it does and does not undo
+- [ ] **Establish whether a RUNNING session honours the switch**, or whether hook config is read once at session start. If a live session keeps firing a hook after the switch is set, the switch is not an emergency stop and must not be described as one. This is a fact to check, not to assume
+- [ ] **Assert the switch fails safe**: if the file cannot be read — permissions, a full disk — the hook must behave as though it were present, not absent
+- [ ] `doctor.py` prints the full reversibility state in one place: which hooks are registered, whether the switch is set, what is inside the folder and what has been written outside it
+
+### What a flag cannot undo, stated plainly
+
+A switch is the wrong mental model for some of this, and pretending otherwise
+would be the dangerous part:
+
+| change | reversible? |
+|---|---|
+| hooks firing | **Yes** — switch, or unregister |
+| data collected | **Yes** — delete the folder |
+| the machine's config outside this folder | **Nothing to undo**; nothing is written there |
+| **work already produced by a routed model** | **No.** Once a delegated task has run on haiku instead of opus, that output is in your repository and your history. Turning routing off stops future tasks; it does not re-do past ones |
+| **the "delegate where possible" working rule (JEV-24b)** | **No.** It is a change in how the work is done, not a change to a program. No flag reverses a habit, and the pre-registration already records it as a confound |
+
+The first three are what a master switch is for. The last two are why the
+experiment is pre-registered and staged rather than simply flagged, and they
+belong in the writeup's limitations rather than in a config file.
 
 ---
 
