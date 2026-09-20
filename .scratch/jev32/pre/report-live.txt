@@ -1,0 +1,100 @@
+==============================================================================
+JEV SHADOW-MODE REPORT
+==============================================================================
+
+Phase 1 measures AGREEMENT BETWEEN ARMS. The reference arm is a pseudo-label,
+not truth. No claim in this report is a claim about correctness; ground-truth
+labels and calibration metrics arrive in Phase 2 from a human-labelled set.
+
+SCOPE OF THE BASELINE. The cc_* arms are Claude Code as it actually ships,
+invoked headless on a subscription. They bundle the model with a ~5K-token
+preamble, a tool round trip and a process spawn. Every comparison below is
+therefore a claim about CLAUDE CODE AS DEPLOYED, not about Opus 5 or Haiku 4.5
+as classifiers. A bare Messages API call answers the same question with roughly
+386 input tokens in under a second. See the attribution table in each surface
+section, and FINDINGS.md Appendix C.
+
+reference arm : cc_opus5
+run context   : live
+pricing       : pricing-2026-09-20
+decisions     : 571   runs: 1783
+state identity: OK (all arms saw byte-identical state)
+
+------------------------------------------------------------------------------
+SURFACE: pre_bash
+------------------------------------------------------------------------------
+  operational
+    arm            n    ok    p50ms    p90ms    p99ms       $/1k model                       
+    cc_haiku45   490   459   9997.6  22145.0  45394.9    11.6929 claude-haiku-4-5            
+      attrition: cli_error=30, malformed_response=1
+    cc_opus5     490   460   4987.8   6451.3  24126.1    26.9787 claude-opus-5               
+      attrition: cli_error=30
+    cc_sonnet5   313   283   3100.3   3677.6  21373.8     7.2366 claude-sonnet-5             
+      attrition: cli_error=30
+    jev          490   487    565.9    743.3   2046.9     0.0281 typesafe-ai/jev             
+      attrition: timeout=3
+  attribution -- how much of the gap is the model, and how much is the wrapper
+    arm           state tok   preamble  think tok  turns  spawn ms    api ms  total ms
+    cc_haiku45            8       6100        587    2.0      2947      9655     12602
+    cc_opus5              4      12238          5    2.8      2496      3510      6006
+    cc_sonnet5            2       7036          0    2.0      1959      1590      3548
+    jev                 670          0          -      -         -         -       635
+
+    state tok = tokens the decision itself is worth
+    preamble  = tokens the harness adds before the question is even asked
+    spawn ms  = wall clock minus API time, i.e. process startup
+    A cc_* arm's advantage-gap is NOT the model's deficit. Read this table
+    before quoting any latency or token ratio from the section above.
+
+  cc_haiku45 vs cc_opus5
+    destructive  (n=459, sessions=1)
+      agreement with cc_opus5   0.996
+      majority-class baseline   1.000   (base rate of cc_opus5-positive: 0.000)
+      Cohen's kappa             0.000
+      PABAK  [clustered 95%]    0.991 [nan, nan] (n=459, clusters=1)  INCONCLUSIVE BY RULE: only 1 cluster(s); 30 pre-committed as the minimum
+      PABAK  [naive 95%]        0.991 [0.978, 1.000] (n=459, clusters=459)   <- shown once to expose the clustering gap
+      confusion (arm x cc_opus5)  ++0 +-2 -+0 --457
+      sharpness (mean bits)     0.114   (0 = decisive, 1 = hedging)
+    needs_review  (n=459, sessions=1)
+      agreement with cc_opus5   0.806
+      majority-class baseline   0.987   (base rate of cc_opus5-positive: 0.013)
+      Cohen's kappa             0.078
+      PABAK  [clustered 95%]    0.612 [nan, nan] (n=459, clusters=1)  INCONCLUSIVE BY RULE: only 1 cluster(s); 30 pre-committed as the minimum
+      PABAK  [naive 95%]        0.612 [0.538, 0.686] (n=459, clusters=459)   <- shown once to expose the clustering gap
+      confusion (arm x cc_opus5)  ++5 +-88 -+1 --365
+      sharpness (mean bits)     0.344   (0 = decisive, 1 = hedging)
+  cc_sonnet5 vs cc_opus5
+    destructive  (n=283, sessions=1)
+      agreement with cc_opus5   1.000
+      majority-class baseline   1.000   (base rate of cc_opus5-positive: 0.000)
+      Cohen's kappa             nan
+      PABAK  [clustered 95%]    1.000 [nan, nan] (n=283, clusters=1)  INCONCLUSIVE BY RULE: only 1 cluster(s); 30 pre-committed as the minimum
+      PABAK  [naive 95%]        1.000 [1.000, 1.000] (n=283, clusters=283)  INCONCLUSIVE BY RULE: zero-width interval — every resample agreed, which is degeneracy, not precision   <- shown once to expose the clustering gap
+      confusion (arm x cc_opus5)  ++0 +-0 -+0 --283
+      sharpness (mean bits)     0.127   (0 = decisive, 1 = hedging)
+    needs_review  (n=283, sessions=1)
+      agreement with cc_opus5   0.982
+      majority-class baseline   0.982   (base rate of cc_opus5-positive: 0.018)
+      Cohen's kappa             0.000
+      PABAK  [clustered 95%]    0.965 [nan, nan] (n=283, clusters=1)  INCONCLUSIVE BY RULE: only 1 cluster(s); 30 pre-committed as the minimum
+      PABAK  [naive 95%]        0.965 [0.929, 0.993] (n=283, clusters=283)   <- shown once to expose the clustering gap
+      confusion (arm x cc_opus5)  ++0 +-0 -+5 --278
+      sharpness (mean bits)     0.238   (0 = decisive, 1 = hedging)
+  jev vs cc_opus5
+    destructive  (n=457, sessions=1)
+      agreement with cc_opus5   1.000
+      majority-class baseline   1.000   (base rate of cc_opus5-positive: 0.000)
+      Cohen's kappa             nan
+      PABAK  [clustered 95%]    1.000 [nan, nan] (n=457, clusters=1)  INCONCLUSIVE BY RULE: only 1 cluster(s); 30 pre-committed as the minimum
+      PABAK  [naive 95%]        1.000 [1.000, 1.000] (n=457, clusters=457)  INCONCLUSIVE BY RULE: zero-width interval — every resample agreed, which is degeneracy, not precision   <- shown once to expose the clustering gap
+      confusion (arm x cc_opus5)  ++0 +-0 -+0 --457
+      sharpness (mean bits)     0.128   (0 = decisive, 1 = hedging)
+    needs_review  (n=457, sessions=1)
+      agreement with cc_opus5   0.536
+      majority-class baseline   0.987   (base rate of cc_opus5-positive: 0.013)
+      Cohen's kappa             0.029
+      PABAK  [clustered 95%]    0.072 [nan, nan] (n=457, clusters=1)  INCONCLUSIVE BY RULE: only 1 cluster(s); 30 pre-committed as the minimum
+      PABAK  [naive 95%]        0.072 [-0.015, 0.164] (n=457, clusters=457)   <- shown once to expose the clustering gap
+      confusion (arm x cc_opus5)  ++6 +-212 -+0 --239
+      sharpness (mean bits)     0.871   (0 = decisive, 1 = hedging)
+

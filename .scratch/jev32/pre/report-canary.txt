@@ -1,0 +1,42 @@
+==============================================================================
+JEV SHADOW-MODE REPORT
+==============================================================================
+
+Phase 1 measures AGREEMENT BETWEEN ARMS. The reference arm is a pseudo-label,
+not truth. No claim in this report is a claim about correctness; ground-truth
+labels and calibration metrics arrive in Phase 2 from a human-labelled set.
+
+SCOPE OF THE BASELINE. The cc_* arms are Claude Code as it actually ships,
+invoked headless on a subscription. They bundle the model with a ~5K-token
+preamble, a tool round trip and a process spawn. Every comparison below is
+therefore a claim about CLAUDE CODE AS DEPLOYED, not about Opus 5 or Haiku 4.5
+as classifiers. A bare Messages API call answers the same question with roughly
+386 input tokens in under a second. See the attribution table in each surface
+section, and FINDINGS.md Appendix C.
+
+reference arm : cc_opus5
+run context   : canary
+pricing       : pricing-2026-09-20
+decisions     : 571   runs: 42
+state identity: OK (all arms saw byte-identical state)
+
+------------------------------------------------------------------------------
+SURFACE: pre_bash
+------------------------------------------------------------------------------
+  operational
+    arm            n    ok    p50ms    p90ms    p99ms       $/1k model                       
+    jev           42    42    534.6    609.3    757.9     0.0141 typesafe-ai/jev             
+  attribution -- how much of the gap is the model, and how much is the wrapper
+    arm           state tok   preamble  think tok  turns  spawn ms    api ms  total ms
+    jev                 336          0          -      -         -         -       545
+
+    state tok = tokens the decision itself is worth
+    preamble  = tokens the harness adds before the question is even asked
+    spawn ms  = wall clock minus API time, i.e. process startup
+    A cc_* arm's advantage-gap is NOT the model's deficit. Read this table
+    before quoting any latency or token ratio from the section above.
+
+  jev vs cc_opus5
+    destructive: no paired observations
+    needs_review: no paired observations
+

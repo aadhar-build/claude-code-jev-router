@@ -1059,7 +1059,7 @@ because making it live changes what gets written to the row schema.
 
 ## JEV-32: `analyze.py` reads the current config against rows run under an older one
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** defect, science
 **Blocked by:** None. Touches frozen `analyze.py`, so it must be its own commit with the reason stated and pre-/post-fix numbers reported (PREREGISTRATION §8).
 
@@ -1076,8 +1076,50 @@ prevent, and it is latent rather than absent.
 defect fix committed separately with its reason stated, reporting pre- and
 post-fix numbers.
 
-- [ ] Assert at analysis time that every row's `question_set_id` matches the spec being applied, and fail loudly on a mismatch rather than producing a plausible wrong number
-- [ ] If rows legitimately span versions, group by `question_set_id` rather than pooling
+- [x] Assert at analysis time that every row's `question_set_id` matches the spec being applied, and fail loudly on a mismatch rather than producing a plausible wrong number
+- [x] If rows legitimately span versions, group by `question_set_id` rather than pooling
+
+**Done 2026-09-20** in `ce9cdc7` (`src/analyze.py` alone) with tests in
+`0016a58` (`tests/test_analyze_config_join.py`, written red first).
+
+`report()` now partitions each surface's rows by the row's own
+`question_set_id`, loads each group's spec from that pin via `_spec_for()`, and
+gives a non-primary pin its own section rather than pooling it. A pin that
+cannot be resolved against `questions/` is excluded with a `!!` banner rather
+than scored under another spec — excluded, not raised, so one unreadable row
+cannot suppress the whole report. `synthetic_report()` names its pin and
+excludes off-pin rows with a count. The pricing header reports what the rows
+were **stamped** with, with current config beside it.
+
+**Pre-/post-fix numbers: IDENTICAL, and that is the point.** All 2,005 rows
+carry `pre_bash/v1#a`, so exactly one group exists and every statistic is
+computed over exactly the rows it was before. Full diffs for all five entry
+points (`--context live|synthetic|canary|all`, `--synthetic`) are in the commit
+message; artefacts in `.scratch/jev32/{pre,post}/`. Every agreement figure,
+kappa, PABAK interval, confusion cell, cluster count, sharpness value, quantile,
+cost and attribution row is byte-identical. The single deleted line is the
+pricing header, same value on both sides.
+
+**Two decisions recorded so they are not relitigated:**
+
+* **Arm-set eras are DISCLOSED, not partitioned.** Keyed on `set(arm_order)`,
+  which is intrinsic to the row, rather than bisecting on `evaluated_at`
+  against JEV-30's 12:07:24Z restart — bisecting a dataset on a wall clock is
+  the contamination JEV-43 exists to remove. The live corpus is 531 three-arm
+  and 1252 four-arm rows (the 42 `jev`-only rows are all `canary`). Partitioning
+  the statistics on the boundary would move every n and every interval, which is
+  a stop-and-report event under §8, not a defect fix. Header line only.
+* **`config_fingerprint` does not supersede this.** Zero of the 2,005 rows carry
+  one; it cannot be a join key for existing data. It is used for the one
+  assertion nothing else can make — two *different* fingerprints inside one
+  question set mean config changed without its version string changing.
+  Absence stays silent and means the pre-fingerprint era.
+
+**Reported, not repaired** (see `.scratch/a3-prep/jev32.md` §7): `--context all`
+pools `live`, `synthetic` and `canary` into one surface section, which
+PREREGISTRATION §4 forbids for live-vs-synthetic; and `_operational_table` /
+`_attribution_table` aggregate `$/1k` and `p50ms` across the two arm-set eras,
+which differ in concurrency regime. Both want their own tickets.
 
 ---
 
