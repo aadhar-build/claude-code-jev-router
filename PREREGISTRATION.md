@@ -791,3 +791,94 @@ a wrong conclusion:
 Neither boundary touches the primary metric, which is PABAK between `jev` and
 `cc_opus5` on `pre_bash.destructive` — both arms are present, on identical
 bytes, throughout.
+
+---
+
+# Amendment 6 — declared attrition, a correction, and the retention clock
+
+**2026-09-20.** Three items, one of which is a disclosure that reflects badly on
+the conduct of the study and is recorded for that reason.
+
+## A6.1 — Live captures were destroyed by our own test suite
+
+`tests/test_hook.sh` calls `rm -f "$ROOT"/spool/ready/*.json` **between
+assertion blocks**, against the real project root, while the worker drains that
+directory. `tests/run_all.sh` invokes it — so "run the test suite", the
+instruction in every agent brief written that day, was the destructive command.
+
+**It was run against the live tree three times: approximately 14:10Z, 14:44Z and
+14:46Z on 2026-09-20.** Each invocation wiped `spool/ready/` repeatedly.
+
+**The number of captures lost is unknown and unrecoverable.** A file deleted
+from the spool leaves no capture row and no run row; there is nothing to count
+afterwards. It is bounded above by the spool depth at those moments, and the
+observed high-water mark for the window is **20**, so the loss is at most tens
+of decision points and plausibly far fewer — the worker drains continuously and
+each reset caught only whatever happened to be waiting.
+
+**It is reported as attrition of unknown size, not estimated away.** §4 commits
+to counting failed runs in attrition; this is a loss that structurally cannot
+enter that count, which is precisely why it is declared here instead. The
+writeup states the three timestamps and the bound.
+
+**What it does not affect.** Losses are of *whole captures* before any arm saw
+them, so no arm is differentially affected and no comparison is biased. The
+mechanism is blind to content: it deletes whatever is waiting, and what is
+waiting is a function of drain timing, not of the command being classified. The
+primary metric loses a small amount of power and nothing else.
+
+**Cause, stated plainly.** The test suite was written before the surface went
+live, when there was no live spool to destroy, and was never revisited when
+collection opened. Tracked as JEV-42.
+
+## A6.2 — Correction to A2.6 #1
+
+A2.6 #1 states that the pre-rule delegation rate must be computed "before the
+rule takes effect" because "once the rule is in force that baseline is
+unrecoverable."
+
+**That reasoning is wrong.** Billable requests carry timestamps, so the rate is
+recoverable by cutting the corpus at the adoption moment — it was in fact
+computed roughly 3.5 hours *after* adoption, cleanly. What makes the baseline
+unrecoverable is **transcript rotation**, not rule adoption. The urgency was
+real; the stated reason for it was not.
+
+The commitment itself stands and has been met. A further deviation is recorded:
+**the cut is per billable request and per delegated task, not per session.** The
+rule was adopted *mid-session*, inside the only sustained work session this
+repository has, so a session-level cut would have either discarded the entire
+real corpus or silently admitted its post-rule half.
+
+**The pre-rule delegation rate, frozen:**
+
+| measure | value |
+|---|---|
+| by spend | **0.1624** ($11.04 delegated of $68.00) |
+| by task count | **0.1591** (7 delegated tasks / 37 typed prompts) |
+| cut at | 2026-09-20T11:11:49Z |
+
+## A6.3 — The retention clock, and how close it ran
+
+Transcript retention was an unstated assumption this study depended on. It is
+now established from primary sources rather than guessed: the setting is
+**`cleanupPeriodDays`**, its default is **30 days**, it is **unset** in both the
+user and project settings, and the documented cleanup covers
+`projects/<project>/<session>/subagents/` on the same clock. Claude Code
+2.1.278.
+
+**The collision that implies.** The earliest sessions in this corpus begin
+2026-09-19T19:58Z, so they are swept from approximately **2026-10-19**. The
+pre-registered hard stop for collection is **2026-10-20**. The source
+transcripts for the entire "before" baseline would have rotated **the day before
+the window closed**, and JEV-06 had recorded that baseline as collected when
+nothing was accumulating at all.
+
+It is now persisted in-repo as derived numbers, under version control, at
+`data/baseline/`. **Snapshotting is not optional and must continue** — a session
+not snapshotted before its thirtieth day is gone.
+
+**A limit on the loss figure, stated rather than rounded off.** Zero sessions
+were found already unrecoverable, and that is a **lower bound, not a proof of
+zero loss**: the index used to detect missing transcripts records only sessions
+that received a *typed* prompt, so a reaped non-interactive session would be
+invisible to it.
