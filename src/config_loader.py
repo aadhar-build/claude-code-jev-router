@@ -10,9 +10,68 @@ import paths
 from arms.base import ArmConfig
 
 
+class QuestionSetError(RuntimeError):
+    """A surface names a question set that cannot be resolved.
+
+    Deliberately fatal. The question set is the replay key (PREREGISTRATION
+    section 8), so a surface that silently fell back to a default version would
+    score the study against a question set nobody chose -- and the rows would
+    look perfectly well-formed while doing it.
+    """
+
+
 @functools.cache
 def surfaces() -> dict[str, Any]:
-    return json.loads((paths.CONFIG / "surfaces.json").read_text())
+    config = json.loads((paths.CONFIG / "surfaces.json").read_text())
+    _validate_question_sets(config)
+    return config
+
+
+def _available_versions(surface: str) -> list[str]:
+    directory = paths.QUESTIONS / surface
+    if not directory.is_dir():
+        return []
+    return sorted(p.stem for p in directory.glob("*.json"))
+
+
+def _validate_question_sets(config: dict[str, Any]) -> None:
+    """Every surface in the config must name a question set file that exists.
+
+    Checked at config-load time, for EVERY surface including `mode: off` ones.
+    A dangling version on an off surface is the same latent defect: it only
+    becomes visible on the day the surface is switched on, which is the worst
+    possible day to discover it. functools.cache does not cache exceptions, so
+    a broken config keeps raising rather than being papered over by the first
+    successful call.
+    """
+    for surface, entry in config.get("surfaces", {}).items():
+        version = entry.get("question_set")
+        if not version:
+            raise QuestionSetError(
+                f"surface '{surface}' in config/surfaces.json has no 'question_set' key. "
+                "There is no default: the question set is the replay key and must be pinned."
+            )
+        path = paths.QUESTIONS / surface / f"{version}.json"
+        if not path.is_file():
+            have = _available_versions(surface) or ["<none>"]
+            raise QuestionSetError(
+                f"surface '{surface}' is pinned to question set '{version}' but "
+                f"{path} does not exist. Available for this surface: {', '.join(have)}."
+            )
+
+
+def surface_question_version(surface: str) -> str:
+    """The question set version this surface is pinned to in config.
+
+    Raises rather than defaulting for an unknown surface.
+    """
+    entry = surfaces()["surfaces"].get(surface)
+    if entry is None:
+        known = ", ".join(sorted(surfaces()["surfaces"])) or "<none>"
+        raise QuestionSetError(
+            f"surface '{surface}' is not declared in config/surfaces.json. Known: {known}."
+        )
+    return entry["question_set"]
 
 
 @functools.cache
@@ -26,8 +85,25 @@ def pricing() -> dict[str, Any]:
 
 
 @functools.cache
-def question_set(surface: str, version: str = "v1") -> dict[str, Any]:
-    return json.loads((paths.QUESTIONS / surface / f"{version}.json").read_text())
+def question_set(surface: str, version: str | None = None) -> dict[str, Any]:
+    """Load a surface's question set.
+
+    `version=None` -- the default for every call site -- resolves the version
+    from `config/surfaces.json`. Passing a version explicitly overrides the
+    config and is how a sweep re-asks a stored state under a different set.
+
+    There is no fallback default. A version that does not exist on disk is a
+    hard error, not a silent reversion to v1.
+    """
+    resolved = version or surface_question_version(surface)
+    path = paths.QUESTIONS / surface / f"{resolved}.json"
+    if not path.is_file():
+        have = _available_versions(surface) or ["<none>"]
+        raise QuestionSetError(
+            f"question set '{surface}/{resolved}' does not exist at {path}. "
+            f"Available for this surface: {', '.join(have)}."
+        )
+    return json.loads(path.read_text())
 
 
 def arm(name: str) -> ArmConfig:
@@ -42,13 +118,18 @@ def surface_mode(surface: str) -> str:
     return surfaces()["surfaces"].get(surface, {}).get("mode", "off")
 
 
-def questions_for(surface: str, version: str = "v1", phrasing: str | None = None) -> dict[str, Any]:
+def questions_for(surface: str, version: str | None = None,
+                  phrasing: str | None = None) -> dict[str, Any]:
     """Resolve a question set into the {name: {type, instructions, ...}} shape
     the arms consume, with one phrasing selected.
+
+    `version=None` takes the version the surface is pinned to in
+    `config/surfaces.json`.
 
     The phrasing is part of the replay key: the same decision re-evaluated under
     a different phrasing is a different row, never an overwrite.
     """
+    version = version or surface_question_version(surface)
     spec = question_set(surface, version)
     chosen = phrasing or spec["primary_phrasing"]
     out: dict[str, Any] = {}
@@ -67,7 +148,9 @@ def questions_for(surface: str, version: str = "v1", phrasing: str | None = None
     return out
 
 
-def question_set_id(surface: str, version: str = "v1", phrasing: str | None = None) -> str:
+def question_set_id(surface: str, version: str | None = None,
+                    phrasing: str | None = None) -> str:
+    """The replay key for a surface. `version=None` takes the configured pin."""
     spec = question_set(surface, version)
     return f"{spec['question_set_id']}#{phrasing or spec['primary_phrasing']}"
 

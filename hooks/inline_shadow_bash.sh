@@ -63,7 +63,12 @@ ENDPOINT="${JEV_INLINE_ENDPOINT:-https://ai-gateway.vercel.sh/v1/evaluate}"
 MODEL="${JEV_INLINE_MODEL:-typesafe-ai/jev}"
 MAX_TIME="${JEV_INLINE_MAX_TIME:-2.0}"
 RUN_CONTEXT="${JEV_INLINE_RUN_CONTEXT:-live}"
-QFILE="$ROOT/questions/$SURFACE/v1.json"
+SURFACES_CONFIG="$ROOT/config/surfaces.json"
+# QFILE is resolved from SURFACES_CONFIG below, once jq is known to be present.
+# It is deliberately NOT hardcoded to v1: the question set version is the replay
+# key, and a hardcoded version is how a surface gets scored against a question
+# set nobody chose.
+QFILE=""
 
 # Thresholds default to 0.5 even though FINDINGS 4b shows 0.5 is the wrong
 # operating point for Jev on both questions (Youden-optimal 0.36 and 0.95).
@@ -93,6 +98,13 @@ emit_minimal() {
 # the payload to build a request. Its absence is a logged error, not a silent
 # skip, so the attrition table can show it.
 command -v jq >/dev/null 2>&1 || { emit_minimal "no_jq"; exit 0; }
+
+# Resolve the pinned question set version from config rather than assuming one.
+# No fallback: an unresolvable version is a logged failure, never a silent v1.
+QVERSION=$(jq -r --arg s "$SURFACE" '.surfaces[$s].question_set // empty' \
+  "$SURFACES_CONFIG" 2>/dev/null)
+[ -n "$QVERSION" ] || { emit_minimal "no_question_set_version"; exit 0; }
+QFILE="$ROOT/questions/$SURFACE/$QVERSION.json"
 [ -f "$QFILE" ] || { emit_minimal "no_question_set"; exit 0; }
 
 T0=$(jq -n 'now')

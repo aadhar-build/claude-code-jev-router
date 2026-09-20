@@ -84,6 +84,7 @@ def process_capture(
     arms: list[ArmConfig],
     *,
     run_context: str = "live",
+    version: str | None = None,
     phrasing: str | None = None,
     rng: random.Random | None = None,
     dry_run: bool = False,
@@ -94,8 +95,12 @@ def process_capture(
 
     state = sb.build(surface, payload)
     state_sha = sb.sha256(state)
-    questions = cl.questions_for(surface, phrasing=phrasing)
-    qsid = cl.question_set_id(surface, phrasing=phrasing)
+    # Resolved once, then passed to both calls. Taking the config default twice
+    # would let the questions actually asked and the question_set_id recorded
+    # beside them drift apart, which is unreconstructable after the fact.
+    version = version or cl.surface_question_version(surface)
+    questions = cl.questions_for(surface, version=version, phrasing=phrasing)
+    qsid = cl.question_set_id(surface, version=version, phrasing=phrasing)
 
     capture_row = {
         "decision_id": decision_id,
@@ -232,6 +237,10 @@ def main() -> int:
     args = parser.parse_args()
 
     paths.ensure_dirs()
+    # Validate every surface's pinned question set BEFORE claiming any spool
+    # file. surface_mode() would load the config anyway, but by then a capture
+    # has already been renamed into claimed/ and a bad pin would orphan it.
+    cl.surfaces()
     names = args.arms.split(",") if args.arms else cl.arms_config()["enabled"]
     arms = [cl.arm(n.strip()) for n in names]
 

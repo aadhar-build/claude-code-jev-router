@@ -145,6 +145,107 @@ class TestQuestionSets(unittest.TestCase):
         self.assertTrue(2 <= len(anchors) <= 10)
 
 
+class TestConfiguredQuestionSetVersion(unittest.TestCase):
+    """`question_set` in config/surfaces.json must be live, not decorative.
+
+    It was decorative: every call site took a `version="v1"` default and no
+    caller passed a version, so questions/user_prompt/v2.json was unloadable by
+    any code path while the config claimed to pin the version. The question set
+    is the replay key (PREREGISTRATION section 8), so a config field that looks
+    like configuration and silently does nothing is how a study ends up scored
+    against a question set nobody chose.
+    """
+
+    CACHED = ("surfaces", "arms_config", "pricing", "question_set")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._config = Path(self._tmp.name) / "config"
+        self._config.mkdir()
+        # Copy ALL config files: other loaders read arms.json and pricing.json
+        # from the same directory and would break if only surfaces.json moved.
+        for name in ("surfaces.json", "arms.json", "pricing.json"):
+            (self._config / name).write_text((paths.CONFIG / name).read_text())
+        self._saved_config = paths.CONFIG
+
+    def tearDown(self):
+        paths.CONFIG = self._saved_config
+        self._clear_caches()
+        self._tmp.cleanup()
+
+    def _clear_caches(self):
+        for name in self.CACHED:
+            getattr(cl, name).cache_clear()
+
+    def _pin(self, surface, version):
+        """Rewrite the temp config so `surface` is pinned to `version`."""
+        path = self._config / "surfaces.json"
+        config = json.loads(path.read_text())
+        config["surfaces"][surface]["question_set"] = version
+        path.write_text(json.dumps(config))
+        paths.CONFIG = self._config
+        self._clear_caches()
+        # Loading the config is the moment the guard fires, so trigger it here
+        # rather than leaving a bad pin to surface at some later call.
+        return cl.surfaces()
+
+    def test_pre_bash_is_pinned_to_v1_in_the_shipped_config(self):
+        """The live surface. Regression guard: this pin is what the running
+        collection has been evaluating against for every row already written."""
+        self.assertEqual(cl.surface_question_version("pre_bash"), "v1")
+        self.assertEqual(cl.question_set_id("pre_bash"), "pre_bash/v1#a")
+
+    def test_setting_a_surface_to_v2_actually_loads_v2(self):
+        """The defect, stated as a test. Before the fix this loaded v1."""
+        self._pin("user_prompt", "v2")
+        self.assertEqual(cl.surface_question_version("user_prompt"), "v2")
+        self.assertEqual(cl.question_set("user_prompt")["question_set_id"], "user_prompt/v2")
+        self.assertEqual(cl.question_set_id("user_prompt"), "user_prompt/v2#a")
+        # v2 adds two questions alongside the `route` carried over from v1.
+        self.assertEqual(
+            set(cl.questions_for("user_prompt")),
+            {"complexity", "needs_frontier", "route"},
+        )
+
+    def test_pinning_one_surface_does_not_move_another(self):
+        self._pin("user_prompt", "v2")
+        self.assertEqual(cl.question_set_id("pre_bash"), "pre_bash/v1#a")
+
+    def test_an_explicit_version_still_overrides_the_config(self):
+        """Sweeps must be able to re-ask a stored state under another set."""
+        self._pin("user_prompt", "v2")
+        self.assertEqual(
+            cl.question_set_id("user_prompt", version="v1"), "user_prompt/v1#a")
+
+    def test_a_missing_version_fails_loudly_instead_of_falling_back(self):
+        """The guard. A dangling version must never silently become v1."""
+        with self.assertRaises(cl.QuestionSetError) as caught:
+            self._pin("user_prompt", "v3")
+        self.assertIn("v3", str(caught.exception))
+        self.assertIn("user_prompt", str(caught.exception))
+
+    def test_a_dangling_version_on_an_OFF_surface_still_fails(self):
+        """`stop` is off. A latent bad pin must surface now, not on the day the
+        surface is switched on."""
+        self.assertEqual(cl.surface_mode("stop"), "off")
+        with self.assertRaises(cl.QuestionSetError):
+            self._pin("stop", "v9")
+
+    def test_a_surface_with_no_question_set_key_fails(self):
+        path = self._config / "surfaces.json"
+        config = json.loads(path.read_text())
+        del config["surfaces"]["post_edit"]["question_set"]
+        path.write_text(json.dumps(config))
+        paths.CONFIG = self._config
+        self._clear_caches()
+        with self.assertRaises(cl.QuestionSetError):
+            cl.surfaces()
+
+    def test_an_undeclared_surface_raises_rather_than_defaulting(self):
+        with self.assertRaises(cl.QuestionSetError):
+            cl.surface_question_version("not_a_surface")
+
+
 class TestCostModel(unittest.TestCase):
     def test_cache_multipliers_are_applied(self):
         usage = {"input_tokens": 0, "cache_creation_input_tokens": 1_000_000,

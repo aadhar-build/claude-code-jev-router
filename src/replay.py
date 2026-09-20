@@ -25,6 +25,10 @@ Modes:
   --determinism N      the same call N times, to see which arms are stable
   --phrasings          every phrasing variant of each question
   --truncation         states cut to 50% and 75%
+
+The question set version comes from `config/surfaces.json` unless
+`--question-version` overrides it. It is part of the replay key, so the same
+state under a different version is a new row, never an overwrite.
 """
 
 from __future__ import annotations
@@ -135,7 +139,8 @@ def stratified_sample(items: list[dict], n: int, rng: random.Random) -> list[dic
 
 
 def run_synthetic(arms: list[ArmConfig], surface: str, limit: int | None,
-                  rng: random.Random, sample: int | None = None) -> int:
+                  rng: random.Random, sample: int | None = None,
+                  version: str | None = None) -> int:
     path = paths.DATA / "synthetic" / f"{surface}-v1.jsonl"
     if not path.exists():
         print(f"no synthetic set at {path}; run src/make_synthetic.py first")
@@ -151,8 +156,9 @@ def run_synthetic(arms: list[ArmConfig], surface: str, limit: int | None,
     elif limit:
         items = items[:limit]
 
-    questions = cl.questions_for(surface)
-    qsid = cl.question_set_id(surface)
+    version = version or cl.surface_question_version(surface)
+    questions = cl.questions_for(surface, version=version)
+    qsid = cl.question_set_id(surface, version=version)
     written = 0
     for i, item in enumerate(items, 1):
         state = sb.build(surface, item["payload"])
@@ -183,12 +189,13 @@ def run_synthetic(arms: list[ArmConfig], surface: str, limit: int | None,
 
 
 def run_determinism(arms: list[ArmConfig], surface: str, repeats: int, limit: int,
-                    rng: random.Random) -> int:
+                    rng: random.Random, version: str | None = None) -> int:
     """The same bytes, N times. If Jev is deterministic and temperature-zero
     LLMs are not, that deserves its own section in the writeup."""
     captures = [c for c in store.captures() if c["surface"] == surface][:limit]
-    questions = cl.questions_for(surface)
-    qsid = cl.question_set_id(surface)
+    version = version or cl.surface_question_version(surface)
+    questions = cl.questions_for(surface, version=version)
+    qsid = cl.question_set_id(surface, version=version)
     written = 0
     for capture in captures:
         state = store.read_state(capture["state_sha256"])
@@ -203,11 +210,13 @@ def run_determinism(arms: list[ArmConfig], surface: str, repeats: int, limit: in
     return written
 
 
-def run_phrasings(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random) -> int:
+def run_phrasings(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random,
+                  version: str | None = None) -> int:
     """Every phrasing variant. If an arm is phrasing-insensitive while another
     is not, that is itself a result -- and it is why the baseline prompts are
     pre-registered."""
-    spec = cl.question_set(surface)
+    version = version or cl.surface_question_version(surface)
+    spec = cl.question_set(surface, version)
     phrasings = sorted({p for q in spec["questions"].values() for p in q["phrasings"]})
     captures = [c for c in store.captures() if c["surface"] == surface][:limit]
     written = 0
@@ -217,19 +226,21 @@ def run_phrasings(arms: list[ArmConfig], surface: str, limit: int, rng: random.R
             written += _emit(
                 decision_id=capture["decision_id"], surface=surface,
                 session_id=capture.get("session_id") or "", state=state,
-                questions=cl.questions_for(surface, phrasing=phrasing),
-                qsid=cl.question_set_id(surface, phrasing=phrasing),
+                questions=cl.questions_for(surface, version=version, phrasing=phrasing),
+                qsid=cl.question_set_id(surface, version=version, phrasing=phrasing),
                 arms=arms, run_context="replay", rng=rng,
                 extra={"sweep": "phrasing", "phrasing": phrasing},
             )
     return written
 
 
-def run_truncation(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random) -> int:
+def run_truncation(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random,
+                   version: str | None = None) -> int:
     """How much of the state does each arm actually need?"""
     captures = [c for c in store.captures() if c["surface"] == surface][:limit]
-    questions = cl.questions_for(surface)
-    qsid = cl.question_set_id(surface)
+    version = version or cl.surface_question_version(surface)
+    questions = cl.questions_for(surface, version=version)
+    qsid = cl.question_set_id(surface, version=version)
     written = 0
     for capture in captures:
         full = store.read_state(capture["state_sha256"])
@@ -245,10 +256,12 @@ def run_truncation(arms: list[ArmConfig], surface: str, limit: int, rng: random.
     return written
 
 
-def run_decisions(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random) -> int:
+def run_decisions(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random,
+                  version: str | None = None) -> int:
     captures = [c for c in store.captures() if c["surface"] == surface][:limit]
-    questions = cl.questions_for(surface)
-    qsid = cl.question_set_id(surface)
+    version = version or cl.surface_question_version(surface)
+    questions = cl.questions_for(surface, version=version)
+    qsid = cl.question_set_id(surface, version=version)
     written = 0
     for capture in captures:
         written += _emit(
@@ -264,6 +277,10 @@ def run_decisions(arms: list[ArmConfig], surface: str, limit: int, rng: random.R
 def main() -> int:
     parser = argparse.ArgumentParser(description="Replay stored or synthetic states.")
     parser.add_argument("--surface", default="pre_bash")
+    parser.add_argument("--question-version", metavar="V",
+                        help="override the question set version pinned for this surface in "
+                             "config/surfaces.json (e.g. v2). The version is part of the "
+                             "replay key, so rows are never overwritten by a different one.")
     parser.add_argument("--arms", help="comma-separated (default: config enabled)")
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--sample", type=int, metavar="N",
@@ -303,15 +320,20 @@ def main() -> int:
     if args.synthetic:
         print(f"synthetic stress set -> {[a.name for a in arms]}")
         total += run_synthetic(arms, args.surface,
-                               args.limit if args.limit != 50 else None, rng, sample=args.sample)
+                               args.limit if args.limit != 50 else None, rng, sample=args.sample,
+                               version=args.question_version)
     if args.decisions:
-        total += run_decisions(arms, args.surface, args.limit, rng)
+        total += run_decisions(arms, args.surface, args.limit, rng,
+                               version=args.question_version)
     if args.determinism:
-        total += run_determinism(arms, args.surface, args.determinism, args.limit, rng)
+        total += run_determinism(arms, args.surface, args.determinism, args.limit, rng,
+                                 version=args.question_version)
     if args.phrasings:
-        total += run_phrasings(arms, args.surface, args.limit, rng)
+        total += run_phrasings(arms, args.surface, args.limit, rng,
+                               version=args.question_version)
     if args.truncation:
-        total += run_truncation(arms, args.surface, args.limit, rng)
+        total += run_truncation(arms, args.surface, args.limit, rng,
+                                version=args.question_version)
 
     if total == 0:
         parser.print_help()

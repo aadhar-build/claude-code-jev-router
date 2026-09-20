@@ -237,8 +237,13 @@ latency, and whether the vendor changed the model underneath you mid-collection.
 
 - [x] `bench_inline.py` invokes the real hook N=200 times over recorded states and reports end-to-end wall-clock including process spawn
 - [x] Reported as projected enforce overhead, clearly separated from API latency
-- [ ] `canary.py` evaluates ~20 fixed states daily and records `response_model` and answers
-- [ ] A drift report flags any change in answers or model string across the collection window
+- [x] `canary.py` evaluates 21 fixed states (7 per stratum, frozen to `data/fixtures/canary-set-v1.json` as `canary-set-v1:2f4a6f6a9ea1`) and records `response_model` and answers under `run_context: "canary"`
+- [x] A drift report flags any change in answers or model string across the collection window — `response_model` change, mean `|delta|` over threshold, or a decision flip at tau. Exit codes 0 clean / 1 drift / 2 no reference / 3 incomplete, so a cron wrapper cannot read "nothing to compare" as "nothing wrong"
+
+Baselined 2026-09-20 on `jev`: reference sweep `01M2ZB4HDS8NTJZ3CX0P9FGNJX`. A sweep is 21 calls,
+~$0.0006, ~11s. **Open limitation**: the gateway reports only `typesafe-ai/jev` with no version
+field anywhere in `providerMetadata`, so the model-string check catches a rename and not a silent
+retrain. The probability deltas are the only signal for the latter.
 
 ---
 
@@ -642,6 +647,60 @@ is invisible to the very number designed to catch it.
 - [ ] Count claimed-but-unprocessed files in the status output of `run-collection.sh`, so the operator can see the backlog
 - [ ] Recover the one stranded capture from 17:28 before the window closes
 - [ ] Report whether any other captures were lost this way during the window — and if the count cannot be recovered, say so rather than implying it is zero
+
+---
+
+## JEV-31b: Five more config fields that look live and are inert
+
+**Status:** ready-for-agent
+**Labels:** defect, science
+**Blocked by:** None
+
+**What is wrong.** Fixing the `question_set` defect turned up five more
+instances of the same class. A config field that looks like configuration and
+does nothing is not a cosmetic problem — it is a field an operator will edit,
+observe no error, and reasonably believe took effect.
+
+| field | reality |
+|---|---|
+| `surfaces.json` → `state_source` | **Inert.** `worker.py` and `replay.py` read the hardcoded `state_builders.STATE_SOURCE` dict. The config values happen to agree today — and this value is written onto **every capture row**, so a divergence would silently mislabel the provenance of the leakage-safety argument |
+| `surfaces.json` → `hook_event`, `matcher` | **Inert.** `.claude/settings.local.json` is hand-written and duplicates them |
+| `surfaces.json` → `spool_backpressure_max_files: 500` | **Inert.** `capture.sh` uses a bare literal `500` |
+| `surfaces.json` → `"version": "surfaces-v1"` | **Inert.** No consumer. Note `pricing()["version"]` *is* recorded on every row; this one is not |
+| `paths.SURFACES` tuple | A **second source of truth** for the surface list, independent of `surfaces.json`. Tests iterate it |
+
+`state_source` is the one that matters most and it needs its own decision,
+because making it live changes what gets written to the row schema.
+
+- [ ] Make `state_source` live, or delete it from config and let `STATE_SOURCE` be the single source — either is defensible; having both is not
+- [ ] Resolve `paths.SURFACES` against `surfaces.json` so the surface list has one source
+- [ ] Either generate the hook registration from config or delete `hook_event`/`matcher` from it
+- [ ] Record `surfaces_version` on rows as `pricing_version` already is, or drop the field
+- [ ] Sweep for any remaining config key with no consumer, and add a test asserting every key in `config/*.json` is read somewhere
+
+---
+
+## JEV-32: `analyze.py` reads the current config against rows run under an older one
+
+**Status:** ready-for-agent
+**Labels:** defect, science
+**Blocked by:** None
+
+**What is wrong.** `analyze.py` resolves the question spec from **current**
+config at analysis time, while every row carries the `question_set_id` it was
+actually run under. If a pin moves mid-collection, the analysis reads one
+question list against rows produced by another — and nothing detects it.
+
+Harmless today: nothing has moved, and all 660 rows carry `pre_bash/v1#a`. But
+it is precisely the failure the pre-registration's question-set freeze exists to
+prevent, and it is latent rather than absent.
+
+`analyze.py` is frozen by `PREREGISTRATION.md` §8, so any change here is a
+defect fix committed separately with its reason stated, reporting pre- and
+post-fix numbers.
+
+- [ ] Assert at analysis time that every row's `question_set_id` matches the spec being applied, and fail loudly on a mismatch rather than producing a plausible wrong number
+- [ ] If rows legitimately span versions, group by `question_set_id` rather than pooling
 
 ---
 
