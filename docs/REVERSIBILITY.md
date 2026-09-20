@@ -96,6 +96,103 @@ travel with it:
 
 ---
 
+## Fully quiescent — the one command, and what it stops (JEV-51)
+
+The switch above stops the **hook**. Until JEV-51 it did **not** stop the
+**worker**: `worker.py`'s drain loop never consulted it, so with the switch
+engaged and a non-empty spool the worker kept draining and kept calling every
+enabled arm. "Disabled" meant *stops recording new decisions*, not *stops
+spending money*, and `run-collection.sh status` printed `capture: DISABLED`
+while API calls were still going out. JEV-40 proves OFF means vanilla **for the
+session**; it never proved OFF means **quiescent**.
+
+Three states, and they are now three separate facts:
+
+| state | what is stopped | how |
+|---|---|---|
+| **capture disabled** | the hook writes no new spool files | `touch .jev-disabled` |
+| **worker quiescent** | no arm is called for files already spooled | the same switch — the worker reads it at the top of every cycle **and before every claim** |
+| **worker stopped** | the process is gone | `./run-collection.sh stop` |
+
+### The one command
+
+```
+touch .jev-disabled
+```
+
+That is the full stop for **spending**. Within one poll interval the worker
+logs `QUIESCENT`, claims nothing, calls nothing and quarantines nothing; the
+spool is left exactly as it was, so `rm .jev-disabled` **resumes** rather than
+recovers. Proven by a test that counts arm invocations with the switch engaged
+and a non-empty spool (`tests/test_worker_lifecycle.py`,
+`TestKillSwitchStopsDispatch`), against a control in which the switch is absent
+and the same drain calls the arm every time — without that control the
+assertion would pass on a drain that was merely broken.
+
+The switch is re-read before **every** claim, not once per cycle: at a 30s poll
+the cycle-top check alone would keep spending for up to 30s after the operator
+believed they had stopped it, and draining a deep backlog is far longer than
+that. It is never read *between* the claim and the dispatch — a capture that
+has left `ready/` is finished, not abandoned.
+
+To also stop the **process**, which is a separate act:
+
+```
+./run-collection.sh stop
+```
+
+### Why `stop` now takes time, and is not hung
+
+`stop` sent a bare SIGTERM and returned immediately. Nothing in the worker
+handled it, so the default disposition killed the process instantly — possibly
+mid-dispatch, with a capture already renamed into `spool/claimed/` and nothing
+in the tree that ever moves it back. **That is the unnamed cause of JEV-31's
+stranded claims**, and it is why two hand-reaps are recorded on the board.
+
+SIGTERM and SIGINT now both set a flag: the in-flight capture finishes, its
+claim is released, the process exits 0. SIGINT gets an **explicit handler**
+rather than relying on `except KeyboardInterrupt`, because the worker is
+started as a background job and the shell sets SIGINT to `SIG_IGN` — the only
+graceful exit that existed was unreachable in the way the worker is actually
+run.
+
+The honest cost: a stop can take up to one dispatch, bounded by the slowest
+enabled arm's `timeout_s` — **180s for the `cc_*` arms, 240s for
+`cc_fable51`**. `stop` prints that bound, reports progress every 15s, waits up
+to 300s, and then **checks `spool/claimed/` and exits non-zero if anything was
+stranded** rather than printing "stopped" and walking away. It removes the
+pidfile only once the process is actually gone.
+
+Asserted end to end in `tests/test_worker_lifecycle.py::TestGracefulStop`,
+which SIGTERMs and SIGINTs a **real** worker process **mid-dispatch** and
+requires exit 0, an empty `claimed/`, a completed run row for the capture that
+was in flight, and the unclaimed captures still sitting in `ready/`.
+
+### If a worker dies anyway — the startup reap (JEV-31)
+
+A kill -9, an OOM or a crash still strands a claim, so the recovery is not
+optional. On every start the worker scans `spool/claimed/` and returns files to
+`ready/` whose owning pid is gone. A claim now records its owner —
+`{base}__p{pid}__t{epoch}__r{retries}.json` — because the number in the old
+name was `capture.sh`'s `$$`, the **hook's** pid, which told a reaper nothing.
+
+- a claim owned by a **live** pid is never reaped, at any age;
+- the reap runs at **startup only**, never inside the drain loop;
+- a re-claim carries a retry counter, and after 3 it is quarantined to
+  `spool/dead/` with the reason, so a payload that kills the worker cannot
+  resurrect itself forever.
+
+Both restrictions exist for the same reason: reaping a claim whose owner is
+still working produces two full sets of well-formed rows under two
+`decision_id`s sharing one `state_sha256`. That is **inflation, not attrition**,
+and it is invisible — the §5 same-state assertion passes because the duplicates
+are legitimately identical, while the clustered bootstrap counts one decision
+point as two. The residual risk is stated rather than engineered away: pid
+reuse can make a dead owner look alive, in which case the file stays in
+`claimed/` and is reported in `status` instead of being reaped.
+
+---
+
 ## OFF equals vanilla — proved, not asserted
 
 The existing gates assert that with the switch on, no spool file appears. For an

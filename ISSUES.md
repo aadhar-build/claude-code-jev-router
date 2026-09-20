@@ -976,12 +976,19 @@ report it.
 
 ## JEV-31: Claimed spool files are never reaped — silent, unmeasured data loss
 
-**Status:** blocked
+**Status:** done
 **Labels:** defect, blocking, science
 
-**Blocked by:** JEV-33
+**Blocked by:** None — JEV-33 landed.
 
-*Same file as JEV-33 — `spool/claimed/` reaping belongs in the drain loop JEV-33 is rewriting. Serialised for that reason alone.*
+*Same file as JEV-33 — `spool/claimed/` reaping belongs in the drain loop JEV-33 rewrote. Serialised for that reason alone.*
+
+**Resolved 2026-09-20 with JEV-51**, whose ungraceful SIGTERM was the unnamed
+cause of the strandings. A claim now records its **owning worker pid** and a
+claim timestamp in its filename — the number in the old name was `capture.sh`'s
+`$$`, the *hook's* pid, so "is the owner alive?" could not be asked and a
+liveness-keyed reap could not be built at all. See `src/worker.py` (the
+lifecycle note at the top) and `docs/REVERSIBILITY.md`.
 
 **What is wrong.** The worker claims a spool file by renaming it into
 `spool/claimed/` before doing any work — the atomicity fix that made two workers
@@ -998,12 +1005,24 @@ by state-size bucket"*. A capture lost in `claimed/` is attrition that never
 appears in the attrition count, because no run row was ever written for it. It
 is invisible to the very number designed to catch it.
 
-- [ ] Reap at startup: any file in `spool/claimed/` older than a threshold, or claimed by a pid that is no longer alive, returns to `ready/`
-- [ ] Record the reap — a re-claimed capture must be distinguishable from a first-claim one, or a poison payload loops forever
-- [ ] Cap the retries and quarantine after N, so a payload that kills the worker cannot resurrect itself indefinitely
-- [ ] Count claimed-but-unprocessed files in the status output of `run-collection.sh`, so the operator can see the backlog
-- [ ] Recover the one stranded capture from 17:28 before the window closes
-- [ ] Report whether any other captures were lost this way during the window — and if the count cannot be recovered, say so rather than implying it is zero
+- [x] Reap at startup: any file in `spool/claimed/` older than a threshold, or claimed by a pid that is no longer alive, returns to `ready/` — **amended: pid liveness only, age never.** `rename()` preserves mtime, so a capture that waited in a deep `ready/` backlog is claimed already looking old and any threshold would eventually reap a file that was mid-dispatch. A **live** pid is never reaped at any age; a claim with no owner recorded (every pre-fix file) is reaped unconditionally, because the reap runs at startup only and `run-collection.sh` pidfile-guards against a second worker, so such a file is stranded by definition. `worker.reap_claimed()`
+- [x] Record the reap — a re-claimed capture must be distinguishable from a first-claim one, or a poison payload loops forever — `{base}__p{pid}__t{epoch}__r{retries}.json` on claim, `{base}__r{n}.json` back in `ready/`. The surface still parses off the front (`split("__", 1)[0]` is non-greedy from the left) and `_quarantine` carries the counter into `dead/` for free
+- [x] Cap the retries and quarantine after N, so a payload that kills the worker cannot resurrect itself indefinitely — `MAX_CLAIM_RETRIES = 3`, then `dead/` with the reason. Asserted end to end by `test_a_poison_payload_terminates_rather_than_looping`
+- [x] Count claimed-but-unprocessed files in the status output of `run-collection.sh` — `spool_watch.report()` already printed it (JEV-33); `stop` now also verifies `claimed/` is empty and **exits non-zero** naming the count if it is not
+- [x] Recover the one stranded capture from 17:28 before the window closes — **already hand-reaped before this wave.** `spool/claimed/` was empty when this ticket was picked up; the reap is therefore shipped untested against that specific file and will first run for real at the next sanctioned restart
+- [x] Report whether any other captures were lost this way during the window — **the honest answer is "unknowable", not zero.** `dead/` is empty and two strandings are recorded on the board, both hand-reaped. But a hand-reap leaves no trace either, and nothing has ever counted a claim. **Report: at least two, both recovered; no mechanism existed to count the rest.** The mechanism now exists — every reap logs a line and every exhausted re-claim lands in `dead/` with its reason
+
+**The defect the fix introduces, named rather than discovered later.** Reaping
+a claim whose owner is still working produces two full sets of *well-formed*
+run rows under two `decision_id`s sharing one `state_sha256`. That is
+**inflation, not attrition**, and it is invisible to the §5 assertion — the
+duplicates are legitimately identical — while making the clustered bootstrap's
+independence assumption quietly false. Two mitigations, both cheap and both
+tested: a live pid is never reaped, and the reap runs at startup only, before
+this process has anything in flight. Residual risk, stated rather than
+engineered away: **pid reuse can make a dead owner look alive**, in which case
+the file is left in `claimed/` and reported in `status` rather than reaped. A
+stranded file that is *visible* is a much smaller problem than this ticket's.
 
 ---
 
@@ -2296,7 +2315,7 @@ and therefore a flattering comparator. Say it before a reviewer does.
 
 ## JEV-51: the kill switch does not stop the worker, and `stop` is ungraceful
 
-Status: ready-for-agent
+Status: done
 Labels: safety, reversibility, defect
 Blocked by: none
 
@@ -2337,12 +2356,57 @@ manual steps instead of one.
 
 **Acceptance criteria**
 
-- [ ] Kill switch engaged + non-empty spool → zero API calls, proven by a test
-      that counts arm invocations
-- [ ] SIGTERM and SIGINT both exit cleanly with `spool/claimed/` empty
-- [ ] A test that SIGTERMs a worker mid-dispatch and asserts no stranded claim
-- [ ] `status` reports capture state and worker state as two separate facts
-- [ ] `docs/REVERSIBILITY.md` updated: the one-command path to fully quiescent
+- [x] Kill switch engaged + non-empty spool → zero API calls, proven by a test
+      that counts arm invocations —
+      `tests/test_worker_lifecycle.py::TestKillSwitchStopsDispatch`. The counter
+      patches `arms.fake.evaluate`, which is what `worker.evaluate_one` actually
+      reaches through `load_arm_module(config.kind)`; patching the wrapper would
+      have counted the wrapper. Paired with a **control** in which the switch is
+      absent and the same drain calls the arm every time, so the assertion
+      cannot pass on a drain that is merely broken. Red before the fix:
+      `Lists differ: ['fake', 'fake', 'fake'] != []`
+- [x] SIGTERM and SIGINT both exit cleanly with `spool/claimed/` empty — both
+      mapped to one flag-setting handler. SIGINT gets an **explicit** handler
+      rather than `except KeyboardInterrupt`, because under `nohup ... &` the
+      shell sets SIGINT to `SIG_IGN` and Python inherits it; `signal.signal`
+      also resets that inherited disposition, which is what makes Ctrl-C work on
+      a background job at all. The poll uses `Event.wait`, not `time.sleep` —
+      PEP 475 retries an interrupted sleep once a non-raising handler returns,
+      so a stop one second into an idle 30s poll would otherwise wait out the
+      remaining 29
+- [x] A test that SIGTERMs a worker mid-dispatch and asserts no stranded claim —
+      `TestGracefulStop`, a **real** subprocess running the real `worker.main()`
+      against a sandbox root (`tests/worker_driver.py`), signalled while an arm
+      is provably in flight. Asserts exit 0, empty `claimed/`, a completed run
+      row for the in-flight capture, and the unclaimed captures still in
+      `ready/`. Red before the fix: `-15 != 0` and
+      `stranded claim after SIGINT: ['pre_bash__80-0.json']`
+- [x] `status` reports capture state and worker state as two separate facts —
+      `worker: RUNNING (pid N), draining` vs `worker: RUNNING (pid N) but
+      QUIESCENT`, printed independently of the `capture:` line.
+      `tests/test_collection_control.sh` §1 asserts the distinction is driven by
+      the switch
+- [x] `docs/REVERSIBILITY.md` updated: the one-command path to fully quiescent —
+      new section *"Fully quiescent"*, with the three states as a table and the
+      honest cost of a graceful `stop`
+
+**Also done, beyond the criteria.** `run-collection.sh stop` waits for the
+handler (bounded at 300s — a dispatch is bounded by the slowest enabled arm's
+`timeout_s`, 180s for the `cc_*` arms and 240s for `cc_fable51`), prints that
+bound and a progress line every 15s so it does not read as hung, removes the
+pidfile only once the process is gone, and **exits non-zero naming the count**
+if `spool/claimed/` is not empty.
+
+**A test-fixture defect surfaced by this work, fixed here.**
+`tests/test_pipeline.py:TempStorage` never repointed `paths.KILL_SWITCH`, which
+was harmless only while nothing in the worker read the switch — with
+`.jev-disabled` present for the whole of Phase A, its two drain tests would have
+run against the *live* switch and asserted on an empty result. It also laid
+`claimed/` and `dead/` out as siblings of `spool/` while `drain_once` reached
+them as `paths.SPOOL / "claimed"`: one directory in production, two in the
+fixture, which is exactly how a test about `claimed/` passes while touching
+nothing. Both corrected, and `worker.py` now uses `paths.SPOOL_CLAIMED` /
+`paths.SPOOL_DEAD` rather than re-deriving the paths.
 
 ## JEV-52: the activation gate — the single deliberate act that turns the experiment on
 

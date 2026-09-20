@@ -58,16 +58,32 @@ class TempStorage(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         base = Path(self._tmp.name)
         self._saved = {}
-        for name in ("CAPTURES", "STATES", "RUNS", "LABELS", "SPOOL", "SPOOL_READY",
-                     "SPOOL_TMP", "SPOOL_CLAIMED", "SPOOL_DEAD", "DROPS"):
+        for name in ("CAPTURES", "STATES", "RUNS", "LABELS", "SPOOL", "DROPS"):
             self._saved[name] = getattr(paths, name)
             target = base / name.lower()
+            target.mkdir(parents=True, exist_ok=True)
+            setattr(paths, name, target)
+        # The three spool subdirectories are laid out UNDER spool/, exactly as
+        # the live tree has them. They used to be siblings (`base/spool_claimed`)
+        # while `worker.drain_once` reached the same directory as
+        # `paths.SPOOL / "claimed"` -- one directory in production and two here,
+        # which is how a test about claimed/ can pass while touching nothing.
+        for name, leaf in (("SPOOL_READY", "ready"), ("SPOOL_TMP", "tmp"),
+                           ("SPOOL_CLAIMED", "claimed"), ("SPOOL_DEAD", "dead")):
+            self._saved[name] = getattr(paths, name)
+            target = paths.SPOOL / leaf
             target.mkdir(parents=True, exist_ok=True)
             setattr(paths, name, target)
         # A file, not a directory: the spool high-water mark must not be
         # advanced by a test run against the real collection window.
         self._saved["SPOOL_WATERMARK"] = paths.SPOOL_WATERMARK
         paths.SPOOL_WATERMARK = base / "spool_watermark.json"
+        # JEV-51. The worker now refuses to drain while the kill switch is
+        # present, and `.jev-disabled` IS present in the live tree for the
+        # whole of Phase A. Without this line every drain test below would
+        # silently do nothing and assert on an empty result.
+        self._saved["KILL_SWITCH"] = paths.KILL_SWITCH
+        paths.KILL_SWITCH = base / ".jev-disabled"
 
     def tearDown(self):
         for name, value in self._saved.items():

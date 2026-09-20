@@ -1,3 +1,8 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 """Spool depth, its high-water mark, and the backpressure-drop count (JEV-33).
 
 Three numbers an operator needs to see BEFORE the spool hits the backpressure
@@ -29,6 +34,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 import paths
+import pyversion
+
+# JEV-44: this module has a __main__ and is invoked from
+# run-collection.sh. The PEP-723 header above binds `uv run` only.
+pyversion.require()
 
 
 def _count(directory) -> int:

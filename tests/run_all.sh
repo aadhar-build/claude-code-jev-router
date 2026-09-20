@@ -97,6 +97,12 @@ guarded "test_python_floor.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/test
 echo
 echo "=== seam 2 + 3: pipeline, statistics, report ==="
 guarded "test_pipeline.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_pipeline.py' 2>&1 | tail -4" || exit 1
+echo
+echo "=== JEV-51 + JEV-31: kill switch, graceful stop, and the claim reap ==="
+guarded "test_worker_lifecycle.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_worker_lifecycle.py' 2>&1 | tail -4" || exit 1
+echo "=== JEV-51: run-collection.sh stop waits, and status separates the two facts ==="
+guarded "test_collection_control.sh" bash -c "set -o pipefail; '$ROOT/tests/test_collection_control.sh' | tail -3" || exit 1
+echo
 echo "=== seam 3b: threshold validation and determinism ==="
 guarded "test_validation.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_validation.py' 2>&1 | tail -4" || exit 1
 echo "=== baseline: known answers from a real transcript ==="
