@@ -157,7 +157,20 @@ def process_capture(
 def drain_once(arms: list[ArmConfig], *, verbose: bool = True) -> int:
     ready = sorted(paths.SPOOL_READY.glob("*.json"))
     processed = 0
-    for spooled in ready:
+    claimed_dir = paths.SPOOL / "claimed"
+    claimed_dir.mkdir(parents=True, exist_ok=True)
+
+    for candidate in ready:
+        # Claim the file by renaming it out of ready/ before doing any work.
+        # rename is atomic, so exactly one worker wins and the loser moves on.
+        # Without this, two workers evaluate the same capture against the live
+        # arms and we pay twice for a duplicate row.
+        spooled = claimed_dir / candidate.name
+        try:
+            candidate.rename(spooled)
+        except (FileNotFoundError, OSError):
+            continue
+
         surface = spooled.name.split("__", 1)[0]
         try:
             payload = json.loads(spooled.read_text(encoding="utf-8"))
@@ -189,10 +202,23 @@ def drain_once(arms: list[ArmConfig], *, verbose: bool = True) -> int:
 
 
 def _quarantine(spooled: Path, reason: str, *, verbose: bool) -> None:
-    """Never silently delete a capture we failed to process."""
+    """Never silently delete a capture we failed to process.
+
+    Tolerant of the file having already gone. Two workers draining the same
+    spool will race: one processes and unlinks a file while the other is still
+    deciding to quarantine it. An unguarded rename raises FileNotFoundError,
+    which killed a live collection run and stopped capture accumulating without
+    any visible signal. Losing one duplicate record is fine; losing the worker
+    is not.
+    """
     dead = paths.SPOOL / "dead"
     dead.mkdir(parents=True, exist_ok=True)
-    spooled.rename(dead / spooled.name)
+    try:
+        spooled.rename(dead / spooled.name)
+    except FileNotFoundError:
+        if verbose:
+            print(f"  {spooled.name} vanished before quarantine (another worker took it)")
+        return
     (dead / f"{spooled.name}.reason").write_text(reason, encoding="utf-8")
     if verbose:
         print(f"  quarantined {spooled.name}: {reason}")

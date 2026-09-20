@@ -187,17 +187,21 @@ three verification tests that must all pass before the hook is enabled.
 
 ## JEV-09: True inline shadow
 
-**Status:** blocked
+**Status:** in-progress
 **Labels:** hooks, hot-path
 **Blocked by:** JEV-08
 
 **What to build:** The script you would actually deploy, running live but never
 blocking -- because a capture-and-replay harness never exercises it.
 
-- [ ] `inline_shadow_bash.sh` calls Jev synchronously with a hard `--max-time`
-- [ ] Logs the decision it would have made; never emits a permission decision
-- [ ] Exits 0 on every path including timeout, network failure and malformed response
-- [ ] Yields a measured inline p99 under live session conditions
+- [x] `inline_shadow_bash.sh` calls Jev synchronously with a hard `--max-time`
+- [x] Logs the decision it would have made; never emits a permission decision
+- [x] Exits 0 on every path including timeout, network failure and malformed response
+- [x] State string verified BYTE-IDENTICAL to `state_builders.build_pre_bash` — without this, shadow and enforce would score different inputs
+- [x] 40 assertions in `tests/test_inline_shadow.sh`; every path exits 0 with empty stdout
+- [x] Measured via `bench_inline.py -n 100` live: **624ms p50 / 929ms p99 e2e**, of which ~69ms is scaffolding no faster model removes
+- [ ] p99 under LIVE SESSION conditions — needs the inline hook registered alongside `capture.sh`, which is a separate decision
+- [ ] Decide `--max-time`: the 2.0s default sits BELOW Jev's 2,681ms p99, so the top 1-3% of the tail becomes timeout attrition
 
 ---
 
@@ -223,15 +227,15 @@ degenerate to provide on its own.
 
 ## JEV-11: Enforce-overhead bench and drift canary
 
-**Status:** blocked
+**Status:** in-progress
 **Labels:** metrics, science
 **Blocked by:** JEV-08
 
 **What to build:** Two small instruments: what enforcement would actually cost in
 latency, and whether the vendor changed the model underneath you mid-collection.
 
-- [ ] `bench_inline.py` invokes the real hook N=200 times over recorded states and reports end-to-end wall-clock including process spawn
-- [ ] Reported as projected enforce overhead, clearly separated from API latency
+- [x] `bench_inline.py` invokes the real hook N=200 times over recorded states and reports end-to-end wall-clock including process spawn
+- [x] Reported as projected enforce overhead, clearly separated from API latency
 - [ ] `canary.py` evaluates ~20 fixed states daily and records `response_model` and answers
 - [ ] A drift report flags any change in answers or model string across the collection window
 
@@ -289,6 +293,116 @@ Anthropic API key, and make the resulting confound impossible to miss.
 - [x] `doctor.py` treats a missing `ANTHROPIC_API_KEY` as correct, and warns if a metered arm is ever enabled
 - [x] 403 classified as `account_gated`, distinct from `auth` — different problems, and an attrition table that conflates them is useless
 - [x] Verified live: 10 state tokens against 5,460 preamble tokens, 1.5s spawn on 4.6s API
+
+## JEV-15: GATE 4 — the future-leakage test that does not exist
+
+**Status:** ready-for-agent
+**Labels:** verification, blocking, science
+**Blocked by:** None (can start immediately)
+
+**What to build:** A gate proving decision #7 actually holds. `tests/gates.sh`
+has 21 assertions covering isolation, fail-open and the kill switch, and **zero
+covering future-leakage** — the study's most load-bearing methodological claim,
+asserted in `PLAN.md`, `SPEC.md` and `FINDINGS.md` and verified nowhere.
+
+This applies to the already-live `pre_bash` surface. It should not wait for `stop`.
+
+- [ ] Fixture transcript; fire the hook; record `state_sha256_expected`
+- [ ] Append 20 more lines to the transcript; drain; assert the hash is UNCHANGED
+- [ ] Negative control: strip the offset, assert the capture is QUARANTINED not processed
+- [ ] Offline, `FakeArm` only, no network, no spend
+- [ ] Parameterise the three existing gates on surface — they are hardcoded to `pre_bash`
+
+---
+
+## JEV-16: Determinism sweep — the enforcement blocker
+
+**Status:** ready-for-agent
+**Labels:** science, blocking
+**Blocked by:** None
+
+**What to build:** The measurement that decides whether Jev can ever enforce.
+`src/determinism.py` is written and correctly **exits non-zero** rather than
+reporting a green result on absent data. `replay.py --determinism N` has never run.
+
+- [ ] Run `replay.py --determinism 20 --arms jev` over a stratified sample — Jev-only costs pennies; the `cc_*` arms would cost hours and are not what is in question
+- [ ] Report flip rate bucketed by |p − τ|; the hypothesis is that flips concentrate near τ and vanish away from it
+- [ ] Resolve the 41%-occupancy concern: at τ=0.95 on `needs_review`, 24/59 synthetic items sit within 0.05 of the threshold
+- [ ] If flips are confined to a narrow band, enforcement is viable with a dead-zone rule; if not, `needs_review` cannot enforce at any threshold
+
+---
+
+## JEV-17: Replace the fitted thresholds with a rule
+
+**Status:** ready-for-agent
+**Labels:** science
+**Blocked by:** JEV-16 (a dead-zone rule depends on the flip-rate result)
+
+**What to build:** τ=0.36 and τ=0.95 do not survive validation (optimism gap
+≈ +0.10, and 0.36 is an unstable constant selecting anywhere in 0.36–0.63). A
+constant fitted to 59 synthetic items does not transfer; a rule re-derives itself
+as data accumulates.
+
+- [ ] Adopt a fixed-target-recall rule (weakly dominant on `destructive`: never worse across 500 paired splits, better on 11–13%)
+- [ ] Re-derive on LIVE captures once the collection window closes, and report the live-vs-synthetic threshold difference as a finding
+- [ ] State the rule in `PREREGISTRATION-SURFACES.md` before it is used for any claim
+
+---
+
+## JEV-18: `user_prompt` / routing — FIRST of the remaining surfaces
+
+**Status:** blocked
+**Labels:** hooks, science
+**Blocked by:** JEV-15, plus the mechanism work in `docs/PLAN-SURFACES.md` §0
+
+**What to build:** Per `docs/PLAN-SURFACES.md` §2. Sequenced FIRST, reversing the
+original order: Part 4c established that gating is additive on every axis and
+**routing is the only surface that can make Claude Code faster or cheaper.**
+Strongest economics, thinnest evidence.
+
+- [ ] `questions/user_prompt/v2.json` adding a `complexity` score (v1 is frozen; never edit it)
+- [ ] No "which model" question — a complexity score plus a threshold evaluates every routing policy offline; a model-choice answer evaluates exactly one
+- [ ] Per-surface arms: jev 100%, cc_opus5 on a deterministic 1-in-3 subsample
+- [ ] **The realised-cost label**: correlate `complexity` against the ACTUAL cost of the turn that followed. Zero human labels, and the only Phase-1-feasible test of the $0.052-per-downgrade economics
+- [ ] ~60-item synthetic set including the class the probe failed on: short, plain-sounding, symptom-only debugging prompts
+- [ ] Re-run the empty-stdout gate specifically — `UserPromptSubmit` stdout is injected into session context, so a stray byte contaminates the prompt being measured
+
+---
+
+## JEV-19: `stop` — resolve the blocker, or cancel the surface
+
+**Status:** blocked
+**Labels:** hooks, science
+**Blocked by:** JEV-18
+
+**What to build:** Per `docs/PLAN-SURFACES.md` §1. **STEP 0 FIRST, before any
+code**: register `capture_only` with the unmodified hook, run one session, and
+settle two unknowns by looking — does the Stop payload carry
+`last_assistant_message` (contested), and is the final message flushed to the
+transcript before the hook fires?
+
+- [ ] Step 0 payload inspection, recorded in `docs/`
+- [ ] **If both unknowns go the wrong way, CANCEL the surface with a written negative result.** "The Stop hook cannot see the message it is being asked about" is a publishable finding about hook design and far cheaper than a week of uninterpretable rows
+- [ ] Otherwise: filename-encoded byte offset, zero-fork extraction, one `stat` (~1–2ms)
+- [ ] Fix `_flatten_content`, which keeps the HEAD of tool results while verdicts are at the TAIL — this directly undermines `has_unverified_claim`
+- [ ] ~60 mini-transcript synthetic set; the unverified-claim stratum is the one no live week will produce
+
+---
+
+## JEV-20: `post_edit` — risk scoring
+
+**Status:** blocked
+**Labels:** hooks
+**Blocked by:** JEV-19
+
+**What to build:** Per `docs/PLAN-SURFACES.md` §3.
+
+- [ ] Fix the verified matcher mismatch: `surfaces.json` says `Edit|Write|NotebookEdit`, the builder quarantines NotebookEdit and MultiEdit unconditionally. Register `Edit|Write` only
+- [ ] Verify `isinstance(response, str)` against a real payload — `tool_response` is likely a dict, silently dropping the tool result
+- [ ] Head-preserving truncation: front-truncation discards exactly what determines the risk anchor on a `Write`
+- [ ] ~100-item synthetic set with the adversarial pairs: a one-character auth-check flip (anchor 5, looks like 1) and a 200-line reformat (anchor 1, looks like 4)
+
+---
 
 ## Deferred: Phase 2
 

@@ -6,6 +6,55 @@ per issue, with `Status:` (`ready-for-agent` | `in-progress` | `blocked` | `done
 body. It lives in git, so issue history and code history are the same history, which for a
 single-author study is the whole point. Issues are numbered `JEV-nn` and never renumbered.
 
+## Status — 2026-09-20
+
+This spec was written before any measurement. Four things in it have since been
+**superseded by evidence**, and are recorded here rather than silently edited,
+because the changes are themselves results.
+
+**1. The question changed.** The spec asks whether Jev is a good classifier. The
+article asks whether **Claude Code becomes faster, more accurate and
+token-optimised** with Jev. Those are different, and separating them reversed a
+conclusion: a gate is *additive* on every axis — it adds ~337 tokens and 557ms
+per decision and removes neither — so **gating cannot make Claude Code faster or
+more token-efficient, by construction.** It can only make it safer, and this
+repository's near-zero destructive base rate cannot demonstrate that. See
+`FINDINGS.md` Part 4c.
+
+**2. Surface priority is reversed.** `pre_bash` was staged first because it was
+simplest to measure. **`user_prompt` / routing should have been first**: one turn
+moved Opus→Haiku saves 3,674× the cost of the Jev call that decided it, and it is
+the only mechanism in the study that could make Claude Code genuinely faster.
+See `docs/PLAN-SURFACES.md`.
+
+**3. The baseline is a harness, not a model.** The study runs entirely on a
+Claude subscription via `claude -p`, with no `ANTHROPIC_API_KEY`. The `cc_*` arms
+bundle the model with ~10K tokens of preamble and a process spawn, so every claim
+is about **Claude Code as deployed**, not about Opus as a classifier. Every
+surface section prints an attribution table decomposing harness from model. See
+`docs/SUBSCRIPTION-ARM.md`.
+
+**4. "Choose a threshold" became "choose a rule".** Fitted constants (τ=0.36,
+τ=0.95) do not survive train/test validation — optimism gap ≈ +0.10, and 0.36 is
+an unstable constant selecting anywhere in 0.36–0.63. Operating points must be
+selected by a rule that re-derives itself as data accumulates. See Part 4d.
+
+### What is built and measured
+
+| | state |
+|---|---|
+| `pre_bash` surface | **live**, 16 live + 60 synthetic captures |
+| Jev vs Claude Code discrimination | **measured** — AUC 0.977 vs 0.980, indistinguishable |
+| Enforce overhead | **measured** — 624ms p50 / 929ms p99, ~69ms irreducible |
+| Threshold validation | **measured** — neither fitted constant survives |
+| Cost reconciliation | **measured** — transcripts under-report by 27.6% |
+| Determinism rate | **NOT measured** — the one blocker for enforcement |
+| Future-leakage guarantee | **NOT tested** — asserted in three documents, verified nowhere |
+| `stop`, `user_prompt`, `post_edit` | specified and planned; **never run** |
+| Gold labels, calibration metrics | Phase 2, untouched |
+
+---
+
 ## Problem Statement
 
 Claude Code makes dozens of consequential decisions per session — whether a Bash command is
