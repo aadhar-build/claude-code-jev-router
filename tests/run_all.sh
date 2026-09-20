@@ -110,6 +110,8 @@ echo "=== seam 3b: threshold validation and determinism ==="
 guarded "test_validation.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_validation.py' 2>&1 | tail -4" || exit 1
 echo "=== JEV-16: sweep selection, and the two things a repeat group must not pool ==="
 guarded "test_jev16.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_jev16.py' 2>&1 | tail -4" || exit 1
+echo "=== JEV-43: wall-clock decomposition, and the contamination cut ==="
+guarded "test_latency.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_latency.py' 2>&1 | tail -4" || exit 1
 echo "=== baseline: known answers from a real transcript ==="
 guarded "test_session_metrics.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_session_metrics.py' 2>&1 | tail -4" || exit 1
 
