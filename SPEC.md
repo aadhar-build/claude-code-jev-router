@@ -6,6 +6,79 @@ per issue, with `Status:` (`ready-for-agent` | `in-progress` | `blocked` | `done
 body. It lives in git, so issue history and code history are the same history, which for a
 single-author study is the whole point. Issues are numbered `JEV-nn` and never renumbered.
 
+## Design decisions settled by the 2026-09-20 grilling
+
+Twenty decisions, taken in five rounds. Recorded here because several reverse
+earlier choices in this spec, and the reversals are themselves results.
+
+### Framing
+
+| # | decision |
+|---|---|
+| Q1 | **Thesis: "routing is where harness savings live."** Not "is Jev a good classifier" — that question is answered (it is) and it turned out not to be the interesting one. |
+| Q2 | **Audience: rigorous single-author case study / preprint.** Pre-registration hash cited, every CI clustered, falsification conditions explicit. Not a benchmark — not honestly reachable at n=1. |
+| Q3 | **Budget: ~1 week.** Land routing properly; do not attempt Phase 2 gold labels. |
+| Q18 | **Thesis narrowed, not pivoted:** "routing *delegated tasks* is where the savings live." The mechanism constraint (below) bounds it. |
+
+### The routing experiment
+
+| # | decision |
+|---|---|
+| Q5 | **A/B with actual routing**, not shadow-mode inference. |
+| Q17 | **Unit of routing is the delegated task, not the turn** — forced by the mechanism constraint. Model selected per subagent via `CLAUDE_CODE_SUBAGENT_MODEL` / `--agents` / frontmatter. |
+| Q17b | **Adopt a global "delegate to a subagent where possible" working rule**, to increase the share of spend that is routable. *See the confound note below.* |
+| Q10 | **Quality measured by friction proxies + escalation rate**, pre-registered as a composite. Explicitly NOT self-rating: unblinded self-assessment at n=1 on one's own experiment is the weakest available evidence. |
+| Q11 | **Primary outcome: net cost including rework** — an escalated turn is charged at its full cost plus the wasted one, so the treatment arm pays for its own mistakes and cannot win by being recklessly cheap. |
+| Q12 | **Runs concurrently with the `pre_bash` window.** Arm assignment must be recorded on every `pre_bash` capture so the analysis can condition on it — routing changes which model generates the commands, so the capture stream is no longer stationary. |
+| Q16 | **Aggressive thresholds.** Break-even is 37.5–44.4%; the economics have slack. |
+
+### Statistical discipline
+
+| # | decision | status |
+|---|---|---|
+| Q13, Q20 | **Degenerate-interval guard**: <30 clusters OR zero width → inconclusive by rule; cluster count always printed | **IMPLEMENTED** — `stats.Interval`, Amendment A1.1 |
+| Q14 | **Stopping rule amended** from 7 calendar days to 30 distinct sessions or 2026-10-20 | **IMPLEMENTED** — Amendment A1.2 |
+| Q15 | **Run all 360 synthetic items through all arms** to close the threshold overfit (gap 0.097 at n=59 → ~0.020 at n=300) | pending — see cost note |
+
+### Scope of publication
+
+| # | decision |
+|---|---|
+| Q4, Q7 | **Code + aggregate results + the 360-item synthetic set.** No live data, no state text, no run rows. The synthetic set carries no private data and is the project's most reusable artifact. |
+
+### Arms and questions
+
+| # | decision |
+|---|---|
+| Q8 | **Four baseline arms**: `cc_opus5`, `cc_sonnet5`, `cc_haiku45`, `cc_fable51`, plus `jev`. |
+| Q19 | **Fable stays, and `v2` gains a `verbosity` question.** Fable is *not* a cheap tier — at $10/$50 it is twice Opus — but its cache reads are half Opus's in absolute terms, so it wins only on cache-heavy *terse* turns. A one-dimensional complexity score cannot express that; routing to Fable needs a prediction of the turn's **shape**. |
+
+---
+
+## Three things a reader should be told plainly
+
+**1. The mechanism is the binding constraint, not the classifier.** No hook event
+accepts a `model` field; `PreModelSwitch` can veto a switch Claude initiates but
+never start one. There is no per-request model override in the SDK or headless.
+**Per-turn routing inside an interactive session is impossible today.** The
+classifier is cheap, fast and good enough — and the harness has nowhere to put
+the answer. See `FINDINGS.md` Part 5c.
+
+**2. The "delegate where possible" rule is a confound, and must be disclosed.**
+Adopting it changes how the work is done in order to make more of it routable.
+That improves the experiment's power and simultaneously makes the measured
+workload less representative of ordinary use. The writeup must state that the
+delegation rate was deliberately raised, and report what fraction of spend was
+delegable **before** the rule was adopted, from the existing transcripts.
+
+**3. Fable's pricing is unverified.** Every other rate in `config/pricing.json`
+was reconciled against Claude Code's own `cost-state` to the cent. Fable's comes
+from documentation, and its 2.5% cache-read multiplier contradicts the uniform
+10% verified empirically for three other models. No published Fable figure until
+one real Fable session is reconciled.
+
+---
+
 ## Status — 2026-09-20
 
 This spec was written before any measurement. Four things in it have since been

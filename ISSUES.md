@@ -404,6 +404,96 @@ transcript before the hook fires?
 
 ---
 
+## JEV-21: Degenerate-interval guard and stopping-rule amendment
+
+**Status:** done
+**Labels:** science, blocking
+**Blocked by:** None
+
+**What to build:** A guard against the trap the power analysis found in our own
+pre-registered test, plus the stopping-rule change it forced. Both committed the
+same day as the original registration, before the window closed and before any
+live analysis ran.
+
+- [x] `<30` clusters OR zero-width → `INCONCLUSIVE BY RULE`, whatever the interval says
+- [x] Cluster count printed beside every interval, always
+- [x] Verified: one cluster and an all-agree 8-session set both report inconclusive; a real 40-session set reports a usable interval
+- [x] `PREREGISTRATION.md` Amendment A1.1 (guard) and A1.2 (stopping rule: 30 sessions or 2026-10-20)
+- [x] Amendment states its own honest cost — changing a stopping rule mid-study is a known bias route; the mitigations are that it is dated, pre-window, blind to the result, and moves the bar UP
+
+---
+
+## JEV-22: Run the full synthetic set to close the threshold overfit
+
+**Status:** ready-for-agent
+**Labels:** science
+**Blocked by:** None
+
+**What to build:** The optimism gap falls from 0.097 at n=59 to ~0.020 at n=300.
+The set holds 360 items; only 60 have ever been run.
+
+> **SCOPE CHANGED SINCE THE DECISION.** This was agreed when there were four
+> arms. Fable makes it five: **4.1 hours serial and 1,440 subscription calls**,
+> against ~4 minutes and $0.005 for Jev alone. Confirm before running — it
+> competes directly with the routing A/B for subscription quota in the same week.
+
+- [ ] Decide scope: all five arms (4.1h, 1,440 calls) vs Jev-only (4 min, pennies)
+- [ ] Re-derive the threshold RULE (not constant) on the larger set
+- [ ] Report the n=300 optimism gap against the n=59 figure
+
+---
+
+## JEV-23: Routing A/B — per delegated task
+
+**Status:** blocked
+**Labels:** science, hooks
+**Blocked by:** JEV-18 (`user_prompt` surface), JEV-22
+
+**What to build:** The article's central experiment, per SPEC "The routing
+experiment". Per-turn routing is impossible (no hook sets a model, no
+per-request override exists), so the unit is the **delegated task**.
+
+- [ ] Model selected per subagent via `CLAUDE_CODE_SUBAGENT_MODEL` / `--agents` / frontmatter
+- [ ] Randomise assignment per delegation; record the arm on every capture including `pre_bash`
+- [ ] Primary outcome: **net cost including rework** — an escalated task charged at full cost plus the wasted one
+- [ ] Quality composite: friction proxies (interruptions, `is_error`, permission denials) + escalation rate
+- [ ] `PREREGISTRATION-ROUTING.md` committed BEFORE the first routed delegation
+- [ ] Aggressive thresholds justified by the 37.5–44.4% break-even, with the break-even arithmetic restated in the pre-registration
+
+---
+
+## JEV-24: "Delegate where possible" working rule — and its confound
+
+**Status:** blocked
+**Labels:** science
+**Blocked by:** JEV-23
+
+**What to build:** A standing rule that work is delegated to subagents where
+practical, raising the share of spend that is routable at all.
+
+- [ ] Measure the delegation rate **before** adopting the rule, from existing transcripts — this is the baseline and it must be captured first or it is gone
+- [ ] Adopt the rule; measure the delegation rate after
+- [ ] **Disclose the confound in the writeup**: the workload was deliberately reshaped to make more of it routable, which raises experimental power and lowers external validity at the same time. Report what fraction of spend was delegable before the change
+
+---
+
+## JEV-25: `verbosity` question — the second routing dimension
+
+**Status:** blocked
+**Labels:** questions, science
+**Blocked by:** JEV-18
+
+**What to build:** Fable is cheaper than Opus only on cache-heavy **terse**
+turns — below ~300 output tokens at 30k cache read, ~1,000 at 100k, ~3,000 at
+300k. A one-dimensional complexity score cannot express that.
+
+- [ ] Add `verbosity` to `questions/user_prompt/v2.json`: predict how much output this request will produce
+- [ ] Two-dimensional routing policy: complexity picks the capability tier, verbosity picks between same-tier models with different cost shapes
+- [ ] Validate against the realised-output-token label — free, derived from the turn that followed
+- [ ] **Do not publish any Fable cost figure** until one real Fable session is reconciled against `cost-state`; its 2.5% cache multiplier contradicts the 10% verified for three other models
+
+---
+
 ## Deferred: Phase 2
 
 Not ticketed. Opens on explicit go-ahead: transcript harvest, blind labelling UI,
