@@ -33,6 +33,7 @@ import argparse
 import json
 import random
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -89,14 +90,58 @@ def _emit(
     return written
 
 
-def run_synthetic(arms: list[ArmConfig], surface: str, limit: int | None, rng: random.Random) -> int:
+def stratified_sample(items: list[dict], n: int, rng: random.Random) -> list[dict]:
+    """Take n items spread evenly across strata, preferring DISTINCT commands.
+
+    Necessary because the synthetic file is command-major: each command appears
+    once per context, so a naive head-of-list slice returns the same command
+    three times over and the sample measures almost nothing. At ~21s per
+    subscription call a ten-item run is all you get, so those ten items have to
+    be ten different commands.
+    """
+    by_stratum: dict[str, list[dict]] = defaultdict(list)
+    for item in items:
+        by_stratum[item["stratum"]].append(item)
+
+    picked: list[dict] = []
+    strata = sorted(by_stratum)
+    per_stratum = {s: n // len(strata) for s in strata}
+    for s in strata[: n % len(strata)]:          # spread the remainder
+        per_stratum[s] += 1
+
+    for stratum in strata:
+        pool = by_stratum[stratum]
+        # One entry per distinct command first, in shuffled order.
+        seen: set[str] = set()
+        unique: list[dict] = []
+        for item in rng.sample(pool, len(pool)):
+            command = item["payload"]["tool_input"]["command"]
+            if command not in seen:
+                seen.add(command)
+                unique.append(item)
+        want = per_stratum[stratum]
+        chosen = unique[:want]
+        if len(chosen) < want:                    # only then allow repeats
+            chosen += [i for i in pool if i not in chosen][: want - len(chosen)]
+        picked.extend(chosen)
+    return picked
+
+
+def run_synthetic(arms: list[ArmConfig], surface: str, limit: int | None,
+                  rng: random.Random, sample: int | None = None) -> int:
     path = paths.DATA / "synthetic" / f"{surface}-v1.jsonl"
     if not path.exists():
         print(f"no synthetic set at {path}; run src/make_synthetic.py first")
         return 0
 
     items = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    if limit:
+    if sample:
+        items = stratified_sample(items, sample, rng)
+        print(f"stratified sample of {len(items)} from {path.name}:")
+        for item in items:
+            print(f"    {item['stratum']:<12} {item['payload']['tool_input']['command'][:56]}")
+        print()
+    elif limit:
         items = items[:limit]
 
     questions = cl.questions_for(surface)
@@ -214,6 +259,9 @@ def main() -> int:
     parser.add_argument("--surface", default="pre_bash")
     parser.add_argument("--arms", help="comma-separated (default: config enabled)")
     parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--sample", type=int, metavar="N",
+                        help="stratified sample of N distinct commands (use this, not --limit, "
+                             "for the synthetic set)")
     parser.add_argument("--seed", type=int, default=20260920)
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--decisions", action="store_true")
@@ -247,7 +295,8 @@ def main() -> int:
     total = 0
     if args.synthetic:
         print(f"synthetic stress set -> {[a.name for a in arms]}")
-        total += run_synthetic(arms, args.surface, args.limit if args.limit != 50 else None, rng)
+        total += run_synthetic(arms, args.surface,
+                               args.limit if args.limit != 50 else None, rng, sample=args.sample)
     if args.decisions:
         total += run_decisions(arms, args.surface, args.limit, rng)
     if args.determinism:
