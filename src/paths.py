@@ -130,4 +130,13 @@ def require(name: str) -> str:
 
 
 def killed() -> bool:
-    return KILL_SWITCH.exists()
+    """True if the kill switch is set.
+
+    JEV-40: this must agree with the hooks' own test, which treats ANY entry at
+    the path as ON -- a regular file, a directory, an unreadable file, or a
+    dangling symlink. `.exists()` alone follows a symlink and reads a dangling
+    one as absent, which would report "running" while every hook was exiting on
+    line one. `src/reversibility.py` describes the same rule in words for the
+    operator; these two are the only places it is encoded outside the hooks.
+    """
+    return KILL_SWITCH.exists() or KILL_SWITCH.is_symlink()

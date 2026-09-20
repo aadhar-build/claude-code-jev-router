@@ -1274,7 +1274,10 @@ untouched. That has never been asserted, because until now nothing rewrote it.
 - [x] **Assert the switch fails safe**: if the file cannot be read — permissions, a full disk — the hook must behave as though it were present, not absent
 - [x] `doctor.py` prints the full reversibility state in one place: which hooks are registered, whether the switch is set, what is inside the folder and what has been written outside it
 
-**Done 2026-09-20.** `tests/reversibility.sh`, 39 assertions, offline, no spend.
+**Done 2026-09-20.** `tests/reversibility.sh`, 42 assertions, offline, no spend,
+entirely inside a sandbox project directory -- it never touches the real
+`spool/`, `data/` or `logs/`, and it asserts the live
+`.claude/settings.local.json` is byte-identical before and after.
 Write-up in `docs/REVERSIBILITY.md`; teardown is `./teardown.sh --yes`
 (`--dry-run` first), printed by `uv run src/doctor.py` alongside the full
 reversibility state.
@@ -1310,7 +1313,14 @@ Four things are worth carrying forward:
    pass on a test incapable of detecting a rewrite — which is the state the
    repo was in before this ticket.
 
-4. **`tests/gates.sh` line 10 still reads "one file stops everything,
+4. **Two consumers were reporting the opposite of what the hooks do.**
+   `run-collection.sh status` used `[ -f ]` and `paths.killed()` used
+   `.exists()`, so after `mkdir .jev-disabled` the operator was told
+   `capture: enabled` while every hook was exiting on line one. Both now use
+   the hooks' rule. Those two, plus `src/reversibility.py`, are the only places
+   the rule is encoded outside the hook scripts.
+
+5. **`tests/gates.sh` line 10 still reads "one file stops everything,
    instantly"**, which is true for an observer and is now underspecified for an
    actuator. It was not edited because another agent owned that file during
    this work. `tests/reversibility.sh` is the superset.

@@ -39,6 +39,12 @@ believe the experiment was off while every hook kept firing. All four cases are
 asserted in `tests/reversibility.sh` §2, on both hook scripts, against a control
 that proves the sandbox captures when the switch is genuinely absent.
 
+Everything that *reports* the switch uses the same rule, or the operator would
+be told the opposite of what the hooks are doing: `run-collection.sh status`,
+`paths.killed()` (and through it `bench_inline.py`), and
+`src/reversibility.py`. Those three are the only places the rule is encoded
+outside the hook scripts themselves.
+
 There is one case the block does not cover, and it does not need to: if the
 project root cannot be traversed at all, Claude Code cannot `exec`
 `$CLAUDE_PROJECT_DIR/hooks/capture.sh` either. That reduces to "the hook never
@@ -106,6 +112,12 @@ separators=(",", ":"))`, because the comparison is between an object that passed
 through a hook's JSON round-trip and one that did not, and key order is not part
 of the claim.
 
+The whole gate runs inside a throwaway sandbox project directory, with
+`CLAUDE_PROJECT_DIR` pointed at it. It never writes to the real `spool/`,
+`data/` or `logs/`, and it re-checks the live `.claude/settings.local.json`'s
+sha256 at the end — that file is the registration a collection window is
+currently running on.
+
 `tests/reversibility.sh` §3 runs four arms over an `Agent`-shaped payload —
 `prompt`, `description`, `subagent_type`, and no `model` key, the case where a
 routing hook *adds* a field:
@@ -117,6 +129,13 @@ routing hook *adds* a field:
 | **A'** | the live one | OFF | == B, *and the hook demonstrably ran* |
 | **C** | an actuator fixture | OFF | **≠ B** — the positive control |
 | **D** | an actuator fixture | ON | **== B** — the claim JEV-35 is gated on |
+
+Every arm is run for **both** payloads where it is meaningful, and §3 first
+asserts that every matcher in the live registration has a payload here at all —
+otherwise the day JEV-35 registers a hook on matcher `Agent`, a Bash-only
+comparison would pass without the routing hook ever running. (The Agent payload
+with the switch **off** is deliberately *not* asserted equal: after JEV-35 it is
+supposed to differ.)
 
 Arm **C** is the load-bearing one. Without it every other row would pass on a
 test incapable of detecting a rewrite at all, which is precisely the state the
@@ -144,6 +163,9 @@ each command to its script, and fails if any of them:
 - is not `$CLAUDE_PROJECT_DIR`-anchored,
 - does not resolve to a script that exists,
 - lacks the canonical switch block,
+- carries the block but never derives `$ROOT` from `$CLAUDE_PROJECT_DIR`
+  before it — a copy-paste that tests `/.jev-disabled` is a switch that is
+  structurally dead, and a negative fixture asserts the checker rejects it,
 - mentions `.jev-disabled` anywhere outside that block (a second, drifting copy),
 - has anything effectful before it — a network call, a write, a `jq`, an emitted
   decision. Comments, the fail-open `trap`, stderr redirection, locale pinning

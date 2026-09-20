@@ -55,7 +55,11 @@ case "${1:-status}" in
       || echo "spool ready   : $(ls "$ROOT"/spool/ready/*.json 2>/dev/null | wc -l | tr -d ' ')"
     echo "captures      : $(cat "$ROOT"/data/captures/*.jsonl 2>/dev/null | wc -l | tr -d ' ')"
     echo "runs          : $(cat "$ROOT"/data/runs/*.jsonl 2>/dev/null | wc -l | tr -d ' ')"
-    if [ -f "$ROOT/.jev-disabled" ]; then
+    # Same fail-safe test the hooks use (JEV-40): ANY entry at the path means
+    # OFF. `[ -f ]` here would print "enabled" after someone ran
+    # `mkdir .jev-disabled`, i.e. tell the operator the exact opposite of what
+    # every hook is doing.
+    if [ -e "$ROOT/.jev-disabled" ] || [ -L "$ROOT/.jev-disabled" ]; then
       echo "capture       : DISABLED (.jev-disabled present)"
     else
       echo "capture       : enabled"

@@ -15,7 +15,8 @@
 # it, against `src/hook_dispatch.py`, which models Claude Code's documented
 # PreToolUse dispatch.
 #
-# Five sections:
+# Six sections, numbered 0-5:
+#   0. PRECONDITION -- there IS a live registration, so nothing below is vacuous
 #   1. ENUMERATION  -- every registered hook carries the canonical switch block,
 #                      so a new surface cannot be added without it
 #   2. FAIL SAFE    -- a switch whose state cannot be established reads as ON
@@ -104,9 +105,19 @@ def block_of(text):
 # Anything before the switch that could touch the world, or emit a decision.
 EFFECTFUL = re.compile(
     r"\b(curl|wget|nc|jq|python3?|node|mkdir|touch|cp|mv|rm|tee|openssl|date|shasum)\b"
+    # echo and printf too: any byte on stdout before the switch, on a PreToolUse
+    # hook, is a permission decision we never intended to make.
+    r"|\b(echo|printf)\b"
     r"|hookSpecificOutput|updatedInput|permissionDecision"
     r"|(^|[^0-9<>&])>>?\s*[\"'$/]"
 )
+
+# The block tests "$ROOT/.jev-disabled". A hook that copy-pastes it WITHOUT
+# first deriving ROOT from $CLAUDE_PROJECT_DIR tests "/.jev-disabled" -- a path
+# that will never exist -- and would otherwise sail through this gate with a
+# switch that is structurally dead.
+ROOT_DERIVED = re.compile(r"^\s*ROOT=.*CLAUDE_PROJECT_DIR")
+ROOT_GUARDED = re.compile(r"^\s*\[\s+-n\s+\"\$ROOT\"\s+\]")
 # Setup that is allowed to precede it: comments, the fail-open trap, stderr
 # redirection, locale pinning, plain assignments, the recursion guard and the
 # `[ -n/-d ]` tests that establish $ROOT itself.
@@ -170,8 +181,14 @@ for s in sorted(scripts):
         out["scripts"][rel] = {"ok": False, "why": "references .jev-disabled outside the canonical block"}
         continue
     preceding = text.splitlines()[:line]
-    offenders = [f"{i+1}:{l.strip()[:60]}" for i, l in enumerate(preceding)
+    offenders = [f"effectful before the switch at line {i+1}: {l.strip()[:60]}"
+                 for i, l in enumerate(preceding)
                  if not ALLOWED.search(l) and EFFECTFUL.search(l)]
+    if not any(ROOT_DERIVED.search(l) for l in preceding):
+        offenders.append("$ROOT is not derived from $CLAUDE_PROJECT_DIR before the block "
+                         "-- the switch would test /.jev-disabled")
+    if not any(ROOT_GUARDED.search(l) for l in preceding):
+        offenders.append('missing `[ -n "$ROOT" ]` before the block')
     out["scripts"][rel] = {"ok": not offenders, "block": blk, "line": line + 1,
                            "why": "; ".join(offenders)}
 
@@ -274,6 +291,30 @@ fire_capture() {
       < "$BASH_PAYLOAD" ) 2>/dev/null
 }
 
+# The enumeration checker must REJECT a dead switch, not merely accept a live
+# one. A hook that copy-pastes the block without deriving $ROOT tests
+# "/.jev-disabled" and is structurally off forever; a checker that cannot see
+# that is a checker that will wave the next surface straight through.
+mkdir -p "$SANDBOX/badhook"
+{
+  echo '#!/bin/bash'
+  awk '/^# --- jev kill switch: canonical block/,/^# --- end jev kill switch/' "$ROOT/hooks/capture.sh"
+  echo 'exit 0'
+} > "$SANDBOX/badhook/no_root.sh"
+verdict=$(python3 - "$SANDBOX/badhook/no_root.sh" <<'NEGATIVE'
+import re, sys
+from pathlib import Path
+lines = Path(sys.argv[1]).read_text().splitlines()
+start = next(i for i, l in enumerate(lines)
+             if l.startswith("# --- jev kill switch: canonical block"))
+derived = any(re.search(r"^\s*ROOT=.*CLAUDE_PROJECT_DIR", l) for l in lines[:start])
+print("accepted" if derived else "rejected")
+NEGATIVE
+)
+[ "$verdict" = "rejected" ] \
+  && ok "the enumeration checker REJECTS a block whose \$ROOT is never derived" \
+  || bad "the checker accepted a structurally dead switch"
+
 # ---------------------------------------------------------------------------
 # 2. FAIL SAFE
 # ---------------------------------------------------------------------------
@@ -352,12 +393,45 @@ VAN_AGENT=$(resolve "$VANILLA_SETTINGS" "$AGENT_PAYLOAD")
   && ok "vanilla arm resolves (hooks unregistered entirely)" \
   || bad "vanilla arm produced nothing -- the comparison has no control"
 
-# 3a. The LIVE registration, switch ON.
+# 3a. The LIVE registration, switch ON -- against EVERY payload this gate
+#     carries, not just the one that happens to match today's matcher. When
+#     JEV-35 registers a hook on matcher `Agent`, a Bash-only comparison would
+#     pass without the routing hook ever running, which is exactly the vacuity
+#     this section exists to prevent. So first: every registered matcher must
+#     have a payload here.
+uncovered=$(python3 - "$SANDBOX/.claude/settings.local.json" <<'COVERAGE'
+import json, re, sys
+from pathlib import Path
+tools = ["Bash", "Agent"]          # the payloads this gate carries
+p = Path(sys.argv[1])
+settings = json.loads(p.read_text()) if p.exists() else {}
+missing = []
+for event, groups in (settings.get("hooks") or {}).items():
+    for g in groups or []:
+        m = g.get("matcher")
+        if m in (None, "", "*"):
+            continue
+        if not any(re.fullmatch(m, tool) for tool in tools):
+            missing.append("%s/%s" % (event, m))
+print(",".join(sorted(set(missing))))
+COVERAGE
+)
+[ -z "$uncovered" ] \
+  && ok "every registered matcher has a payload in this gate (no surface is untested)" \
+  || bad "registered matchers with no payload here: $uncovered -- add one before registering it"
+
 rm -rf "$SWITCH"; : > "$SWITCH"; sandbox_clean
 A_BASH=$(resolve "$SANDBOX/.claude/settings.local.json" "$BASH_PAYLOAD")
 [ "$A_BASH" = "$VAN_BASH" ] \
-  && ok "live registration + switch ON: resolved input is byte-identical to vanilla" \
+  && ok "live registration + switch ON (Bash): byte-identical to vanilla" \
   || bad "live registration + switch ON DIFFERS from vanilla: [$A_BASH] vs [$VAN_BASH]"
+# The Agent payload is the one JEV-35 will rewrite, and it must hold with the
+# switch ON whatever is registered. With the switch OFF it is EXPECTED to differ
+# once a routing hook exists, so that direction is deliberately not asserted.
+A_AGENT=$(resolve "$SANDBOX/.claude/settings.local.json" "$AGENT_PAYLOAD")
+[ "$A_AGENT" = "$VAN_AGENT" ] \
+  && ok "live registration + switch ON (Agent): byte-identical to vanilla" \
+  || bad "live registration + switch ON rewrote an Agent input: [$A_AGENT] vs [$VAN_AGENT]"
 [ "$(sandbox_count)" = "0" ] && ok "live registration + switch ON: nothing recorded either" \
   || bad "switch ON still recorded $(sandbox_count)"
 
