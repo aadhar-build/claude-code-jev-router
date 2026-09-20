@@ -43,7 +43,7 @@ This is the table to consult before designing any join.
 | `decision_id` | yes, all | yes | **yes** — the primary join key, runs ↔ captures |
 | `question_set_id` | yes, all (`pre_bash/v1#a`, 2005/2005) | yes | **yes** — partition on it, never pool |
 | `state_sha256` | yes | yes | **yes** — and it is asserted equal across arms |
-| `session_id` | on captures | yes | yes, but see §5 — it is the clustering unit |
+| `session_id` | on run rows **and** captures (verified on disk) | yes | yes, but see §5 — it is the clustering unit. `analyze.py` reads it off the **run** row (`p[0].get("session_id") or p[0]["decision_id"]`) |
 | `pricing_version` | yes, all (`pricing-2026-09-20`) | yes | **weak** — hand-maintained, see §3 |
 | `cost_usd` | yes, stamped at write time | yes | yes as a *value*; never recompute it |
 | `arm_order` | yes | yes | **yes, with care** — see §2 |
