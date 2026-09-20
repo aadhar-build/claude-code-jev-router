@@ -13,6 +13,68 @@ run and look at, rather than finishing one layer at a time.
 
 ---
 
+## Execution plan
+
+Eight waves, **at most four agents at a time**. The waves are shaped by two
+constraints that matter more than dependency order:
+
+**1. Two agents must never own the same file.** Most of the serialisation below
+is this, not a real dependency — JEV-30 and JEV-31 do not interact with JEV-33's
+problem at all, they just live in the same drain loop. Where that is the only
+reason, the ticket says so, so nobody mistakes a scheduling artifact for a
+design constraint.
+
+**2. One new surface registration per collection window.** Two capture hooks
+landing together makes the capture stream uninterpretable: a change in volume or
+base rate cannot be attributed to either. This is why JEV-18, JEV-19, JEV-20 and
+JEV-35 are spread across the tail rather than batched.
+
+Three standing rules for any agent picking up a ticket:
+
+- `src/stats.py`, `src/analyze.py` and `questions/*/v1.json` are **frozen**
+  (`PREREGISTRATION.md` §8). A change to any of them is a defect fix, its own
+  commit, with the reason stated and pre-/post-fix numbers reported.
+- **Only one ticket per wave may write to `data/runs/`.** A live worker is
+  already appending there; adding two more writers makes attrition
+  unattributable.
+- The worker may be restarted, but **reap `spool/claimed/` back to
+  `spool/ready/` first** (JEV-31) or the restart loses whatever was mid-flight.
+
+| wave | tickets | why these together |
+|---|---|---|
+| **1** | **33**, **38 + 24a** (one agent), **15**, **37** | Nothing blocks any of them, and they touch four disjoint areas: the drain loop, the transcript corpus, the gate suite, the canary wrapper. 38 and 24a share one agent because they read the same corpus and are exposed to the same retention risk — reading it twice is wasted work on data that may not survive |
+| **2** | **30 + 31** (one agent), **31b**, **32**, **16** | 30 and 31 wait only because JEV-33 is rewriting the file they live in. 16 is the wave's single `data/runs/` writer |
+| **3** | **22**, **34**, **27**, **39** | 34 unblocks once 15 has parameterised the gates; 27 unblocks once 38 has persisted the cost distribution. 22 is the wave's single data writer, and it produces the Fable session JEV-28 needs as a by-product |
+| **4** | **28**, **29**, **17**, **10** | 17 unblocks once 16 has the flip rate. 28 consumes what 22 produced. 10 is the wave's single data writer |
+| **5** | **35**, **25**, **12**, *(spare)* | 35 and 25 both follow 34. 12 follows 10. The fourth slot is deliberately empty — 35 turns the routing hook into an actuator, the first time anything in this study changes what runs, and that deserves attention rather than a crowded wave |
+| **6** | **36**, **24b**, **18**, **09** | 36 follows 35. 18 is the window's next surface registration, and it is here rather than in wave 5 because 35 already registered one |
+| **7** | **23**, **19** | The experiment itself, plus the next surface in the one-at-a-time queue |
+| **8** | **20** | Last surface |
+
+### The two things that should not wait for a wave
+
+**JEV-38 is the most time-sensitive item on the board** and it is in wave 1 for
+that reason. It is not urgent because it unblocks much — it unblocks JEV-27.
+It is urgent because **its source data lives outside this folder, in
+`~/.claude/projects/`, under a retention policy we do not control and have never
+written down.** Routing can be built next month; a rotated transcript cannot be
+recovered at any price. The same exposure applies to JEV-24a, which is why they
+share an agent.
+
+**JEV-33 is the throughput blocker.** Until it lands, the spool grows during
+every working session, and past 500 files the hook fails open and drops captures
+silently. Every wave after this one adds load.
+
+### What the plan deliberately does not parallelise
+
+**The routing chain 34 → 35 → 36 → 23 is strictly serial**, across four waves.
+It is the longest path on the board and the obvious candidate for compression,
+and it should not be compressed: the whole reason it was split was to put a
+verifiable checkpoint between "the classifier decides" and "the decision changes
+what runs". Collapsing the waves removes exactly that checkpoint.
+
+---
+
 ## JEV-01: Skeleton and self-containment
 
 **Status:** done
@@ -191,7 +253,7 @@ three verification tests that must all pass before the hook is enabled.
 
 **Status:** in-progress
 **Labels:** hooks, hot-path
-**Blocked by:** JEV-08
+**Blocked by:** None. **Not blocked — stalled on two decisions**, which is different and should not read as blocked: whether to register the inline hook live alongside `capture.sh`, and what `--max-time` should be given the 2.0s default sits BELOW Jev's 2,681ms p99.
 
 **What to build:** The script you would actually deploy, running live but never
 blocking -- because a capture-and-replay harness never exercises it.
@@ -211,7 +273,7 @@ blocking -- because a capture-and-replay harness never exercises it.
 
 **Status:** in-progress
 **Labels:** science
-**Blocked by:** JEV-04, JEV-05
+**Blocked by:** None. The sweeps needed credentials and now have them. **JEV-16 is the determinism sweep split out** because it gates enforcement; the other three sweeps (phrasing, option-order, truncation) stay here.
 
 **What to build:** The discrimination story, which the live base rate is too
 degenerate to provide on its own.
@@ -252,7 +314,7 @@ retrain. The probability deltas are the only signal for the latter.
 
 **Status:** blocked
 **Labels:** analysis, security
-**Blocked by:** JEV-05, JEV-10
+**Blocked by:** JEV-10 (the sweeps it draws figures from). JEV-05 is done.
 
 **What to build:** The artifact you would actually publish, with the redaction
 step that makes publishing safe.
@@ -304,7 +366,7 @@ Anthropic API key, and make the resulting confound impossible to miss.
 
 **Status:** ready-for-agent
 **Labels:** verification, blocking, science
-**Blocked by:** None (can start immediately)
+**Blocked by:** None (can start immediately). **Start it early anyway**: its last item parameterises the three existing gates on surface, which JEV-19, JEV-20 and JEV-34 all need before they can gate anything.
 
 **What to build:** A gate proving decision #7 actually holds. `tests/gates.sh`
 has 21 assertions covering isolation, fail-open and the kill switch, and **zero
@@ -325,7 +387,7 @@ This applies to the already-live `pre_bash` surface. It should not wait for `sto
 
 **Status:** ready-for-agent
 **Labels:** science, blocking
-**Blocked by:** None
+**Blocked by:** None. Avoid running it at the same moment as another process writing `data/runs/` — see the execution plan.
 
 **What to build:** The measurement that decides whether Jev can ever enforce.
 `src/determinism.py` is written and correctly **exits non-zero** rather than
@@ -395,6 +457,8 @@ Strongest economics, thinnest evidence.
 **Labels:** hooks, science
 **Blocked by:** JEV-18
 
+*The gate is operational, not technical: **register one new surface at a time.** Two new capture hooks landing in the same window makes the capture stream uninterpretable, because you cannot attribute a change in volume or base rate to either. Step 0's payload inspection does not depend on JEV-18 and can be done any time.*
+
 **THE BLOCKER, migrated from JEV-13 when that ticket was superseded.** Found during JEV-03; resolve before building anything else here. `build_stop` requires `transcript_bytes_at_capture`, but `capture.sh` does no JSON parsing by design, so it cannot `stat` a path it never reads. Decision #7's mechanism has no implementation route as currently written. Two options: give `stop` its own hook line that extracts the path with a single `sed -n 's/.*"transcript_path":"\([^"]*\)".*/\1/p'` and calls `stat -f %z`, then re-time it against the 10ms budget; or find a different truncation marker. `build_stop` already refuses to run without the offset, so the leakage guard holds either way — the surface simply cannot be enabled until this is settled
 
 **What to build:** Per `SPEC.md` *Surface plans* §1. **STEP 0 FIRST, before any
@@ -416,6 +480,8 @@ transcript before the hook fires?
 **Status:** blocked
 **Labels:** hooks
 **Blocked by:** JEV-19
+
+*Same one-surface-at-a-time rule as JEV-19.*
 
 **What to build:** Per `SPEC.md` *Surface plans* §3.
 
@@ -449,7 +515,7 @@ live analysis ran.
 
 **Status:** ready-for-agent
 **Labels:** science
-**Blocked by:** None
+**Blocked by:** None. **It incidentally produces the real Fable session JEV-28 needs** — if this runs first, JEV-28 should use its transcript rather than generating another.
 
 **SCOPE CUT 2026-09-20, by the owner: 60 items, not 360.** Grilling Q15 chose
 the full 360-item run. That decision was taken when there were four arms; Q8
@@ -538,7 +604,7 @@ after the data.
 
 **Status:** ready-for-agent
 **Labels:** science, blocking
-**Blocked by:** None (can start immediately — and must, before JEV-23 or JEV-24b)
+**Blocked by:** None (can start immediately — and must, before JEV-23 or JEV-24b). **Do it in the same pass as JEV-38**: both read the same transcript corpus, both are destroyed by the same retention risk, and reading it twice is wasted work on data that may not survive.
 
 **What to build:** The fraction of spend that was delegated to subagents
 **before** the "delegate where possible" rule is adopted, computed from the
@@ -628,7 +694,9 @@ the wrong conclusion from it.
 
 **Status:** ready-for-agent
 **Labels:** science, blocking
-**Blocked by:** None — and it blocks JEV-23
+**Blocked by:** JEV-38
+
+*A real data dependency, not sequencing: the power analysis needs the per-delegated-task cost distribution, which is exactly what JEV-38 persists. Doing it first means reading the transcript corpus once instead of twice.*
 
 **What to build:** The one piece of `PREREGISTRATION.md` Amendment 2 that is
 still unratified. A2.4's "60 delegated tasks" was chosen by eye, and a stopping
@@ -648,7 +716,7 @@ The derivation is specified in A2.4 so it cannot be tuned after the fact.
 
 **Status:** ready-for-agent
 **Labels:** science, blocking, cost
-**Blocked by:** None — and it blocks JEV-23
+**Blocked by:** None. Cheapest path is to let JEV-22 or JEV-29 produce the Fable session as a by-product rather than generating one for this alone.
 
 **What to build:** Fable is in the routing choice set, and the A/B's primary
 outcome is **net cost in USD**. So an unverified Fable rate is a wrong headline,
@@ -694,7 +762,9 @@ chosen after results are visible are not evidence.
 
 **Status:** ready-for-agent
 **Labels:** defect, science, blocking
-**Blocked by:** None
+**Blocked by:** JEV-33
+
+*Both rewrite the worker's startup and drain path. Serialised to avoid two agents editing the same file, not because the problems interact.*
 
 **What happened, on live data.** The running worker started at **15:49:55**.
 `config/arms.json` gained `cc_sonnet5` to its `enabled` list at **15:55:26** —
@@ -725,7 +795,9 @@ report it.
 **Status:** ready-for-agent
 **Labels:** defect, blocking, science
 
-**Blocked by:** None
+**Blocked by:** JEV-33
+
+*Same file as JEV-33 — `spool/claimed/` reaping belongs in the drain loop JEV-33 is rewriting. Serialised for that reason alone.*
 
 **What is wrong.** The worker claims a spool file by renaming it into
 `spool/claimed/` before doing any work — the atomicity fix that made two workers
@@ -755,7 +827,7 @@ is invisible to the very number designed to catch it.
 
 **Status:** ready-for-agent
 **Labels:** defect, science
-**Blocked by:** None
+**Blocked by:** None.
 
 **What is wrong.** Fixing the `question_set` defect turned up five more
 instances of the same class. A config field that looks like configuration and
@@ -785,7 +857,7 @@ because making it live changes what gets written to the row schema.
 
 **Status:** ready-for-agent
 **Labels:** defect, science
-**Blocked by:** None
+**Blocked by:** None. Touches frozen `analyze.py`, so it must be its own commit with the reason stated and pre-/post-fix numbers reported (PREREGISTRATION §8).
 
 **What is wrong.** `analyze.py` resolves the question spec from **current**
 config at analysis time, while every row carries the `question_set_id` it was
@@ -840,7 +912,9 @@ session will reach 500.
 
 **Status:** ready-for-agent
 **Labels:** hooks, science
-**Blocked by:** None (can start immediately)
+**Blocked by:** JEV-15
+
+*JEV-15's last item parameterises the three existing gates on surface. Without it, `agent_route` would either ship ungated or duplicate three hardcoded `pre_bash` gates — and this is the surface that will later be allowed to change which model your work runs on.*
 
 **What to build:** The routing surface, observing only. A `PreToolUse` hook
 matched on the `Agent` tool builds state from the delegated task, asks Jev which
@@ -931,7 +1005,7 @@ intervals, and the arm each was assigned.
 
 **Status:** ready-for-agent
 **Labels:** science, ops
-**Blocked by:** None
+**Blocked by:** None.
 
 **What to build:** A way for the drift canary to actually run daily. The
 pre-registration commits to a **daily** fixed-state check; `src/canary.py`
@@ -954,7 +1028,7 @@ wrapper, no instruction and no record of whether it ran exists.
 
 **Status:** ready-for-agent
 **Labels:** metrics, blocking, science
-**Blocked by:** None — and it is the most time-sensitive ticket on the board
+**Blocked by:** None — and it is the most time-sensitive ticket on the board. **Do it in the same pass as JEV-24a.**
 
 **What to build:** An accumulating, append-only, **in-repo** record of
 per-session metrics for every session in this repository, snapshotted from the
@@ -988,7 +1062,7 @@ dependency and the same exposure.
 **Status:** ready-for-agent
 **Labels:** analysis, ops
 
-**Blocked by:** None
+**Blocked by:** None. Overlaps JEV-32 in `analyze.py`; if both are agent-run, serialise them.
 
 **What to build:** A dated, committed snapshot of the collection's statistics,
 produced on a schedule rather than when someone happens to run `analyze.py`.
