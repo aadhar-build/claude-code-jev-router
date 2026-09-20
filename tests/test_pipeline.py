@@ -263,6 +263,115 @@ class TestWorkerOrchestration(TempStorage):
         self.assertEqual(len(dead), 1)
 
 
+class TestLiveArmWireFormats(unittest.TestCase):
+    """The live arms' translation layers, tested offline.
+
+    No network: these check the shapes we send and the shapes we accept, which
+    is where a silent incompatibility between arms would otherwise hide.
+    """
+
+    def setUp(self):
+        from arms import claude, jev
+        self.jev, self.claude = jev, claude
+        self.q = cl.questions_for("pre_bash")
+        self.all_types = {
+            "b": {"type": "boolean", "instructions": "is it?"},
+            "c": {"type": "choice", "instructions": "which?", "options": {"x": "X", "y": "Y"}},
+            "s": {"type": "score", "instructions": "how much?", "anchors": ["low", "mid", "high"]},
+        }
+
+    def test_jev_wire_uses_criteria_per_type(self):
+        wire = self.jev.to_wire(self.all_types)
+        self.assertNotIn("criteria", wire["b"])          # boolean needs none
+        self.assertIsInstance(wire["c"]["criteria"], dict)   # choice: a record
+        self.assertIsInstance(wire["s"]["criteria"], list)   # score: ordered array
+        for entry in wire.values():
+            self.assertIn("instructions", entry)
+
+    def test_jev_rejects_out_of_range_score_anchors(self):
+        with self.assertRaises(ValueError):
+            self.jev.to_wire({"s": {"type": "score", "instructions": "x", "anchors": ["only one"]}})
+        with self.assertRaises(ValueError):
+            self.jev.to_wire({"s": {"type": "score", "instructions": "x",
+                                    "anchors": [str(i) for i in range(11)]}})
+
+    def test_jev_rejects_too_many_choice_options(self):
+        with self.assertRaises(ValueError):
+            self.jev.to_wire({"c": {"type": "choice", "instructions": "x",
+                                    "options": {str(i): "" for i in range(256)}}})
+
+    def test_jev_normalises_into_the_shared_answer_shape(self):
+        raw = {
+            "b": {"type": "boolean", "probability": 0.9},
+            "c": {"type": "choice", "choice": "x", "probabilities": {"x": 0.7, "y": 0.3}},
+            "s": {"type": "score", "score": 2, "probabilities": {"1": 0.2, "2": 0.6, "3": 0.2}},
+        }
+        out = self.jev.from_wire(raw, self.all_types)
+        self.assertEqual(out["b"]["probability"], 0.9)
+        self.assertEqual(out["c"]["choice"], "x")
+        self.assertEqual(out["s"]["score"], 2)
+
+    def test_jev_records_confidence_only_when_present(self):
+        without = self.jev.from_wire({"b": {"type": "boolean", "probability": 0.5}},
+                                     {"b": self.all_types["b"]})
+        self.assertNotIn("confidence", without["b"])
+        with_meta = self.jev.from_wire(
+            {"b": {"type": "boolean", "probability": 0.5,
+                   "providerMetadata": {"typesafe": {"confidence": 0.8}}}},
+            {"b": self.all_types["b"]},
+        )
+        self.assertEqual(with_meta["b"]["confidence"], 0.8)
+
+    def test_claude_boolean_schema_asks_for_a_probability_not_a_label(self):
+        """If the baseline returned a bare label there would be no threshold
+        sweep and no sharpness comparison to make."""
+        schema = self.claude.build_schema(self.q)
+        for name in self.q:
+            props = schema["properties"][name]["properties"]
+            self.assertIn("probability", props)
+            self.assertEqual(props["probability"]["type"], "number")
+            self.assertEqual((props["probability"]["minimum"], props["probability"]["maximum"]), (0, 1))
+
+    def test_claude_schema_is_strict(self):
+        schema = self.claude.build_schema(self.all_types)
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(set(schema["required"]), set(self.all_types))
+        self.assertEqual(schema["properties"]["c"]["properties"]["choice"]["enum"], ["x", "y"])
+        self.assertEqual(schema["properties"]["s"]["properties"]["score"]["maximum"], 3)
+
+    def test_claude_prompt_includes_state_and_every_option(self):
+        prompt = self.claude.build_prompt("SOME STATE", self.all_types)
+        self.assertIn("SOME STATE", prompt)
+        for fragment in ("x: X", "y: Y", "1: low", "3: high"):
+            self.assertIn(fragment, prompt)
+
+    def test_thinking_is_never_disabled_on_opus(self):
+        """Documented failure mode: tool calls leak into visible text."""
+        source = (ROOT / "src" / "arms" / "claude.py").read_text()
+        self.assertNotIn('"type": "disabled"', source)
+        self.assertNotIn("'type': 'disabled'", source)
+
+    def test_both_arms_emit_the_same_answer_shape(self):
+        """The analysis must never need to know which arm produced a row."""
+        jev_out = self.jev.from_wire(
+            {"b": {"type": "boolean", "probability": 0.4}}, {"b": self.all_types["b"]}
+        )
+        fake_out = worker.evaluate_one("s", {"b": self.all_types["b"]}, cl.arm("fake")).answers
+        self.assertEqual(set(jev_out["b"]), set(fake_out["b"]))
+
+    def test_live_arms_refuse_to_run_without_credentials(self):
+        """Fail loudly and classifiably rather than silently sending nothing."""
+        import os
+        saved = os.environ.pop("AI_GATEWAY_API_KEY", None)
+        try:
+            run = worker.evaluate_one("state", self.q, cl.arm("jev"))
+            self.assertFalse(run.ok)
+            self.assertIsNotNone(run.error_kind)
+        finally:
+            if saved is not None:
+                os.environ["AI_GATEWAY_API_KEY"] = saved
+
+
 class TestStatistics(unittest.TestCase):
     """Known answers, worked out by hand."""
 
