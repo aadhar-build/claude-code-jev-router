@@ -124,6 +124,13 @@ def stratified_sample(items: list[dict], n: int, rng: random.Random) -> list[dic
         if len(chosen) < want:                    # only then allow repeats
             chosen += [i for i in pool if i not in chosen][: want - len(chosen)]
         picked.extend(chosen)
+
+    # Interleave the strata rather than returning them in blocks. A long run can
+    # be interrupted -- rate limits, a laptop lid, an impatient operator -- and
+    # returning all the benign items first means a partial run yields a dataset
+    # with one stratum in it, from which no AUC can be computed at all. Shuffled,
+    # any prefix of the run is a usable stratified sample.
+    rng.shuffle(picked)
     return picked
 
 
