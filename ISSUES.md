@@ -15,70 +15,113 @@ run and look at, rather than finishing one layer at a time.
 
 ## Execution plan
 
-Eight waves, **at most four agents at a time**. The waves are shaped by two
-constraints that matter more than dependency order:
+**Restructured 2026-09-20 on a new constraint from the operator: the system is
+dev-complete before ANY part of it goes live.** The previous eight-wave plan
+interleaved building and collecting — JEV-35 turned the routing hook into an
+actuator in wave 5 while waves 6-8 were still building surfaces. That is now
+explicitly out.
 
-**1. Two agents must never own the same file.** Most of the serialisation below
-is this, not a real dependency — JEV-30 and JEV-31 do not interact with JEV-33's
-problem at all, they just live in the same drain loop. Where that is the only
-reason, the ticket says so, so nobody mistakes a scheduling artifact for a
-design constraint.
+**Collection is STOPPED as of 2026-09-20T21:42Z.** `.jev-disabled` engaged,
+worker (pid 94441) terminated, spool empty in all four directories, hook
+verified to exit 0 without capturing. Standing totals at the freeze: **571
+captures, 2,005 run rows**. Nothing restarts until the activation gate below.
 
-**2. One new surface registration per collection window.** Two capture hooks
-landing together makes the capture stream uninterpretable: a change in volume or
-base rate cannot be attributed to either. This is why JEV-18, JEV-19, JEV-20 and
-JEV-35 are spread across the tail rather than batched.
+### The shape
 
-Three standing rules for any agent picking up a ticket:
+```
+  PHASE A  (dev, offline)        build everything, register nothing,
+                                 call nothing. 5 waves.
+        |
+  GATE   (JEV-52)                one deliberate act: full suite, reversibility
+                                 proof, canary baseline, THEN enable.
+        |
+  PHASE B  (live)                collect and analyse. 3 waves.
+```
+
+The gate exists because the failure mode we keep hitting is *partial* live
+state: a hook registered while another is half-built, a config field that looks
+live and is inert (JEV-31b), a kill switch that stops one writer and not the
+other (JEV-51). Every one of those was cheap to find offline and expensive to
+find live.
+
+### Standing rules (unchanged except where noted)
 
 - `src/stats.py`, `src/analyze.py` and `questions/*/v1.json` are **frozen**
-  (`PREREGISTRATION.md` §8). A change to any of them is a defect fix, its own
-  commit, with the reason stated and pre-/post-fix numbers reported.
-- **Only one ticket per wave may write to `data/runs/`.** A live worker is
-  already appending there; adding two more writers makes attrition
-  unattributable.
-- The worker may be restarted, but **reap `spool/claimed/` back to
-  `spool/ready/` first** (JEV-31) or the restart loses whatever was mid-flight.
+  (`PREREGISTRATION.md` §8). A change is a defect fix, its own commit, reason
+  stated, pre-/post-fix numbers reported.
+- **Two agents must never own the same file.** Most serialisation below is
+  this, not a real dependency; where that is the only reason, it says so.
+- **Only one ticket per wave may write to `data/runs/`** — amended: rows with a
+  non-`live` `run_context` (canary, synthetic, replay) are exempt, since
+  `canary.py` is a standing writer by design and the rule as originally written
+  could not survive JEV-37.
+- **NEW — no ticket in Phase A may register a hook, enable a surface, start the
+  worker, or remove `.jev-disabled`.** Building the actuator is Phase A;
+  arming it is the gate. An agent that believes it needs live data to finish is
+  wrong or the ticket is mis-scoped — say so rather than turning something on.
+- **One new surface registration per collection window** still holds, and now
+  applies inside Phase B only.
+
+### Phase A — dev, offline, at most four agents at a time
 
 | wave | tickets | why these together |
 |---|---|---|
-| **1** | **33**, **38 + 24a** (one agent), **15**, **40** | Nothing blocks any of them, and they touch disjoint areas: the drain loop, the transcript corpus, the gate suite, the kill switch. 38 and 24a share an agent because they read the same corpus and face the same retention risk. **40 is here rather than later so a way back to vanilla exists before anything is built on top of it** |
-| **2** | **30 + 31** (one agent), **31b**, **16**, **37** | 30 and 31 wait only because JEV-33 is rewriting the file they live in. 16 is the wave's single `data/runs/` writer |
-| **3** | **22**, **34**, **27**, **32** | 34 unblocks once 15 has parameterised the gates; 27 unblocks once 38 has persisted the cost distribution. 22 is the single data writer, and produces the Fable session JEV-28 needs as a by-product |
-| **4** | **28**, **29**, **17**, **10** | 17 unblocks once 16 has the flip rate. 28 consumes what 22 produced. 10 is the single data writer |
-| **5** | **35**, **25**, **12**, **39** | 35 turns the routing hook into an actuator — it requires both 34 (the surface) and 40 (a proven way back). 12 follows 10 |
-| **6** | **36**, **24b**, **18**, **09** | 36 follows 35. 18 is the window's next surface registration, held back because 35 already registered one |
-| **7** | **23**, **19** | The experiment itself, plus the next surface in the one-at-a-time queue |
-| **8** | **20** | Last surface |
+| **A1** | **51**, **30 + 31** (one agent), **31b**, **44** | The shutdown/config-staleness cluster. 51 first because until it lands "stopped" is four manual steps and a belief. 30+31 share an agent (same drain loop); 31b is the same class of defect in five more fields. 44 pins the interpreter |
+| **A2** | **49**, **16**, **32**, **43** | The measurement instruments, before anything depends on their numbers. 49 corrects the cost pipeline **before** JEV-27 sizes a study on its output. 16 is the wave's data writer (`run_context: replay`, exempt but declared). 43 resolves the contaminated wall-clock that 33 and 41 already quote |
+| **A3** | **27**, **46**, **47**, **48** | The science design, all downstream of a corrected cost distribution (49) and a known flip rate (16). 46 replaces the rejected static-heuristic arm; 27 must now size a **three**-arm study, which is why it moved after 46 rather than before |
+| **A4** | **34**, **29**, **17**, **28** | 34 builds the `agent_route` surface **in shadow, deciding nothing** — buildable offline against replayed states. 29 builds and freezes the blinded grader. 17 replaces fitted thresholds with a rule. 28 reconciles Fable pricing, now inside a primary outcome |
+| **A5** | **35**, **36**, **25**, **50** | 35 writes the actuator **and its two gates** but does not arm it. 36 writes outcome measurement against fixtures. 50 is the writeup correction and touches no code, so it is free to share any wave |
 
-### The two things that should not wait for a wave
+Phase A ends with: every surface built, every arm implemented, every analysis
+path exercised against fixtures and replayed rows, and **nothing running.**
 
-**JEV-38 is the most time-sensitive item on the board** and it is in wave 1 for
-that reason. It is not urgent because it unblocks much — it unblocks JEV-27.
-It is urgent because **its source data lives outside this folder, in
-`~/.claude/projects/`, under a retention policy we do not control and have never
-written down.** Routing can be built next month; a rotated transcript cannot be
-recovered at any price. The same exposure applies to JEV-24a, which is why they
-share an agent.
+### The gate — JEV-52 (to be written)
 
-**JEV-40 comes before anything that changes behaviour.** Everything built so
-far only watches, so the existing kill switch has never had to mean more than
-"stop recording". From JEV-35 onward it has to mean "stop deciding, and let the
-default happen exactly as it would have" — a stronger claim that has never been
-asserted, because nothing has ever rewritten a tool input before. Building the
-actuator first and the way back second is the wrong order.
+A single ticket, done by one agent, no parallelism:
 
-**JEV-33 is the throughput blocker.** Until it lands, the spool grows during
-every working session, and past 500 files the hook fails open and drops captures
-silently. Every wave after this one adds load.
+1. Full test suite green, run from the sandbox (JEV-42's guarantee).
+2. `tests/reversibility.sh` green — OFF provably means vanilla (JEV-40).
+3. JEV-51's proof: switch engaged + non-empty spool ⇒ zero API calls.
+4. A canary baseline sweep recorded **before** the window opens, so drift has a
+   reference (JEV-37).
+5. Pre-registration amended and committed with its hash: three routing arms,
+   the auth path, the Jev endpoint limitation (JEV-45), the corrected loss bound.
+6. Only then: remove `.jev-disabled`, start the worker, register the first
+   surface.
 
-### What the plan deliberately does not parallelise
+### Phase B — live
 
-**The routing chain 34 → 35 → 36 → 23 is strictly serial**, across four waves.
-It is the longest path on the board and the obvious candidate for compression,
-and it should not be compressed: the whole reason it was split was to put a
-verifiable checkpoint between "the classifier decides" and "the decision changes
-what runs". Collapsing the waves removes exactly that checkpoint.
+| wave | tickets | why |
+|---|---|---|
+| **B1** | **22**, **10**, **24b**, **09** | The offline-heavy collection: the five-arm matrix, the synthetic stress set, the working rule, and the inline shadow — which is the window's first live registration and must be alone in that role |
+| **B2** | **23**, **18**, **12** | The routing A/B itself. 18 is the next surface in the one-at-a-time queue. 12 produces the publishable export from whatever exists |
+| **B3** | **19**, **20**, **39** | The last two surfaces, and the persisted stats layer |
+
+### What moved, and why
+
+- **JEV-38 and JEV-24a are already done** (wave 1) — which is fortunate, because
+  they were the only genuinely time-sensitive items on the board: their source
+  lives in `~/.claude/projects/` under a retention policy we do not control.
+  Nothing else on the board can be lost by waiting.
+- **JEV-35 moved from wave 5 to A5, and no longer arms anything.** It was the
+  ticket that used to cross the dev/live line invisibly.
+- **JEV-09, 18, 19, 20 all moved into Phase B**, because each one is a live
+  registration and Phase A forbids those.
+- **JEV-49 moved ahead of JEV-27.** Sizing a study on a cost distribution that
+  is wrong in three known ways is worse than sizing it late.
+- **JEV-46 was added and inserted before JEV-27**, because a three-arm study
+  needs a different N than a two-arm one.
+- **JEV-51 is now the first ticket on the board.** Until it lands, "the
+  experiment is stopped" is a claim that took four manual steps to make true and
+  cannot be re-asserted by a script.
+
+### What the plan still deliberately does not parallelise
+
+**34 → 35 → 36 → 23 remains strictly serial**, now across A4 → A5 → A5 → B2.
+It is the longest path and the obvious candidate for compression, and it should
+not be compressed: the split exists to put a verifiable checkpoint between "the
+classifier decides" and "the decision changes what runs". The dev/live gate now
+adds a second checkpoint in the same chain, which is the point.
 
 ---
 
@@ -323,6 +366,23 @@ retrain. The probability deltas are the only signal for the latter.
 **Labels:** analysis, security
 **Blocked by:** JEV-10 (the sweeps it draws figures from). JEV-05 is done.
 
+**Prior-art amendment (2026-09-20).** Add **decision-curve / net-benefit
+analysis**. The sweep found **nothing** applying it to LLM routing, gating,
+cascades or abstention, in any vocabulary — it is the clearest unclaimed
+contribution on the board. The mapping is exact: *treat none* = all-cheap,
+*treat all* = our all-Opus control, threshold probability p_t = (Opus cost -
+cheap cost) / (cost of a cheap-tier failure). It answers the question accuracy
+and AUC cannot: **does the classifier beat BOTH trivial policies?**
+Origin: Vickers & Elkin, *Medical Decision Making* 26(6), 2006; CIs at
+`doi.org/10.1186/s41512-023-00148-y`. scikit-learn has an open, unimplemented
+issue for net-benefit curves (#22136), so this is hand-rolled.
+**State the assumption honestly:** clinical net benefit fixes the harm of a
+false positive as a constant multiple of a true positive's benefit, whereas our
+under-routing harm is a failed subtask whose cost is itself stochastic.
+Also: reliability diagrams use **equal-mass quantile bins, not equal-width** —
+routing probabilities pile up near 0 and 1, and equal-width bins will be empty
+in the middle and overloaded at the ends.
+
 **What to build:** The artifact you would actually publish, with the redaction
 step that makes publishing safe.
 
@@ -458,6 +518,22 @@ reporting a green result on absent data. `replay.py --determinism N` has never r
 **Status:** blocked
 **Labels:** science
 **Blocked by:** JEV-16 (a dead-zone rule depends on the flip-rate result)
+
+**Prior-art amendment (2026-09-20).** Two independent results say a single
+fitted threshold will degenerate, and both should be cited in the rule's
+rationale:
+- **Threshold non-transfer.** Shafran et al., "Rerouting LLM Routers"
+  (arXiv:2501.01818) §5: a Chatbot-Arena-calibrated threshold moved to MMLU and
+  GSM8K routed **~98% of queries to the strong model** — the saving vanished
+  while the router still looked like it worked.
+- **Jev specifically.** ickma2311's pre-registered eval found that at exact
+  accuracy parity with the frontier model, **Jev requires 100% escalation**; at
+  1pp below parity it escalates 22%.
+Therefore: choose on held-out data, **report the whole curve, never a point**,
+and prefer RouteLLM's reporting metrics — **CPT(x%)** (minimum strong-model call
+share to reach a target performance-gap-recovered) and **APGR** (average PGR
+across cost constraints). The threshold is an operator knob to be swept, not a
+parameter to be fitted once.
 
 **What to build:** τ=0.36 and τ=0.95 do not survive validation (optimism gap
 ≈ +0.10, and 0.36 is an unstable constant selecting anywhere in 0.36–0.63). A
@@ -612,7 +688,21 @@ same cost; nothing is discarded, only deferred.
 **Blocked by:** JEV-34 (the surface), JEV-35 (the actuator and its gates),
 JEV-36 (outcome measurement), JEV-24a (the pre-rule baseline this destroys),
 JEV-27 (the stopping rule), JEV-28 (Fable pricing, now inside a primary
-outcome), JEV-29 (the grader).
+outcome), JEV-29 (the grader), **JEV-46** (the third routing arm), **JEV-47**
+(delegation-shape equality).
+
+**Prior-art amendment (2026-09-20).** Three changes from `.scratch/prior-art.md`:
+1. **A third routing arm, `random_matched` (JEV-46), is now required.** Two arms
+   cannot separate "tiering helps" from "Jev helps", and five independent
+   sources find the second effect is often zero. Add JEV-46 to Blocked by.
+2. **The wall-clock co-primary is confirmed novel.** No paper reports wall-clock
+   as a co-primary outcome for agentic routing — the sweep found none in any
+   vocabulary. This vindicates A3.5 and should be stated as a contribution.
+3. **Report the realised strong-model call rate PER TASK FAMILY, not just in
+   aggregate.** "Rerouting LLM Routers" (arXiv:2501.01818 §5) found a
+   transferred threshold sent ~98% of queries to the strong model while the
+   router still appeared to work; ickma2311 found Jev needs 100% escalation at
+   accuracy parity. An aggregate rate hides both.
 
 **Rescoped 2026-09-20.** This ticket previously carried the whole of building
 the `agent_route` surface *and* running the experiment on it. That is not a
@@ -747,7 +837,21 @@ the wrong conclusion from it.
 
 **Status:** ready-for-agent
 **Labels:** science, blocking
-**Blocked by:** JEV-38
+**Blocked by:** JEV-38, **JEV-49** (the cost pipeline it sizes against has three
+known defects), **JEV-46** (a three-arm study needs a different N)
+
+**Prior-art amendment (2026-09-20).** The power analysis must now size a
+**three**-arm study (JEV-46), and two empirical results change how the budget
+should be spent:
+- **PointFive (arXiv:2607.12161) measured ICC 0.37-0.55 for cost repetitions:
+  712 runs per arm bought only ~38-45 effective tasks.** Buy breadth, not reps.
+  Target many distinct delegated tasks at ~3-5 reps each, paired across arms.
+- **"How Do AI Agents Spend Your Money?" (arXiv:2604.22750) measured up to 30x
+  run-to-run token variance on the same task.** Any N derived without that
+  variance in the model is wrong.
+Use task-level bootstrap and clustered SEs (Miller, arXiv:2411.00640). Also:
+this ticket is now blocked on **JEV-49**, because sizing a study on a cost
+distribution with three known defects in it is worse than sizing it late.
 
 *A real data dependency, not sequencing: the power analysis needs the per-delegated-task cost distribution, which is exactly what JEV-38 persists. Doing it first means reading the transcript corpus once instead of twice.*
 
@@ -1103,6 +1207,23 @@ tier and a probability; `resolvedModel` is unchanged.
 **Labels:** hooks, science, blocking
 **Blocked by:** JEV-34, **JEV-40**
 
+**Prior-art amendment (2026-09-20).** Two semantics must be pre-registered
+before this is armed, because three shipped systems chose three different
+answers and the cost signatures are opposite:
+- **Fail behaviour.** Claude Code's documented hook timeout is **fail-open** (the
+  tool proceeds). Anthropic's auto mode is **fail-closed**. togishima's
+  dispatcher **fails to frontier** — a Jev outage silently routes everything to
+  Opus and the bill explodes. Ours is fail-open by design; say so explicitly and
+  state what it costs.
+- **Escalation semantics.** SWE-Router (arXiv:2607.00053) restarts the strong
+  model from the original query rather than continuing the cheap model's
+  trajectory, *"because conditioning m2 on m1's reasoning has been seen to bias
+  m2 toward m1's mistakes."* Restart discards the cheap work; continue inherits
+  the errors. Both are defensible, they cost differently, and picking after
+  seeing results is not allowed. **Pre-register which.**
+**Scope change (dev/live gate):** this ticket now BUILDS the actuator and its
+two gates and does **not** arm it. Arming happens only at JEV-52.
+
 *JEV-40 is a hard gate, not a nicety. This is the first ticket that changes what
 actually runs, and a way back to vanilla must exist and be proven **before** it
 lands, not after.*
@@ -1133,6 +1254,19 @@ fail-open, kill switch, GATE 4 — all apply, plus two written for this one
 **Status:** blocked
 **Labels:** analysis, science, blocking
 **Blocked by:** JEV-35
+
+**Prior-art amendment (2026-09-20).** Two additions, both cheap and both
+pre-empting an obvious objection:
+- **A per-step "was this step under-routed" diagnostic**, reported alongside
+  trajectory-level success. TwinRouterBench (arXiv:2605.18859) found that **one
+  under-routed step in an 8-13 call trajectory fails the instance**, and that
+  Claude Opus 4.6 used as a router flagged only **7 of 147** verified-high steps,
+  failing all 40 SWE trajectories. Aggregate cost figures hide this completely.
+- **Cache-write tokens and tier-switch counts per trajectory** — see JEV-47.
+  TwinRouterBench is the only source that prices it: *"cache writes on tier
+  switch are charged at the incoming tier's rate."*
+See also **JEV-48**, which uses this ticket's outcomes to test whether we are
+measuring tier fit or task difficulty.
 
 **What to build:** The measurement the experiment reports. Two co-primary
 outcomes per delegated task — **raw net cost** and **net wall-clock** — with
@@ -1834,3 +1968,296 @@ unredacted command text changes too.
       confound we would otherwise have had to argue about.
 - [ ] Waitlist status re-checked once before the writeup is frozen, so the
       claim "not generally available" is true as of publication, not as of today.
+
+## JEV-46: `random_matched` — the third routing arm, and why it is NOT a static heuristic
+
+Status: ready-for-agent
+Labels: science, arms, prior-art
+Blocked by: JEV-34 (the surface), JEV-27 (the stopping rule must cover three arms)
+
+**The problem this fixes.** With two routing arms — `default` (everything at
+session tier) and `jev_routed` — a win confounds two effects: **(a)** the value
+of tiering at all, and **(b)** the value of tiering *intelligently*. (a) is
+already known to be large; (b) is the study's actual question. Five independent
+sources (LLMRouterBench ACL'26, RouterArena, arXiv:2505.12601, Lynkr's own
+RouterArena placement, RouteLLM's near-random MMLU result) find (b) is
+frequently **zero or negative**. We currently cannot measure it.
+
+**A static heuristic arm was considered and REJECTED on our own data.** Recorded
+here so it is not re-proposed:
+
+- The only static rule portable to `agent_route` is a subagent-type → tier map
+  (AqueGen's design). Against `data/baseline/sessions.jsonl`, 29 sessions / 120
+  delegated tasks: `general-purpose` **78 (65%)**, `claude-code-guide` 18 (15%),
+  `Plan` 12 (10%), `Explore` 12 (10%). **On 65% of traffic the rule has no
+  signal and degenerates to a constant** — it becomes `default` wearing a
+  different label, and burns a third of the run budget reproducing an arm we
+  already have.
+- liteLLM's Explore/Implement/Verify rule — the one with the 46% saving — does
+  **not** port. It switches phase after two consecutive matching *tool calls*,
+  i.e. it observes a stream. `agent_route` decides **once, at delegation time**,
+  on a task description. There is no phase sequence to observe. Citing that 46%
+  for our surface would be carrying a number across a boundary where it does not
+  apply.
+- The only rule that *would* discriminate on our traffic is keyword-matching the
+  task description — which is a worse Jev, hand-written by the party whose study
+  benefits when it loses. That is precisely the strawman the plan's baseline-
+  fairness commitment exists to forbid.
+
+**What to build instead.** `random_matched`: a routing arm that assigns a tier
+at random, with the tier **mix pinned post hoc to whatever mix `jev_routed`
+actually produced**. Same cost profile, same cheap-model call rate, zero
+information. It answers the sceptic's question directly — *is Jev's choice
+better than chance at the same price?* — and there is no rule for a reviewer to
+call badly written, because there is no rule.
+
+It is also the convexity baseline Kapoor et al. (arXiv:2407.01502) require
+before a Pareto comparison between two arms is legitimate at all: one can always
+randomise between two policies, so any claimed frontier point must beat the
+randomised interpolation.
+
+**The cost, stated.** The mix cannot be pre-registered, because it is derived
+from Jev's realised behaviour. Pre-register the **procedure**, not the numbers:
+the arm runs in a second pass once `jev_routed`'s realised tier distribution is
+known, with the seed, the mix and the freeze point recorded. An arm whose
+parameters come from the data is a legitimate control only if it cannot be
+re-tuned after seeing its own result — so the mix is frozen and committed
+before the first `random_matched` run.
+
+**Acceptance criteria**
+
+- [ ] `random_matched` implemented as a routing arm (no classifier call, no
+      network, no cost for the routing decision itself)
+- [ ] Mix derived from `jev_routed`'s realised tier distribution, frozen and
+      committed with its git hash before the first run
+- [ ] Seed recorded on every row; assignment reproducible from the row
+- [ ] Pre-registration amended: three routing arms, the procedure for deriving
+      the mix, and the commitment that it is frozen before use
+- [ ] The rejected static-heuristic option and its 65%-degeneracy evidence
+      written into the writeup's design-rationale section — a reviewer WILL ask
+      why there is no rule-based arm, and the answer is empirical, not lazy
+
+## JEV-47: both routing arms must delegate identically, or we measure the delegation penalty
+
+Status: ready-for-agent
+Labels: science, threat-to-validity, prior-art
+Blocked by: JEV-34
+
+**The finding.** `AqueGen/model-routing` published 7 days of telemetry with a
+three-way comparison almost nobody makes: **`$1.36` doing the work inline <
+`$1.68` routed to subagents < `$2.01` for the same subagent work at session
+tier.** Delegating-and-routing came out **~24% MORE expensive than not
+delegating at all.** Cause: a subagent starts with empty context, so you trade
+cheap cache-*reads* in the main session for expensive cache-*writes* in the
+subagent.
+
+**Why this can invalidate our primary outcome.** If `default` ever runs work
+inline while `jev_routed` delegates it, the cost difference we publish is the
+delegation penalty with a routing label on it. Our design randomises assignment
+*over the same delegated task*, so I believe both arms delegate identically —
+**but that is currently a belief, not an assertion backed by a check.**
+
+**What to build.** A per-row assertion and a report line, not an argument.
+
+- Assert, in analysis, that every `decision_id` in the A/B has the **same
+  delegation shape in both arms**: same number of spawned tasks, same spawn
+  depth, same agent type. A mismatch is a hard failure, not a warning — this is
+  the `state_sha256` equality assertion's sibling.
+- Report **cache-write tokens per delegated task, per arm.** TwinRouterBench
+  (arXiv:2605.18859) is the only source that prices the switching penalty:
+  *"cache writes on tier switch are charged at the incoming tier's rate."* If
+  one arm switches tiers more often, it pays more cache-writes at a higher rate,
+  and that is a real cost of routing that belongs in the headline, not a
+  footnote.
+- Report **switches-per-trajectory** per arm.
+
+**Acceptance criteria**
+
+- [ ] Delegation-shape equality asserted per `decision_id`, failing loudly
+- [ ] Cache-write tokens per delegated task reported per arm
+- [ ] Switches-per-trajectory reported per arm
+- [ ] If the shapes are not equal, the ticket stops and reports rather than
+      normalising them away
+
+## JEV-48: are we measuring tier fit, or just task difficulty?
+
+Status: ready-for-agent
+Labels: science, analysis, prior-art
+Blocked by: JEV-36 (outcome measurement)
+
+**The problem.** "Cost-Saving LLM Cascades with Early Abstention"
+(arXiv:2502.09054) reports that *"error patterns of small and large models are
+correlated, so small models can anticipate abstention decisions by large
+models."* If the tasks Haiku fails are largely the tasks Opus also fails, then a
+classifier that predicts "this needs the big model" is predicting **task
+difficulty**, not **tier fit** — and routing cannot help, because there is no
+tier at which the hard tasks succeed.
+
+This is cheap to measure and expensive to be asked about after publication.
+
+**What to build.** Per delegated task, the 2x2 of outcome by tier, and the
+tetrachoric (or simple phi) correlation between cheap-tier failure and
+frontier-tier failure, with a clustered CI. Plus the derived quantity that
+actually matters: **the fraction of cheap-tier failures that the frontier tier
+would have succeeded on** — that is the entire addressable headroom for routing,
+and if it is small the study's ceiling is low regardless of how good Jev is.
+
+**Acceptance criteria**
+
+- [ ] Per-task outcome matrix by tier, from the JEV-29 blinded grader's scores
+- [ ] Failure correlation with a session-clustered CI
+- [ ] Addressable headroom reported as a headline-adjacent number
+- [ ] Stated in the writeup whether the observed headroom bounds the result
+
+## JEV-49: three known cost-pipeline bugs, and the reconciliation nobody has published
+
+Status: ready-for-agent
+Labels: cost, correctness, prior-art
+Blocked by: JEV-38
+
+**Three documented failure modes, each verified as filed by a third party.**
+
+1. **`usage.iterations[]` asymmetry.** jverhoeks/claudecounter PR #26: a
+   multi-round-trip turn logs `in=4/out=691` at top level against iterations of
+   `(2,357)`, `(88762,1249)`, `(2,334)` — **88,762 input tokens invisible in one
+   record.** The rule is asymmetric and easy to get backwards: **token fields
+   MUST be summed from `iterations[]`; cache fields must NOT be, because the
+   top-level value already equals the sum.** `docs/PLAN.md` and JEV-06 currently
+   say "ignore `iterations[]`", which is half right and half wrong.
+2. **Over-report by substring model matching.** `claude-spend#31`: `getPricing()`
+   matched "opus" inside `claude-opus-5`, failed its version check, and fell
+   back to **Opus 4.0 pricing ($15/$75 against the correct $5/$25)** — a 3x
+   error across 96% of usage, compounded by duplicate rows (22,759 → 12,067 on
+   dedupe by `requestId` + `message.id`). **A routing study introduces new model
+   IDs into the transcript by definition, which is exactly the trigger
+   condition.** `config_loader.cost_usd()` already returns `None` on an unknown
+   model rather than guessing — verify the analysis treats that as a **hard
+   failure**, not a coverage statistic quietly reported at the bottom.
+3. **Cache-write multiplier depends on the auth path.** 1-hour cache writes bill
+   at **2x**, not 1.25x (`ccusage#899`, $479 / 19% under-reported across ~40,000
+   records before PR #1221 fixed it). And **TTL is 1 hour on a subscription but
+   5 minutes on usage credits / an API key**, which decides *which multiplier
+   applies*. Two runs of the identical experiment on different auth paths do not
+   produce the same cost. **Our auth path must be declared in the
+   pre-registration**, not inferred by a reader.
+
+**And the thing nobody has done.** No published work reconciles
+transcript-derived Claude Code cost against the **Claude Console usage page or
+an invoice**. Anthropic's own docs state the local figure is computed "from
+token counts at list price" — an estimate, not a billing record — and that the
+prompt-cache stats line *"covers the main conversation only, not subagents"*,
+i.e. first-party instrumentation goes silent exactly where this study lives.
+One independent reconciliation puts the ceiling for any `~/.claude`-reading tool
+at **~72% of the real bill**. Doing this reconciliation and publishing the
+residual inoculates our headline cost number and is a contribution on its own.
+
+**Acceptance criteria**
+
+- [ ] `iterations[]` handled asymmetrically, with a fixture proving both halves
+- [ ] Dedupe by `requestId` + `message.id`; unknown model ID is a hard failure
+- [ ] Cache-write multiplier correct for our auth path; auth path declared in
+      `PREREGISTRATION.md`
+- [ ] Pre-/post-fix cost numbers reported for every row already collected
+- [ ] Transcript-derived total reconciled against the Console usage page for a
+      bounded window; residual published with its sign and its method
+- [ ] `docs/PLAN.md`'s "ignore `iterations[]`" line corrected
+
+## JEV-50: retract the novelty claim — eleven independent Jev evaluations already exist
+
+Status: ready-for-agent
+Labels: writeup, correctness, prior-art
+Blocked by: none
+
+**We were going to publish something false.** The framing "nobody has measured
+whether Jev can do this" appears in `docs/PLAN.md`'s problem statement and in
+`SPEC.md`. Within five days of Jev's launch there are **at least 11 independent
+Tier-A benchmarks** catalogued at `jevbench.xyz`, several pre-registered. The
+claim is not merely overreaching; it is checkable and wrong, and a reader who
+checks it stops trusting everything else.
+
+**The replacement claim, which is both true and stronger.** Independent
+evaluations exist and are **mixed-to-unfavourable**: Jev loses to Haiku 4.5 by
+18.7pp on 2,000 phishing emails (McNemar p<0.0001) with **worse calibration**
+(ECE 0.154 vs 0.097) and **loses to a regex on its own best single signal**
+(89.4% vs 91.8%); loses to a supervised BGE encoder by 10pp on Banking77; and
+returned AMBIGUOUS on a pre-registered baselines eval. Against that, an n=60
+tool-call-risk benchmark found it well-behaved, with **no wrong answer at
+confidence 1.000**. **Calibration is task-dependent and does not transfer** —
+which is the justification for measuring it ourselves rather than citing anyone.
+None of the eleven has been independently reproduced. **None measures tier
+routing end-to-end**, and the five public Jev tier-routers for Claude Code
+(`andrei10k/claude-jev-model-router`, `leftspace89/jevsubrouter`,
+`flaviusapop/jev-router`, `0x7067/claude-jev` PR#4,
+`togishima/subagent-dispatcher` PR#1) report **not one measured cost, wall-clock
+or quality number between them.** That is the actual gap.
+
+**Two pieces of first-party prior art must be cited or the paper looks naive.**
+Anthropic's **"How we built Claude Code auto mode"** (2026-03-25) is Anthropic
+shipping this architecture: a **single-token** stage-1 classifier, then a
+reasoning stage 2 whose prompt is near-identical so it is **almost entirely a
+cache hit from stage 1**, on Sonnet 4.6 regardless of session model, **fail-
+closed**, with published FPR 8.5%→0.4% and a frank FNR of 17% they call "the
+honest number". **We must explain why an external classifier beats that
+design**, because it is cheaper than paying a vendor. Second: HAL
+(arXiv:2510.11977) found the most expensive model on the Pareto frontier in
+**only 1 of 9 benchmarks** — so our all-Opus control is probably off-frontier
+and therefore a flattering comparator. Say it before a reviewer does.
+
+**Acceptance criteria**
+
+- [ ] The false claim removed from `docs/PLAN.md` and `SPEC.md`
+- [ ] A related-work section citing the 11 benchmarks, the 5 tier-routers, and
+      Anthropic's auto mode
+- [ ] The off-frontier control acknowledged in limitations
+- [ ] `.scratch/prior-art.md` folded in as the source, with its unverified items
+      still flagged as unverified
+
+## JEV-51: the kill switch does not stop the worker, and `stop` is ungraceful
+
+Status: ready-for-agent
+Labels: safety, reversibility, defect
+Blocked by: none
+
+**Found while stopping collection on 2026-09-20T21:42Z.** Three defects, all in
+the shutdown path, all discovered because stopping the experiment took four
+manual steps instead of one.
+
+1. **`.jev-disabled` does not stop the worker.** The switch is checked by
+   `hooks/capture.sh:53` and by `paths.killed()`, so capture stops — but
+   `worker.py`'s main loop never consults it. With the switch engaged and a
+   non-empty spool, the worker **keeps draining and keeps calling all four
+   arms.** "Disabled" currently means "stops recording new decisions", not
+   "stops spending money", and `run-collection.sh status` prints `capture:
+   DISABLED` while the worker is still making API calls. JEV-40 proves OFF means
+   vanilla *for the session*; it does not prove OFF means quiescent.
+2. **SIGINT is ignored.** The worker is started as a background job, so the
+   shell sets SIGINT to `SIG_IGN` and the `except KeyboardInterrupt` at
+   `worker.py:366` — the only graceful exit that exists — is **unreachable in
+   the way the worker is actually run.**
+3. **`run-collection.sh stop` sends SIGTERM** (line 38) and nothing handles it,
+   so the default disposition kills the process instantly, possibly mid-
+   `_dispatch`, leaving a claimed file with no owner. **This is the unnamed
+   cause behind JEV-31's stranded claims** — the startup reap addresses the
+   crash half, and this is the other half.
+
+**What to build.**
+
+- `worker.py` consults the kill switch at the top of every cycle and before
+  every dispatch: switch present → drain nothing, call nothing, log a single
+  line, keep polling so it resumes when the switch is removed.
+- A `signal.signal(SIGTERM, ...)` handler that sets a flag, finishes the
+  in-flight capture, releases the claim, and exits 0. `SIGINT` mapped to the
+  same handler so it works in a background job.
+- `run-collection.sh stop` waits for the handler, verifies `spool/claimed/` is
+  empty, and reports if it is not.
+- `run-collection.sh status` distinguishes **capture disabled** from **worker
+  quiescent**, because today it conflates them.
+
+**Acceptance criteria**
+
+- [ ] Kill switch engaged + non-empty spool → zero API calls, proven by a test
+      that counts arm invocations
+- [ ] SIGTERM and SIGINT both exit cleanly with `spool/claimed/` empty
+- [ ] A test that SIGTERMs a worker mid-dispatch and asserts no stranded claim
+- [ ] `status` reports capture state and worker state as two separate facts
+- [ ] `docs/REVERSIBILITY.md` updated: the one-command path to fully quiescent
