@@ -13,11 +13,41 @@
 # unreachable-host case uses a closed port on localhost so it fails identically
 # on a plane. Set JEV_TEST_LIVE=1 to add ONE real call (~$0.000013).
 
+#
+# --------------------------------------------------------------------------
+# SANDBOXED (JEV-42)
+# --------------------------------------------------------------------------
+# This file used to run the hook with CLAUDE_PROJECT_DIR pointed at the REAL
+# project root, and the kill-switch case touched the REAL `.jev-disabled`.
+# That is not a harmless second or two: for the duration of that window every
+# live capture hook that fires exits on line one, so the decision points that
+# happened during it are lost with no file missing and no row to count them --
+# the same invisible attrition as JEV-42's `rm`, by a different mechanism. And
+# a run interrupted between the `touch` and the `rm -f` leaves collection
+# switched OFF indefinitely, with nothing anywhere to say so.
+#
+# It also wrote its scratch tree into the real `data/inline/`, alongside the
+# live inline-shadow rows.
+#
+# So the hook now runs against a throwaway root under `logs/` (gitignored,
+# removed on exit). `config/` and `questions/` are symlinked in because the
+# hook reads them, and they are read-only inputs; `.env` likewise, for the
+# opt-in live call. Every guard in the hook is `$CLAUDE_PROJECT_DIR`-anchored,
+# so what is under test is unchanged.
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$ROOT/hooks/inline_shadow_bash.sh"
-# Under data/ rather than spool/tmp/: test_hook.sh asserts the staging dir is
-# left clean, and a sibling test's scratch files there would fail it.
-WORK="$ROOT/data/inline/.test"
+
+mkdir -p "$ROOT/logs"
+SANDBOX="$(mktemp -d "$ROOT/logs/inlinetest.XXXXXX")" || exit 1
+mkdir -p "$SANDBOX/spool/tmp" "$SANDBOX/spool/ready" "$SANDBOX/logs" "$SANDBOX/data"
+ln -s "$ROOT/config"    "$SANDBOX/config"
+ln -s "$ROOT/questions" "$SANDBOX/questions"
+[ -f "$ROOT/.env" ] && ln -s "$ROOT/.env" "$SANDBOX/.env"
+# Symlinked rather than copied: a copy of .env under logs/ would be a second
+# home for the API key, at whatever mode the copy happened to land in.
+
+WORK="$SANDBOX/work"
 LOGDIR="$WORK/log"
 
 pass=0; fail=0
@@ -26,7 +56,7 @@ bad() { echo "  FAIL  $1"; fail=$((fail+1)); }
 
 # `wait` after the kill so bash reaps the job quietly instead of printing a
 # "Terminated" line into the middle of the test output.
-cleanup() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; rm -rf "$WORK"; }
+cleanup() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; chmod -R u+rwX "$SANDBOX" 2>/dev/null; rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
 rm -rf "$WORK"; mkdir -p "$LOGDIR"
@@ -41,8 +71,8 @@ field() { rows | tail -1 | jq -r "$1" 2>/dev/null; }
 # Every case runs the hook the way Claude Code would, plus the two env overrides
 # that keep the test's rows out of the live log.
 run_hook() {
-  (cd "$ROOT" && printf '%s' "$PAYLOAD" | \
-    CLAUDE_PROJECT_DIR="$ROOT" \
+  (cd "$SANDBOX" && printf '%s' "$PAYLOAD" | \
+    CLAUDE_PROJECT_DIR="$SANDBOX" \
     JEV_INLINE_LOG_DIR="$LOGDIR" \
     JEV_INLINE_API_KEY="${KEY:-test-key}" \
     JEV_INLINE_ENDPOINT="$ENDPOINT" \
@@ -95,7 +125,7 @@ print(sb.sha256(sb.build_pre_bash(json.loads(sys.stdin.read()))))
 # one-character disagreement about where the cut lands changes the hash.
 reset
 BIG=$(python3 -c "import json;print(json.dumps({'session_id':'itest','tool_use_id':'big','cwd':'/x','tool_input':{'command':'echo '+'y'*70000}}))")
-(cd "$ROOT" && printf '%s' "$BIG" | CLAUDE_PROJECT_DIR="$ROOT" \
+(cd "$SANDBOX" && printf '%s' "$BIG" | CLAUDE_PROJECT_DIR="$SANDBOX" \
   JEV_INLINE_LOG_DIR="$LOGDIR" JEV_INLINE_API_KEY=test-key \
   JEV_INLINE_ENDPOINT="$BASE" "$HOOK") >/dev/null 2>&1
 expected_big=$(printf '%s' "$BIG" | python3 -c "
@@ -175,9 +205,9 @@ fi
 
 # --- kill switch ------------------------------------------------------------
 reset
-touch "$ROOT/.jev-disabled"
+touch "$SANDBOX/.jev-disabled"
 out=$(run_hook); rc=$?
-rm -f "$ROOT/.jev-disabled"
+rm -f "$SANDBOX/.jev-disabled"
 [ "$rc" -eq 0 ]      && ok "kill switch: exits 0" || bad "kill switch: exit $rc"
 [ -z "$out" ]        && ok "kill switch: stdout is empty" || bad "kill switch: stdout was [$out]"
 [ "$(nrows)" = "0" ] && ok "kill switch: no call, no row" || bad "kill switch: logged $(nrows) rows"
@@ -191,7 +221,7 @@ out=$(run_hook env JEV_ARM_SUBPROCESS=1); rc=$?
 
 # --- cwd guard --------------------------------------------------------------
 reset
-out=$(cd /usr && printf '%s' "$PAYLOAD" | CLAUDE_PROJECT_DIR="$ROOT" \
+out=$(cd /usr && printf '%s' "$PAYLOAD" | CLAUDE_PROJECT_DIR="$SANDBOX" \
   JEV_INLINE_LOG_DIR="$LOGDIR" JEV_INLINE_API_KEY=test-key \
   JEV_INLINE_ENDPOINT="$BASE" "$HOOK"); rc=$?
 [ "$rc" -eq 0 ]      && ok "cwd guard: exits 0" || bad "cwd guard: exit $rc"
@@ -200,7 +230,7 @@ out=$(cd /usr && printf '%s' "$PAYLOAD" | CLAUDE_PROJECT_DIR="$ROOT" \
 
 # --- malformed payload ------------------------------------------------------
 reset
-out=$(cd "$ROOT" && printf 'not json at all' | CLAUDE_PROJECT_DIR="$ROOT" \
+out=$(cd "$SANDBOX" && printf 'not json at all' | CLAUDE_PROJECT_DIR="$SANDBOX" \
   JEV_INLINE_LOG_DIR="$LOGDIR" JEV_INLINE_API_KEY=test-key \
   JEV_INLINE_ENDPOINT="$BASE" "$HOOK"); rc=$?
 [ "$rc" -eq 0 ]      && ok "bad payload: exits 0" || bad "bad payload: exit $rc"
@@ -214,7 +244,7 @@ leftover=$(ls -a "$LOGDIR" 2>/dev/null | grep -c '^\.\(req\|body\)\.')
 # --- one live call, opt-in --------------------------------------------------
 if [ "$JEV_TEST_LIVE" = "1" ]; then
   reset
-  out=$(cd "$ROOT" && printf '%s' "$PAYLOAD" | CLAUDE_PROJECT_DIR="$ROOT" \
+  out=$(cd "$SANDBOX" && printf '%s' "$PAYLOAD" | CLAUDE_PROJECT_DIR="$SANDBOX" \
     JEV_INLINE_LOG_DIR="$LOGDIR" JEV_INLINE_RUN_CONTEXT=test "$HOOK"); rc=$?
   [ "$rc" -eq 0 ]             && ok "LIVE: exits 0" || bad "LIVE: exit $rc"
   [ -z "$out" ]               && ok "LIVE: stdout is empty" || bad "LIVE: stdout was [$out]"

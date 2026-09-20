@@ -186,13 +186,18 @@ was draining. **That half is fixed** — `gates.sh` now points
 guards are `CLAUDE_PROJECT_DIR`-anchored the behaviour under test is unchanged.
 `test_hook.sh` was left alone because another agent was active in the tree.
 
-- [ ] Give `test_hook.sh` the same sandbox treatment `gates.sh` now has
-- [ ] Audit **every** test file for writes to the real `spool/`, `data/` or `logs/` — `test_inline_shadow.sh` touches the kill switch and should be checked
-- [ ] Add a guard that makes this class of mistake loud: a test that writes to the real spool while a worker pid is live should **fail**, not silently succeed
-- [ ] Decide whether `run_all.sh` should refuse to run at all while a collection window is open, or always sandbox
+- [x] Give `test_hook.sh` the same sandbox treatment `gates.sh` now has
+- [x] Audit **every** test file for writes to the real `spool/`, `data/` or `logs/` — `test_inline_shadow.sh` touches the kill switch and should be checked
+- [x] Add a guard that makes this class of mistake loud: a test that writes to the real spool while a worker pid is live should **fail**, not silently succeed
+- [x] Decide whether `run_all.sh` should refuse to run at all while a collection window is open, or always sandbox
 
-**Until it is fixed, the standing rule for every agent is: run `test_hook.sh` and
-`run_all.sh` only from a throwaway copy of the tree.** All three wave-1 agents
+**FIXED 2026-09-20. The standing rule below is retired:** `test_hook.sh`,
+`test_inline_shadow.sh` and `run_all.sh` all sandbox now, `run_all.sh` refuses
+to start if any shell test writes to the live window, and a runtime tripwire
+re-checks the window after every test. Full write-up in ISSUES.md JEV-42.
+
+~~Until it is fixed, the standing rule for every agent is: run `test_hook.sh` and
+`run_all.sh` only from a throwaway copy of the tree.~~ All three wave-1 agents
 still running were warned directly and asked to disclose if they had already run
 it.
 

@@ -1,27 +1,97 @@
 #!/bin/bash
 # Every test in the project. No network, no API spend.
+#
+# --------------------------------------------------------------------------
+# THIS SUITE RUNS WHILE A COLLECTION WINDOW IS OPEN. IT DOES NOT REFUSE TO.
+# --------------------------------------------------------------------------
+# JEV-42 asked whether `run_all.sh` should refuse to run while the worker is
+# draining, or always sandbox. It always sandboxes, and here is why.
+#
+# A suite that refuses to run is a suite people stop running. The collection
+# window is not a rare event to be waited out -- it is the normal state of this
+# repository from go-live until the study ends, and "the full test suite must
+# pass" is the instruction in every agent brief. Refusing would mean either
+# nobody tests for the duration of the study, or everybody learns the
+# environment variable that turns the refusal off, which is the same thing with
+# an audit trail that lies. Amendment 6 already shows the failure mode: told
+# not to use `run_all.sh`, one agent ran `test_hook.sh` directly.
+#
+# Refusal would also make correctness depend on `logs/worker.pid`, a file that
+# is stale the moment the worker dies unexpectedly. "Is a window open?" is a
+# question the suite would get wrong in both directions. "Never touch the live
+# tree" is a question it can get right unconditionally.
+#
+# So: every test runs against a throwaway root, and two guards make that
+# enforceable rather than aspirational.
+#
+#   1. tests/audit_live_writes.sh runs FIRST and the suite does not start if it
+#      fails. It enumerates tests/*.sh, so a new test is covered without its
+#      author opting in. Static: it catches the mistake before it executes.
+#
+#   2. tests/lib/live_guard.sh snapshots the live window and re-checks it after
+#      EVERY test, naming the test that moved it. Runtime: it catches what the
+#      scanner cannot see (Python tests, indirection through variables) after
+#      the fact, which is still enormously better than the status quo ante,
+#      where the damage was silent and unrecoverable.
+#
+# The one thing the suite does refuse is to continue after guard 2 fires.
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 set -o pipefail
+
+GUARD="$ROOT/tests/lib/live_guard.sh"
+SNAP="$(mktemp "${TMPDIR:-/tmp}/jev-live-snapshot.XXXXXX")"
+trap 'rm -f "$SNAP"' EXIT
+
+echo "=== JEV-42 guard: no test may write to the live collection window ==="
+"$ROOT/tests/audit_live_writes.sh" || {
+  echo
+  echo "REFUSING TO RUN. A test in this suite writes to the live spool/, data/"
+  echo "or logs/. Fix it before running anything -- see ISSUES.md JEV-42."
+  exit 1
+}
+"$GUARD" snapshot "$SNAP"
+
+# Run one test, then prove the live window is where we left it. A test that
+# damaged it stops the suite immediately rather than letting the next nine
+# tests pile more damage on top.
+guarded() { # label, command...
+  local label="$1"; shift
+  "$@"
+  local rc=$?
+  "$GUARD" verify "$SNAP" "$label" || exit 1
+  return $rc
+}
+
+echo
 echo "=== seam 1: hook process boundary ==="
-"$ROOT/tests/test_hook.sh" || exit 1
+guarded "test_hook.sh" "$ROOT/tests/test_hook.sh" || exit 1
+echo
+echo "=== JEV-42: the sandboxed hook test still catches a broken hook ==="
+guarded "test_hook_mutations.sh" "$ROOT/tests/test_hook_mutations.sh" || exit 1
 echo
 echo "=== seam 1: inline shadow hook (loopback fake, no spend) ==="
-"$ROOT/tests/test_inline_shadow.sh" || exit 1
+guarded "test_inline_shadow.sh" "$ROOT/tests/test_inline_shadow.sh" || exit 1
 echo
 echo "=== seam 2 + 3: pipeline, statistics, report ==="
-python3 "$ROOT/tests/test_pipeline.py" 2>&1 | tail -4 || exit 1
+guarded "test_pipeline.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_pipeline.py' 2>&1 | tail -4" || exit 1
 echo "=== seam 3b: threshold validation and determinism ==="
-python3 "$ROOT/tests/test_validation.py" 2>&1 | tail -4 || exit 1
+guarded "test_validation.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_validation.py' 2>&1 | tail -4" || exit 1
 echo "=== baseline: known answers from a real transcript ==="
-python3 "$ROOT/tests/test_session_metrics.py" 2>&1 | tail -4 || exit 1
+guarded "test_session_metrics.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_session_metrics.py' 2>&1 | tail -4" || exit 1
 
 echo "=== baseline: the persisted 'before' record is append-only and idempotent ==="
-python3 "$ROOT/tests/test_baseline.py" 2>&1 | tail -4 || exit 1
+guarded "test_baseline.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_baseline.py' 2>&1 | tail -4" || exit 1
 
 echo "--- canary: frozen set stability, drift flags, row-schema identity ---"
-python3 "$ROOT/tests/test_canary.py" 2>&1 | tail -4 || exit 1
+guarded "test_canary.py" bash -c "set -o pipefail; python3 '$ROOT/tests/test_canary.py' 2>&1 | tail -4" || exit 1
 echo
 echo "=== JEV-40: reversibility -- one switch, and OFF proven equal to vanilla ==="
-"$ROOT/tests/reversibility.sh" | tail -4 || exit 1
+guarded "reversibility.sh" bash -c "set -o pipefail; '$ROOT/tests/reversibility.sh' | tail -4" || exit 1
 echo "=== doctor ==="
-python3 "$ROOT/src/doctor.py" | tail -3
+guarded "doctor.py" bash -c "set -o pipefail; python3 '$ROOT/src/doctor.py' | tail -3"
+
+echo
+echo "=== live window untouched by the full suite ==="
+"$GUARD" verify "$SNAP" "run_all.sh (whole suite)" && \
+  echo "  ok    spool, data/ and logs/ are as the suite found them"

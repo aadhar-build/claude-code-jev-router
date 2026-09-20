@@ -1493,6 +1493,155 @@ about this change reaches live collection until then.
 
 ---
 
+## JEV-42: the test suite destroys live collection data
+
+**Status:** done
+**Labels:** defect, blocking, test, data-loss
+**Blocked by:** None
+
+**What was wrong.** `tests/test_hook.sh` ran every assertion against the REAL
+project root while the worker drained it.
+
+- `reset(){ rm -f "$ROOT"/spool/ready/*.json "$ROOT"/spool/tmp/* ...}` — called between assertion blocks
+- `chmod 500 "$ROOT/spool/tmp"` for the fail-open case
+- 501 filler files written into `$ROOT/spool/ready/` for the backpressure case
+- `mv "$ROOT/logs" "$ROOT/logs.bak"` for the fresh-checkout case
+- a snapshot-and-restore of the live `data/drops/` attrition stream, itself a hazard: a real drop landing between the two would have been overwritten
+
+`tests/run_all.sh` invokes it, so "run the full test suite" — the instruction in
+every agent brief — was the destructive command.
+
+**It caused real, declared data loss.** `PREREGISTRATION.md` Amendment 6 (A6.1)
+records at least seven invocations across roughly 14:10Z–15:05Z on 2026-09-20 by
+two agents, each wiping `spool/ready/` several times over. The number of
+captures lost is unknown and unrecoverable: a file deleted from the spool leaves
+no capture row and no run row, so it cannot even enter the attrition count §4
+commits to reporting. Fourth instance of the JEV-31/32/33 shape — loss invisible
+to the measurement built to catch it.
+
+**Two mechanisms beyond `rm`, both of which delete nothing and lose captures
+anyway.** `chmod 500` on the live `spool/tmp` makes every hook that fires during
+the window take its fail-open path and drop the capture, with no missing file to
+notice afterwards. And `tests/test_inline_shadow.sh` did `touch
+"$ROOT/.jev-disabled"` against the real kill switch: collection is OFF for the
+duration, and a run interrupted between the `touch` and the `rm -f` leaves it
+off indefinitely with nothing anywhere to say so.
+
+- [x] Give `test_hook.sh` the same sandbox treatment `gates.sh` now has
+- [x] Audit **every** test file for writes to the real `spool/`, `data/` or `logs/` — `test_inline_shadow.sh` touches the kill switch and should be checked
+- [x] Add a guard that makes this class of mistake loud: a test that writes to the real spool while a worker pid is live should **fail**, not silently succeed
+- [x] Decide whether `run_all.sh` should refuse to run at all while a collection window is open, or always sandbox
+
+**What was done.**
+
+*`tests/test_hook.sh` is sandboxed.* `CLAUDE_PROJECT_DIR` points at a throwaway
+root created with `mktemp -d "$ROOT/logs/hooktest.XXXXXX"` — gitignored, inside
+the folder, removed on a trap. The `data/drops/` snapshot dance is gone entirely
+rather than made safer: in the sandbox the drop stream starts empty and belongs
+to the run. The session id is now unique per run (`hooktest-$$`) and the final
+assertion greps the live spool and `data/captures` for it, so an escape is a
+visible failure instead of the expected outcome. `HOOK` is overridable via
+`JEV_TEST_HOOK`; `hooks/capture.sh` is never edited, because a live session is
+firing it.
+
+*The claim that this does not weaken the test was verified, not assumed.* Every
+path `capture.sh` touches derives from `${CLAUDE_PROJECT_DIR}`: `$ROOT/logs/capture.err`,
+`$ROOT/.jev-disabled`, `$ROOT/spool/tmp`, `$ROOT/spool/ready`, `$ROOT/data/drops`,
+and a cwd guard comparing `$PWD/` against `"$ROOT"/*`. A grep for `$HOME`,
+`/tmp`, `dirname`, `$0` and `~` returns exactly one line, `TMP="$ROOT/spool/tmp"`,
+matched on the substring `/tmp`. The hook cannot tell the difference. 27
+assertions, all passing, same set as before.
+
+*And it was proved the sandboxed test still bites.* `tests/test_hook_mutations.sh`
+does to `test_hook.sh` what GATE 4 does to the state builder: it copies
+`capture.sh` into a sandbox, breaks it eight ways, and requires the *specific*
+assertion that should notice to be the one that fails — kill switch removed
+→ "captured despite kill switch"; cwd guard removed → "captured from outside
+cwd"; recursion guard removed → "captured from an arm subprocess";
+`[ -s "$STAGED" ]` removed → "spooled an empty record"; cap raised to 999999 →
+"wrote past cap"; `mv -f` → `cp` → "staging dir not clean"; a byte on stdout →
+"stdout was"; `trap 'exit 0'` → `'exit 1'` → "exit code was 1". Plus an
+unmutated control. All eight caught, control green.
+
+One mutation is deliberately NOT run and says so in the file: a hook with the
+real root hardcoded would escape the sandbox and be caught by the live-window
+assertion, but running it means writing ~40 synthetic captures into `spool/ready`
+for the worker to drain, bill and record as real decision points. Proving a
+data-loss guard by contaminating the dataset is this bug with the sign flipped.
+What is proved instead is that the detector expression finds a planted capture
+in a decoy tree, so it is not vacuous.
+
+*`tests/test_inline_shadow.sh` is sandboxed too* — same pattern, with `config/`,
+`questions/` and `.env` symlinked in read-only (symlinked, not copied: a copy of
+`.env` would be a second home for the API key). The kill-switch case now touches
+the sandbox's switch. 40 assertions, all passing, unchanged set.
+
+*The guard is two layers, and neither depends on a future test opting in.*
+
+1. `tests/audit_live_writes.sh` — a static scan that ENUMERATES `tests/*.sh` and
+   fails the suite if any line aims a destructive verb (`rm`/`mv`/`cp`/`chmod`/
+   `chown`/`ln`/`truncate`) or an output redirect at `$ROOT/spool`, `$ROOT/data`,
+   `$ROOT/logs` or `$ROOT/.jev-disabled`, or sets `CLAUDE_PROJECT_DIR=$ROOT`.
+   Read-only references stay legal — `gates.sh` greps the live spool precisely to
+   prove it left no trace there — so the rule is verb-based, not path-based.
+   `mkdir`/`mktemp` are not destructive verbs, because creating the sandbox under
+   `logs/` is the sanctioned pattern and flagging it would train exemptions. It
+   runs FIRST in `run_all.sh`, before any test executes. Its own mutation test is
+   in `test_hook_mutations.sh`: pointed at the pre-fix `test_hook.sh` recovered
+   from git, it must reject the file and name lines 18, 58, 85 and 121.
+
+2. `tests/lib/live_guard.sh` — a runtime tripwire run after EVERY test, naming
+   the test that moved the window. A plain directory diff is useless here because
+   the worker is supposed to be emptying `spool/ready`, so every invariant is one
+   legitimate draining cannot violate: inodes of `spool/`, `spool/ready`,
+   `spool/tmp`, `logs/`, `data/` unchanged (catches the `mv`-aside shape); modes
+   of `spool/ready` and `spool/tmp` unchanged (catches the `chmod` shape); the
+   kill switch in the same state before and after (catches the `touch` shape);
+   the worker still alive if it was; `data/drops` and `data/inline` line counts
+   non-decreasing; and the conservation law that catches deletion —
+   `ready + claimed + dead + capture_rows` never falls, because the worker moves
+   a file `ready → claimed → (capture row | dead/)` and a new capture only adds.
+
+*`run_all.sh` always sandboxes; it does not refuse.* A suite that refuses to run
+is a suite people stop running. The collection window is not a rare event to
+wait out — it is the normal state of this repository until the study ends, and
+"the full test suite must pass" is in every agent brief. Refusal means either
+nobody tests for the duration or everybody learns the override, which is the
+same thing with an audit trail that lies; Amendment 6 already shows the shape,
+where an agent told not to use `run_all.sh` ran `test_hook.sh` directly.
+Refusal would also make correctness depend on `logs/worker.pid`, which is stale
+the moment the worker dies unexpectedly — a question the suite would get wrong
+in both directions, where "never touch the live tree" is one it can get right
+unconditionally. The one thing it does refuse is to continue after the runtime
+guard fires.
+
+**Audit of the other test files.**
+
+| file | verdict |
+|---|---|
+| `tests/gates.sh` | already sandboxed (the fix this one follows). Clean. |
+| `tests/reversibility.sh` | already sandboxed. Note: it uses a plain `mktemp -d`, so its sandbox is in `/tmp`, not "inside the folder" as `gates.sh`'s header describes the pattern. Correct either way; the inconsistency is worth knowing. |
+| `tests/test_pipeline.py` | `TempStorage.setUp` repoints `CAPTURES`, `STATES`, `RUNS`, `LABELS`, `SPOOL*`, `DROPS` and `SPOOL_WATERMARK` at a tempdir and `tearDown` restores them. Classes that do not inherit it (`TestSyntheticSet`, `TestStateBuilders`, …) only READ under `data/`. Safe. |
+| `tests/test_canary.py` | repoints `FIXTURES`, `RUNS`, `CAPTURES`, `STATES`, `LABELS`, `REPORTS`, `LOGS` at a `mkdtemp` before `ensure_dirs()`. Safe. |
+| `tests/test_baseline.py` | repoints `bl.SESSIONS`/`bl.MANIFEST` at a tempdir, so the committed `data/baseline/sessions.jsonl` is never written. Reads the live transcript corpus, which is read-only by design. Safe. |
+| `tests/test_validation.py` | tempdir-scoped. Safe. |
+| `tests/test_session_metrics.py` | reads `paths.FIXTURES` and `NamedTemporaryFile`s. Safe. |
+| `tests/gate4_drain.py` | repoints every writable path at its `--sandbox`. Safe. |
+| `src/doctor.py` (run by the suite) | calls `ensure_dirs()` on the real directories — creates them if absent, touches nothing that exists. Benign; the guard's inode checks cover it. |
+
+**The limit of the static scan, stated plainly.** It scans shell. The Python
+tests are safe by CONVENTION — `tempfile` redirection in `setUp` — not by
+enforcement, and a new Python test that forgets is caught only by the runtime
+tripwire, after the fact. Making that structural (a `conftest`-style fixture
+that repoints `paths` for every test by default, so opting OUT is the explicit
+act) is the right next step and is not done here.
+
+**Related.** The standing rule from the wave-2 prep note — "run `test_hook.sh`
+and `run_all.sh` only from a throwaway copy of the tree" — can be retired. The
+decision #7 / `transcript_bytes_at_capture` finding filed alongside JEV-42 in the
+same report belongs to JEV-19 and is not addressed here.
+
+---
 ## JEV-43: `cc_*` wall-clock is contaminated by the operator's own user-level hooks
 
 **Status:** ready-for-agent
