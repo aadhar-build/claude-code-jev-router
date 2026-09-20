@@ -212,3 +212,158 @@ closed, with the reasoning and the arithmetic that motivated it — and that it
 moves the bar **up**, not down. A reader who rejects the amendment can read the
 seven-day result instead; it will be reported alongside, and it will almost
 certainly say "inconclusive".
+
+---
+
+# Amendment 2 — the routing A/B — **PROPOSED, NOT RATIFIED**
+
+**Status: DRAFT.** This amendment is *not* in force. It must be ratified — and
+the open question in §A2.0 answered — **before the first routed task runs**.
+Nothing below may be cited as a pre-registered commitment until that happens,
+and if a routed task runs before ratification, the A/B is reported as
+exploratory rather than pre-registered.
+
+**Why it exists.** The study's thesis moved from "is Jev a good classifier?" to
+"does routing make Claude Code cheaper?" The original registration above covers
+only `pre_bash` PABAK. **The headline experiment is currently unregistered** —
+which is the single most damaging gap a reviewer could find in a paper whose
+methodological argument is that it pre-registered everything.
+
+## A2.0 — The open question that blocks ratification
+
+**The unit of randomisation is not decided.** It was asked (grilling Q9) and
+never answered, and the recommendation offered at the time — randomise per
+*turn* — was subsequently invalidated: a turn is not a routable unit, because no
+mechanism exists to change the model for one turn of a running session. Q9 must
+be re-answered as **per-delegation randomisation**, and the paired-comparison
+argument that justified per-turn randomisation does not survive the move: two
+delegated tasks within one session are different tasks, so assignment is no
+longer a within-subject comparison over identical context.
+
+Everything below is conditional on that answer.
+
+## A2.1 — What is being compared
+
+| arm | assignment |
+|---|---|
+| treatment | model tier for each delegated task chosen by `jev` from the task prompt |
+| control | model tier fixed at the current default |
+
+**The treatment must be verified, not assumed.** Every delegated task records the
+model reported by the subagent's own transcript, and a mismatch against the
+assigned tier is a hard failure, not a dropped row. An assignment that is
+silently ignored would make the treatment arm identical to the control arm and
+produce a null result caused by a bug.
+
+## A2.2 — Primary outcome
+
+> **Net cost in USD per delegated task, including rework**, treatment vs control,
+> with a 95% bootstrap CI clustered on `session_id`.
+
+"Including rework" is what stops the treatment winning by being recklessly cheap:
+when a task is escalated, the arm is charged the **full cost of the escalated
+run plus the wasted cost of the run it replaced**.
+
+**Definition of escalation — fixed now, because it is the term most open to
+post-hoc redefinition.** An escalation is recorded when, within the same session,
+a delegated task is **re-delegated with substantially the same objective to a
+higher tier**. Recorded prospectively as a logged event at the moment of
+re-delegation, with the `decision_id` of the run it replaces — *not* recovered
+afterwards by matching prompts, which would be a judgement call made with the
+outcome already visible. A re-delegation with no recorded predecessor is a new
+task, not an escalation.
+
+**Directional hypothesis: net cost per delegated task in the treatment arm is
+lower than in the control arm.** A superiority test, one primary outcome, no
+multiplicity correction needed because there is exactly one.
+
+## A2.3 — Secondary outcomes
+
+All labelled secondary, none headline-eligible: escalation rate; friction proxies
+(user interruptions, permission denials, error `tool_result` rows); wall-clock per
+delegated task; token counts by class; per-tier assignment distribution.
+
+**Quality is measured by friction proxies and escalation rate only.** Self-rating
+is excluded by design: an unblinded author scoring their own experiment at n=1 is
+the weakest evidence available, and its absence is a feature to be stated, not a
+limitation to be apologised for.
+
+## A2.4 — Stopping rule
+
+> **60 delegated tasks with a recorded outcome, or 2026-10-20, whichever comes
+> first.**
+
+Fixed in advance and blind to the statistic. No interim analysis of the primary
+outcome before the stopping condition is met.
+
+*(The 60 is a placeholder pending a power analysis on the observed per-task cost
+variance. It must be replaced with a derived number before ratification — a
+stopping rule chosen by eye is not a stopping rule.)*
+
+## A2.5 — Exclusions
+
+- Tasks whose subagent transcript is missing or truncated: excluded, counted in
+  attrition, reported by arm. **Attrition that differs by arm is itself reported
+  as a threat**, since a tier that fails more often would otherwise look cheaper.
+- Tasks belonging to work on this experiment's own infrastructure: **not**
+  excluded, but flagged, and the analysis is reported with and without them.
+- No exclusion may be introduced after the stopping condition is met.
+
+## A2.6 — The confound, registered before it can be spun
+
+The "delegate where possible" working rule (grilling Q17b) deliberately changes
+how the work is done in order to make more of it routable. It raises the
+experiment's power and lowers its external validity at the same time.
+
+Registered commitments:
+
+1. The pre-rule delegation rate — the fraction of spend that was delegated
+   *before* the rule was adopted — is computed from existing transcripts
+   **before the rule takes effect**. Once the rule is in force that baseline is
+   unrecoverable.
+2. The writeup states plainly that the delegation rate was deliberately raised.
+3. The result is framed as a claim about a **workload deliberately shaped to be
+   routable**, not about ordinary Claude Code use.
+
+## A2.7 — Interaction with the `pre_bash` primary metric
+
+The two experiments share a collection window. Delegation moves `pre_bash`
+captures into subagent sessions, where §4 above excludes them from the headline —
+so the routing experiment can starve the gating experiment of the very clusters
+A1.2 requires.
+
+**The exclusion is not relaxed.** Live `pre_bash` captures are reported split by
+`is_sidechain`, so the size of the effect is visible. If the main-session stream
+does not reach 30 sessions by the hard stop, the `pre_bash` primary metric is
+**inconclusive by rule** and published as such. It is not rescued by pooling.
+
+## A2.8 — What would falsify it
+
+The hypothesis is falsified if the clustered 95% interval on the net-cost
+difference lies entirely at or above zero. An interval spanning zero is reported
+as **inconclusive at this sample size** — and at 60 tasks, given the variance in
+per-task cost, that is the most probable outcome. Saying so now is the point.
+
+## A2.9 — Arms added since the original registration
+
+§1 above lists three arms. Two more have since been added (grilling Q8):
+`cc_sonnet5` and `cc_fable51`. The original text is left as written; this is the
+amendment.
+
+**The reference arm does not change.** `cc_opus5` remains the reference for the
+`pre_bash` primary metric, and `jev` remains the treatment. Both added arms are
+**secondary**, and adding them does not create a multiplicity problem for the
+primary metric because it is a single pre-specified comparison.
+
+Two disclosures attach to `cc_fable51`:
+
+- **Its pricing is unverified.** Every other rate in `config/pricing.json` was
+  reconciled to the cent against Claude Code's own `cost-state`. Fable's comes
+  from documentation, and its 2.5% cache-read multiplier contradicts the uniform
+  10% verified empirically for three other models. **No Fable cost figure is
+  published until one real Fable session is reconciled.**
+- **It is not a cheap tier.** At roughly twice Opus's headline rate it cannot
+  appear as the low end of a routing ladder. Its plausible advantage is narrow
+  and shape-dependent (cache-heavy, terse turns), which is why routing to it
+  requires a second dimension — the `verbosity` question, JEV-25 — rather than a
+  position on a one-dimensional complexity score.

@@ -1,15 +1,38 @@
 # Spec
 
-Written to `SPEC.md` in the folder on implementation. There is no external issue tracker; per your
-instruction the tracker is **`ISSUES.md`** in this folder — a flat markdown file, one `##` heading
+**Read the Status section before the body.** This document is written in layers: the
+original spec (written before any measurement), then the decisions and evidence that
+superseded parts of it. Superseded passages are *annotated in place*, never deleted —
+the reversals are results, and a reader who cannot see what we believed first cannot
+judge what changed our minds.
+
+There is no external issue tracker; the tracker is **`ISSUES.md`** in this folder — a flat markdown file, one `##` heading
 per issue, with `Status:` (`ready-for-agent` | `in-progress` | `blocked` | `done`), `Labels:`, and a
 body. It lives in git, so issue history and code history are the same history, which for a
 single-author study is the whole point. Issues are numbered `JEV-nn` and never renumbered.
 
 ## Design decisions settled by the 2026-09-20 grilling
 
-Twenty decisions, taken in five rounds. Recorded here because several reverse
-earlier choices in this spec, and the reversals are themselves results.
+Five rounds of twenty questions were asked. **Sixteen were answered; four were
+not.** The distinction matters and was previously lost: an earlier version of
+this section presented all twenty as settled decisions. Q9–Q12 were asked in
+Round 3 and **never answered** — the round was overtaken by a sub-agent report
+and the interview moved on to Round 4. What appears below for Q10, Q11 and Q12
+is therefore the *recommendation as offered*, marked **UNRATIFIED**, and Q9 —
+the unit of randomisation, the single most consequential design choice in the
+A/B — is **still open**.
+
+Recorded here because several answered decisions reverse earlier choices in this
+spec, and the reversals are themselves results.
+
+### Open — must be answered before the routing A/B starts
+
+| # | question | status |
+|---|---|---|
+| **Q9** | **What is the unit of randomisation, and how is it kept unconfounded?** Offered: (a) per session, coin flip at session start; (b) per turn, within session; (c) per session blocked by task type. The recommendation was **(b) per turn**, because within a session both arms see the same task mix, repository and hour, which is the one place n=1 helps. | **OPEN — and the recommendation is now void.** Q17 established that a turn is not a routable unit; the only routable unit is the delegated task. Q9 must be re-asked as **per-delegation randomisation**, and (b)'s pairing argument has to be re-earned: two delegated tasks in one session are *not* the same task, so the paired-comparison logic that justified (b) does not carry over unchanged. |
+| **Q10** | Quality measured by friction proxies + escalation rate, as a pre-registered composite; explicitly not self-rating. | **UNRATIFIED** (recommendation only) |
+| **Q11** | Primary outcome: net cost including rework. | **UNRATIFIED** (recommendation only) |
+| **Q12** | Routing A/B runs concurrently with the `pre_bash` window; arm recorded on every capture. | **UNRATIFIED** (recommendation only) |
 
 ### Framing
 
@@ -18,6 +41,7 @@ earlier choices in this spec, and the reversals are themselves results.
 | Q1 | **Thesis: "routing is where harness savings live."** Not "is Jev a good classifier" — that question is answered (it is) and it turned out not to be the interesting one. |
 | Q2 | **Audience: rigorous single-author case study / preprint.** Pre-registration hash cited, every CI clustered, falsification conditions explicit. Not a benchmark — not honestly reachable at n=1. |
 | Q3 | **Budget: ~1 week.** Land routing properly; do not attempt Phase 2 gold labels. |
+| Q6 | **Let the pre-registered `pre_bash` week run to completion** rather than shortening or dropping it when the thesis moved to routing. Breaking one's own pre-registration is the first thing a reviewer looks for; an "inconclusive" pre-registered result strengthens the methodology section rather than weakening it. *Partly superseded by Q14, which replaced the seven-day rule with a cluster-count rule — the commitment not to abandon the gating experiment stands.* |
 | Q18 | **Thesis narrowed, not pivoted:** "routing *delegated tasks* is where the savings live." The mechanism constraint (below) bounds it. |
 
 ### The routing experiment
@@ -25,11 +49,12 @@ earlier choices in this spec, and the reversals are themselves results.
 | # | decision |
 |---|---|
 | Q5 | **A/B with actual routing**, not shadow-mode inference. |
+| **Q9** | **unit of randomisation — OPEN, see above.** Nothing else in this table is safe to build on until it is settled. |
 | Q17 | **Unit of routing is the delegated task, not the turn** — forced by the mechanism constraint. Model selected per subagent via `CLAUDE_CODE_SUBAGENT_MODEL` / `--agents` / frontmatter. |
 | Q17b | **Adopt a global "delegate to a subagent where possible" working rule**, to increase the share of spend that is routable. *See the confound note below.* |
-| Q10 | **Quality measured by friction proxies + escalation rate**, pre-registered as a composite. Explicitly NOT self-rating: unblinded self-assessment at n=1 on one's own experiment is the weakest available evidence. |
-| Q11 | **Primary outcome: net cost including rework** — an escalated turn is charged at its full cost plus the wasted one, so the treatment arm pays for its own mistakes and cannot win by being recklessly cheap. |
-| Q12 | **Runs concurrently with the `pre_bash` window.** Arm assignment must be recorded on every `pre_bash` capture so the analysis can condition on it — routing changes which model generates the commands, so the capture stream is no longer stationary. |
+| Q10 *(UNRATIFIED)* | **Quality measured by friction proxies + escalation rate**, pre-registered as a composite. Explicitly NOT self-rating: unblinded self-assessment at n=1 on one's own experiment is the weakest available evidence. |
+| Q11 *(UNRATIFIED)* | **Primary outcome: net cost including rework** — an escalated turn is charged at its full cost plus the wasted one, so the treatment arm pays for its own mistakes and cannot win by being recklessly cheap. |
+| Q12 *(UNRATIFIED)* | **Runs concurrently with the `pre_bash` window.** Arm assignment must be recorded on every `pre_bash` capture so the analysis can condition on it — routing changes which model generates the commands, so the capture stream is no longer stationary. |
 | Q16 | **Aggressive thresholds.** Break-even is 37.5–44.4%; the economics have slack. |
 
 ### Statistical discipline
@@ -38,7 +63,7 @@ earlier choices in this spec, and the reversals are themselves results.
 |---|---|---|
 | Q13, Q20 | **Degenerate-interval guard**: <30 clusters OR zero width → inconclusive by rule; cluster count always printed | **IMPLEMENTED** — `stats.Interval`, Amendment A1.1 |
 | Q14 | **Stopping rule amended** from 7 calendar days to 30 distinct sessions or 2026-10-20 | **IMPLEMENTED** — Amendment A1.2 |
-| Q15 | **Run all 360 synthetic items through all arms** to close the threshold overfit (gap 0.097 at n=59 → ~0.020 at n=300) | pending — see cost note |
+| Q15 | **Run all 360 synthetic items through all arms** to close the threshold overfit (gap 0.097 at n=59 → ~0.020 at n=300) | **pending, and the scope has changed since the decision** — see *Cost note on Q15* below |
 
 ### Scope of publication
 
@@ -55,7 +80,7 @@ earlier choices in this spec, and the reversals are themselves results.
 
 ---
 
-## Three things a reader should be told plainly
+## Four things a reader should be told plainly
 
 **1. The mechanism is the binding constraint, not the classifier.** No hook event
 accepts a `model` field; `PreModelSwitch` can veto a switch Claude initiates but
@@ -76,6 +101,81 @@ was reconciled against Claude Code's own `cost-state` to the cent. Fable's comes
 from documentation, and its 2.5% cache-read multiplier contradicts the uniform
 10% verified empirically for three other models. No published Fable figure until
 one real Fable session is reconciled.
+
+**4. The delegation rule and the primary metric pull against each other.** This
+is not a presentational point; it is a live threat to the headline number, and it
+was found by reading the two decisions side by side rather than by either one
+alone. Q17b routes work into subagents. Subagent `pre_bash` captures carry
+`is_sidechain: true`, and pre-registration §4 excludes those from the headline.
+So the more successfully Q17b runs, the faster the *main-session* `pre_bash`
+stream drains — at exactly the moment the A1.2 stopping rule starts counting
+sessions towards 30. **Adopting the routing experiment can starve the gating
+experiment.** Resolution is specified under *Interaction: Q17b × the `pre_bash`
+primary metric* below; whichever way it is resolved, the writeup states that the
+two experiments shared a collection window and how that was handled.
+
+---
+
+## Cost note on Q15 — the scope changed after the decision was taken
+
+Q15 (run all 360 synthetic items through all arms) was agreed when there were
+**four** arms. Q8 made it **five**. The arithmetic that follows is the reason
+this ticket is still `ready-for-agent` and not running:
+
+| | Jev only | all five arms |
+|---|---|---|
+| wall clock, serial | ~4 minutes | **~4.1 hours** |
+| subscription calls | 0 | **1,440** |
+| metered spend | ~$0.005 | $0 (subscription) |
+
+The binding cost is not dollars, it is **subscription quota in the same week as
+the routing A/B**, which needs the same quota and is the headline experiment.
+Two honest options, and this is a decision for the owner, not a default:
+
+- **(a) Jev-only on all 360**, four baseline arms on the existing 60. Closes the
+  threshold-overfit question — which is a question about *Jev's* operating point,
+  not about the baselines — at ~1% of the cost. Recommended.
+- **(b) All five on all 360**, accepting that the routing A/B waits a week.
+
+Until this is answered, the threshold-overfit gap (0.097) stands as a stated
+limitation rather than a closed question.
+
+## Interaction: Q17b × the `pre_bash` primary metric
+
+Three things are underdefined where the routing experiment touches the gating
+experiment. Fixed here, before the A/B starts, because all three are choices that
+could otherwise be made after seeing which way they push the number.
+
+**1. `is_sidechain` exclusion stands, and its cost is reported.** Pre-registration
+§4 excludes sidechain captures from the headline, and that exclusion is *not*
+relaxed — relaxing an exclusion mid-study to recover sample size is precisely the
+move pre-registration exists to prevent. Instead the writeup reports, for the
+collection window, the count of live `pre_bash` captures **split by
+`is_sidechain`**, so a reader can see how much of the stream the delegation rule
+moved out of the headline. If the main-session stream fails to reach 30 sessions
+by 2026-10-20, the primary metric is **inconclusive by rule** (A1.1) and is
+published as such. It is not rescued by pooling sidechains.
+
+**2. The clustering key does not change.** `session_id` remains the cluster. A
+subagent runs under its own session; those rows are excluded from the headline
+anyway, so no cluster is split or merged by the delegation rule.
+
+**3. `arm` on a `pre_bash` capture is a per-task attribute, and most captures do
+not have one.** Q12 says "record arm assignment on every `pre_bash` capture",
+which is not literally possible: arms are assigned per *delegated task*, whereas
+`pre_bash` fires per *command*, and a command issued by the main session belongs
+to no arm. Definition, fixed now:
+
+| field | value |
+|---|---|
+| `routing_arm` | the model tier assigned to the delegated task, or `null` |
+| `routing_context` | `main_session` \| `delegated` \| `unassigned_delegated` |
+
+`main_session` is the correct value for a command Claude runs directly, and it is
+**not** a missing value — it is a distinct stratum. `unassigned_delegated` covers
+subagent commands captured before or outside the A/B, and exists so that an
+absent assignment can never be silently read as `main_session`. The analysis
+conditions on `routing_context`; the headline uses `main_session` only.
 
 ---
 
@@ -130,6 +230,12 @@ selected by a rule that re-derives itself as data accumulates. See Part 4d.
 
 ## Problem Statement
 
+> **Superseded in part by Q1 and Q18.** This section poses the question the study
+> *started* with — "is Jev a good classifier?" — and it is left standing because
+> the answer turned out to be yes and uninteresting. The question the study now
+> answers is in *Status* §1 and §2 above: whether routing makes Claude Code
+> cheaper. Read this as background, not as the thesis.
+
 Claude Code makes dozens of consequential decisions per session — whether a Bash command is
 dangerous, whether a task is actually finished, which route a prompt should take, how risky an edit
 is — and today each one is either a hardcoded regex, a permission prompt aimed at the human, or
@@ -146,17 +252,30 @@ compute confidence intervals that ignore session clustering.
 
 ## Solution
 
-A shadow-mode measurement harness living entirely in one folder. Claude Code hooks capture real
-decision points as they occur and write them to a spool in under 10ms, never blocking and never
-changing session behaviour. An offline worker replays each captured state against three arms — Jev,
-Opus 5, Haiku 4.5 — interleaved with randomised arm order so no arm pays a latency cost the others
-don't. Everything is stored append-only and content-addressed, so a single human labelling pass in
-Phase 2 applies to every question phrasing ever replayed, with zero re-running.
+Two experiments, not one. The original spec described only the first.
 
-The output is a set of per-surface tables and figures: latency distributions, cost per decision,
-inter-arm agreement with clustered confidence intervals, sharpness, and robustness sweeps — plus a
-pre-registration committed before the first record, so the analysis choices are on the record rather
-than chosen after seeing the numbers.
+**A. The shadow-mode measurement harness (built, live).** A harness living
+entirely in one folder. Claude Code hooks capture real decision points as they
+occur and write them to a spool in under 10ms, never blocking and never changing
+session behaviour. An offline worker replays each captured state against **five
+arms** — `jev`, `cc_opus5`, `cc_sonnet5`, `cc_haiku45`, `cc_fable51` (Q8; the
+original three-arm text is superseded) — interleaved with randomised arm order so
+no arm pays a latency cost the others don't. Everything is stored append-only and
+content-addressed, so a single human labelling pass in Phase 2 applies to every
+question phrasing ever replayed, with zero re-running.
+
+Its output is a set of per-surface tables and figures: latency distributions,
+cost per decision, inter-arm agreement with clustered confidence intervals,
+sharpness, and robustness sweeps — plus a pre-registration committed before the
+first record.
+
+**B. The routing A/B (Q5, Q17 — specified, not yet started).** This one is **not
+shadow mode**: it changes session behaviour on purpose. Delegated tasks are
+assigned a model tier and actually run on it, and the outcome is net cost
+including rework. It is the headline experiment, and it is why *Out of Scope*
+below has been amended. It has no pre-registration yet — see
+`PREREGISTRATION.md` Amendment 2 (PROPOSED), which must be ratified before its
+first task runs.
 
 ## User Stories
 
@@ -174,8 +293,8 @@ than chosen after seeing the numbers.
    reverts my machine completely.
 7. As a researcher, I want each captured state stored content-addressed, so that identical states
    deduplicate and every run is traceable to exact bytes.
-8. As a researcher, I want all three arms to receive byte-identical state, so that no difference
-   between them can be blamed on input drift.
+8. As a researcher, I want all arms to receive byte-identical state, so that no difference
+   between them can be blamed on input drift. *(Amended by Q8: five arms, not three.)*
 9. As a researcher, I want arm order randomised per decision point, so that time-of-day network
    drift doesn't systematically favour one arm.
 10. As a researcher, I want per-call timings decomposed into DNS, TCP, TLS and TTFB, so that I can
@@ -202,8 +321,10 @@ than chosen after seeing the numbers.
     Opus is never mistaken for truth.
 21. As a researcher, I want a pre-registration committed before the first record, so that my
     analysis choices are verifiably not post-hoc.
-22. As a researcher, I want a calendar-based stopping rule, so that I can't stop collecting when the
-    numbers happen to look good.
+22. As a researcher, I want a stopping rule fixed in advance, so that I can't stop collecting when
+    the numbers happen to look good. *(Amended by A1.2: the rule is now 30 distinct sessions or the
+    hard calendar stop at 2026-10-20, whichever comes first. A pure calendar rule was found to
+    produce an* undefined *primary metric at the observed session rate.)*
 23. As a researcher, I want a daily canary over fixed states, so that a mid-collection vendor model
     change is detected rather than silently averaged in.
 24. As a researcher, I want `response_model` recorded on every call, so that model substitution is
@@ -212,8 +333,11 @@ than chosen after seeing the numbers.
     curve has resolution my live base rate can never provide.
 26. As a researcher, I want synthetic results reported separately and labelled, so that they are
     never pooled with live data.
-27. As a researcher, I want determinism measured by repeating identical calls, so that "Jev is
-    deterministic and the LLMs aren't" becomes a finding rather than an anecdote.
+27. As a researcher, I want determinism measured by repeating identical calls, so that I know how
+    much **both** arms wobble. *(The original story assumed the finding — "Jev is deterministic and
+    the LLMs aren't". The day-0 spike* falsified *that: Jev is not bit-deterministic. See
+    `PREREGISTRATION.md` §7. The measurement stands; the expected answer does not, and the sweep
+    (JEV-16) is still the blocker on enforcement.)*
 28. As a researcher, I want each question asked in 2–3 independent phrasings, so that a lazily
     written baseline prompt can't manufacture my result.
 29. As a researcher, I want option order shuffled for `choice` questions, so that known LLM position
@@ -253,12 +377,17 @@ in full above and are not restated here. The additions this spec makes:
 
 - **Issue tracker is `ISSUES.md`** in the folder. Flat markdown, `##` per issue, `JEV-nn` ids,
   `Status:` and `Labels:` lines, never renumbered. No external tracker; git history is issue history.
-- **Module boundaries.** `hooks/` is bash and owns only spooling. `src/arms/` owns all network I/O
-  and is the only place an HTTP client appears. `src/worker.py` owns orchestration and is the sole
+- **Module boundaries.** `hooks/` is bash and owns only spooling. `src/arms/` owns all **outbound
+  calls to a model** and is the only place either an HTTP client or a `claude -p` subprocess spawn
+  appears. (The original wording said "the only place an HTTP client appears", which stopped being
+  accurate when the baseline moved to the subscription: the `cc_*` arms reach their model by
+  spawning a process, not by opening a socket. The boundary is the same; its description was
+  wrong.) `src/worker.py` owns orchestration and is the sole
   writer of `data/runs/`. `src/analyze.py` and `src/figures.py` are pure functions over jsonl and
   perform no I/O beyond reading inputs and writing `reports/`.
 - **The arm interface is one function**: `evaluate(state: str, questions: dict, config: ArmConfig)
-  -> Run`. Both arms implement it. Adding a fourth arm means adding one file.
+  -> Run`. Every arm implements it; adding an arm means adding one file — which is how the study
+  went from three arms to five (Q8) without touching the worker.
 - **Versioning is explicit everywhere**: `question_set_id`, `state_builder_version`,
   `pricing_version`, `arm_config_id`, `redaction_version` on the rows they apply to. Nothing is
   "current"; everything is pinned.
@@ -284,42 +413,84 @@ into internals. Two seams plus pure functions — ratified with you:
    statistics run against small hand-built jsonl where κ, PABAK and the clustered bootstrap have
    known answers.
 
+4. **The future-leakage gate (GATE 4)** is a testing decision, not merely a ticket. Decision #7 —
+   state is built only from what existed at capture time — is the study's most load-bearing
+   methodological claim, and leakage would help *both* arms equally, so **no agreement metric can
+   ever reveal it**. It must be asserted directly, at the hook/worker boundary: append lines to a
+   fixture transcript after capture, drain, and assert `state_sha256` is unchanged; plus a negative
+   control asserting that a capture with a stripped byte offset is quarantined rather than
+   processed. Offline, `FakeArm`, no spend. Tracked as JEV-15.
+
+5. **The routing A/B needs one assertion, and it is a verification of the experiment itself:**
+   for every delegated task, the model recorded in the subagent's own transcript matches the tier
+   the randomiser assigned. Without it, a silently ignored `model` argument would be indistinguishable
+   from a treatment that simply doesn't help — the treatment arm would quietly *be* the control arm,
+   and the study would publish a null result caused by a bug. Asserted per task, from the transcript,
+   not from the request.
+
 Live API calls appear in exactly one place: the day-0 `--selftest` spike, run deliberately and never
 in the automated suite.
 
-## Tickets — vertical slices
+## Tickets
 
-Thirteen tracer-bullet slices. Each cuts a complete path through hook → spool → worker → arm → row →
-report rather than finishing one layer at a time, so every ticket ends in something you can run and
-look at. All live in `ISSUES.md` in this folder (a single file, per your instruction — the skill's
-default is one file per ticket under `.scratch/`; noting the deviation, not silently taking it).
+**`ISSUES.md` is authoritative.** The thirteen-row table that used to sit here was
+written before collection started; it has been removed rather than maintained in
+parallel, because two copies of a ticket list diverge and the copy in the spec is
+the one nobody updates. It had already drifted in three ways worth recording: it
+named three arms (Q8 makes five), it carried a single "remaining three surfaces"
+row (now JEV-18/19/20, with the priority order reversed), and it predated
+JEV-14 through JEV-25 entirely.
 
-| # | Title | Blocked by | What it delivers |
-|---|---|---|---|
-| 1 | **Skeleton & self-containment** | — | `git init`, `.gitignore`, folder layout, `.env` at mode 600 + loader, `SPEC.md`/`ISSUES.md`/`docs/PLAN.md`. Run `doctor.py`: it prints the layout, confirms credentials load, and asserts nothing outside this folder was written. |
-| 2 | **Jev API spike** | 1 | One live round-trip. Answers the four open vendor questions — does `providerMetadata.typesafe.confidence` survive the REST path, is Jev deterministic, does caching fire, what does `usage` actually report — and records the findings. Everything downstream assumes a contract this proves. |
-| 3 | **Offline tracer bullet** | 1 | The whole pipeline end to end with zero network: pipe a recorded payload into `capture.sh` → `worker --once` drains it through `FakeArm` → a `runs` row lands → `analyze --report` prints a per-surface table. Hook not yet registered; invoked by hand. Both test seams appear here. |
-| 4 | **Three real arms, interleaved** | 2, 3 | Swap `FakeArm` for `jev`, `opus5`, `haiku45`. Randomised arm order per decision point, decomposed DNS/TCP/TLS/TTFB timings, failures recorded as rows. Demo: one captured command, three arms, a latency and cost table. |
-| 5 | **Statistics & report v1** | 3 | Per-surface agreement, κ *and* PABAK, majority-class baseline beside every number, session-clustered bootstrap CIs — with known-answer tests over hand-built fixtures, so the maths is verified before real data exists. |
-| 6 | **The "before" baseline** | 1 | `session_metrics.py` over a frozen completed transcript in `data/fixtures/`: cost reconciled against `cost-state.totalCostUSD`, dedupe by `requestId`, tokens by class, wall-clock, friction proxies. Independent of everything else; this is the only thing enforce mode can ever be differenced against. |
-| 7 | **Pre-registration** | 4, 5 | `PREREGISTRATION.md` committed, with its git hash. Deliberately blocked on 4 and 5: you can only honestly pre-register metrics you have already demonstrated you can compute. **Nothing may be captured live before this lands.** |
-| 8 | **Go live on `pre_bash`** | 7 | Register the hook in `.claude/settings.local.json` and pass all three gates before it is enabled: isolation (control dir, worktree subagent, gitignore), fail-open (bogus key, unreachable host, read-only spool), kill switch (`.jev-disabled` → zero activity). First real capture from a real session. |
-| 9 | **True inline shadow** | 8 | `inline_shadow_bash.sh` calls Jev synchronously with `--max-time`, logs what it would have decided, never blocks. Exercises the script you would actually deploy and yields a *measured* enforce overhead. |
-| 10 | **Synthetic stress set & robustness** | 4, 5 | ~300 stratified items replayed offline, plus determinism N=20, phrasing, option-order and truncation sweeps. This is where the ROC curve gets resolution the live base rate can't provide. Reported separately, labelled synthetic. |
-| 11 | **Enforce-overhead bench & drift canary** | 8 | `bench_inline.py` (N=200, including process spawn) and `canary.py` (daily fixed-state check so a mid-collection vendor model change is caught, not averaged in). |
-| 12 | **Figures & publishable export** | 5, 10 | Latency CDFs, sharpness histograms, pseudo-reliability curves; export-time scrubber with `redaction_version`; packaging that excludes `data/states/` by default. The artifact you'd actually publish. |
-| 13 | **Remaining three surfaces** | 8 + ~1 week of `pre_bash` data | Register `stop`, `user_prompt`, `post_edit`. Held deliberately until the analysis path is proven end to end on one surface — otherwise you collect 2,000 records you can't use. |
+Tickets are vertical slices, `JEV-nn`, never renumbered. Current shape of the
+board — counts, not a second list:
 
-Tickets 1 and 6 have no blockers between them and can run in parallel. Phase 2 — labelling UI, gold
-labels, Brier/ECE/RPS, decision curves, writeup — is not ticketed here; it opens on your go.
+| state | tickets |
+|---|---|
+| done | JEV-01…08, 14, 21 |
+| in-progress | JEV-09, 10, 11 |
+| **ready now** (no unmet blockers) | **JEV-15, 16, 17, 22, 24a** |
+| blocked | JEV-12, 13, 18, 19, 20, 23, 24b, 25 |
+
+Two of the four ready tickets gate almost everything else:
+
+- **JEV-16 (determinism sweep)** is the enforcement blocker. Until the flip rate
+  is known, no surface can move from shadow to enforce, and JEV-17's dead-zone
+  rule has nothing to be derived from.
+- **JEV-24a (pre-rule delegation baseline)** is urgent for a different reason: it
+  measures something that ceases to exist the moment the delegation rule or the
+  A/B starts. It was previously a checkbox inside JEV-24, which was blocked by
+  JEV-23 — an ordering inversion that would have destroyed the measurement.
+- **JEV-15 (GATE 4, future-leakage)** verifies the study's most load-bearing
+  methodological claim, which is currently asserted in three documents and tested
+  in none. It applies to the *already-live* surface, so it is overdue rather than
+  upcoming.
+
+**JEV-23 (the routing A/B) carries a prerequisite that is not a ticket:** Q9 must
+be answered and Amendment 2 ratified. A blocker that lives outside the board is
+the kind that gets missed, so it is named here as well.
 
 ## Out of Scope
 
-Enforce mode and any enforce hook script. Registration of `stop`, `user_prompt` and `post_edit`
-(their question sets and state builders are written; only registration waits). Phase 2 in its
-entirety — the labelling UI, gold labels, Brier/ECE/RPS, decision-curve analysis, and the writeup.
-Multi-repo collection, ruled out by the isolation requirement. Any launchd or auto-start mechanism.
-Any claim about accuracy, calibration, or productivity improvement.
+**Amended by Q5.** The original exclusions listed below were written for a
+shadow-mode-only study. Two of them no longer hold:
+
+- **"Enforce mode"** — the routing A/B *is* an intervention that changes session
+  behaviour. It does not block a tool call (no `enforce_*.sh` hook is written, and
+  the rule that enforcement requires a deliberately different registered script
+  stands), but calling it out-of-scope would be false. What remains out of scope
+  is **enforcement on `pre_bash`**, which JEV-16 blocks.
+- **"Any claim about productivity improvement"** — superseded. Net cost including
+  rework *is* a productivity claim, and it is now the headline. The discipline
+  that replaces the blanket ban: the claim is pre-registered before the first
+  routed task (Amendment 2), the outcome is net-of-rework so the treatment pays
+  for its own mistakes, and quality is measured by friction proxies rather than
+  self-rating.
+
+Still out of scope, unchanged: Phase 2 in its entirety — the labelling UI, gold
+labels, Brier/ECE/RPS, decision-curve analysis and the writeup. Multi-repo
+collection, ruled out by the isolation requirement. Any launchd or auto-start
+mechanism. Any claim about **accuracy or calibration**, which need gold labels
+this study does not have.
 
 ## Further Notes
 

@@ -1,7 +1,8 @@
 # ISSUES
 
 The issue tracker for this experiment. One `##` heading per ticket. Tickets are
-numbered `JEV-nn` and never renumbered. Git history is issue history.
+numbered `JEV-nn` and never renumbered. A ticket may be split into `nn-a` / `nn-b`
+when an ordering hazard is found inside it; the number is preserved.
 
 `Status:` is one of `ready-for-agent` | `in-progress` | `blocked` | `done`.
 A ticket is workable when every ticket in its `Blocked by:` line is `done`.
@@ -345,7 +346,7 @@ as data accumulates.
 
 - [ ] Adopt a fixed-target-recall rule (weakly dominant on `destructive`: never worse across 500 paired splits, better on 11–13%)
 - [ ] Re-derive on LIVE captures once the collection window closes, and report the live-vs-synthetic threshold difference as a finding
-- [ ] State the rule in `PREREGISTRATION-SURFACES.md` before it is used for any claim
+- [ ] State the rule in `PREREGISTRATION.md` as a dated amendment before it is used for any claim (one pre-registration file, not three)
 
 ---
 
@@ -447,31 +448,69 @@ The set holds 360 items; only 60 have ever been run.
 
 **Status:** blocked
 **Labels:** science, hooks
-**Blocked by:** JEV-18 (`user_prompt` surface), JEV-22
+**Blocked by:** JEV-24a (the pre-rule baseline is destroyed the moment this starts),
+grilling **Q9** (unanswered — the unit of randomisation), and ratification of
+`PREREGISTRATION.md` **Amendment 2** (currently PROPOSED).
 
 **What to build:** The article's central experiment, per SPEC "The routing
 experiment". Per-turn routing is impossible (no hook sets a model, no
 per-request override exists), so the unit is the **delegated task**.
 
-- [ ] Model selected per subagent via `CLAUDE_CODE_SUBAGENT_MODEL` / `--agents` / frontmatter
-- [ ] Randomise assignment per delegation; record the arm on every capture including `pre_bash`
+**Two blockers here are not tickets, which is why they are named in the status
+line.** Q9 was asked and never answered; the recommendation it carried
+(randomise per turn) was invalidated by the mechanism constraint and cannot be
+silently reused. And the headline experiment currently has no pre-registration —
+Amendment 2 is drafted but explicitly not in force.
+
+- [ ] **Answer Q9** — unit of randomisation, re-posed as per-delegation
+- [ ] **Ratify Amendment 2**, including replacing its placeholder stopping rule (60 tasks) with a power-derived number
+- [ ] Model selected per subagent by whichever mechanism the verification in SPEC establishes as real
+- [ ] **Assert the assignment took effect**: the subagent transcript's own reported model must equal the assigned tier, per task, or the treatment arm is silently the control arm
+- [ ] Randomise assignment per delegation; record `routing_arm` and `routing_context` on every capture including `pre_bash`
 - [ ] Primary outcome: **net cost including rework** — an escalated task charged at full cost plus the wasted one
+- [ ] Escalation logged **prospectively at the moment of re-delegation**, with the `decision_id` it replaces — never reconstructed afterwards by prompt matching
 - [ ] Quality composite: friction proxies (interruptions, `is_error`, permission denials) + escalation rate
-- [ ] `PREREGISTRATION-ROUTING.md` committed BEFORE the first routed delegation
 - [ ] Aggressive thresholds justified by the 37.5–44.4% break-even, with the break-even arithmetic restated in the pre-registration
+
+**Note on the pre-registration file.** Earlier tickets referred to
+`PREREGISTRATION-ROUTING.md` and `PREREGISTRATION-SURFACES.md`. There is **one**
+pre-registration file, `PREREGISTRATION.md`, extended by dated amendments. Three
+files would mean three places to check whether a commitment was made before or
+after the data.
 
 ---
 
-## JEV-24: "Delegate where possible" working rule — and its confound
+## JEV-24a: Pre-rule delegation baseline — **measure this first or lose it**
+
+**Status:** ready-for-agent
+**Labels:** science, blocking
+**Blocked by:** None (can start immediately — and must, before JEV-23 or JEV-24b)
+
+**What to build:** The fraction of spend that was delegated to subagents
+**before** the "delegate where possible" rule is adopted, computed from the
+existing transcripts.
+
+This was previously a checkbox inside JEV-24, which was itself blocked by
+JEV-23 — an ordering inversion that would have destroyed the measurement. The
+moment the rule takes effect, or the A/B starts, the pre-rule baseline is
+unrecoverable. It is split out here as its own ticket precisely so that it
+cannot be scheduled after the thing that erases it.
+
+- [ ] Compute pre-rule delegation rate by task count and by spend, over the existing transcript corpus
+- [ ] Freeze the result into `data/fixtures/` as a derived number with the transcript window recorded
+- [ ] Report it in the writeup as the external-validity anchor for the confound
+
+---
+
+## JEV-24b: "Delegate where possible" working rule — and its confound
 
 **Status:** blocked
 **Labels:** science
-**Blocked by:** JEV-23
+**Blocked by:** JEV-24a
 
 **What to build:** A standing rule that work is delegated to subagents where
 practical, raising the share of spend that is routable at all.
 
-- [ ] Measure the delegation rate **before** adopting the rule, from existing transcripts — this is the baseline and it must be captured first or it is gone
 - [ ] Adopt the rule; measure the delegation rate after
 - [ ] **Disclose the confound in the writeup**: the workload was deliberately reshaped to make more of it routable, which raises experimental power and lowers external validity at the same time. Report what fraction of spend was delegable before the change
 
