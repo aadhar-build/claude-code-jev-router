@@ -3,7 +3,7 @@
 The glossary for this project. Terms only — no implementation details, no
 decisions, no schema. Decisions live in `SPEC.md`, commitments in
 `PREREGISTRATION.md`, work in `ISSUES.md`, and hard-to-reverse choices in
-`docs/adr/`.
+`.scratch/adr/`.
 
 ---
 

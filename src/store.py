@@ -1,9 +1,35 @@
-"""Three append-only streams, joined by keys. Nothing is ever updated in place.
+"""Append-only streams, joined by keys. Nothing is ever updated in place.
+
+Streams this module writes:
 
     data/captures/YYYY-MM-DD.jsonl   immutable decision points
     data/states/<sha256>.json        content-addressed state blobs
     data/runs/YYYY-MM-DD.jsonl       one row per (decision_id, arm, question_set_id, attempt)
     data/labels/*.jsonl              Phase 2, appended by a human
+
+A fifth stream exists that this module deliberately does NOT write:
+
+    data/inline/YYYY-MM-DD.jsonl     written directly by hooks/inline_shadow_bash.sh
+
+`data/inline/` bypasses this module on purpose, and the bypass is the point of
+the measurement rather than a violation of the module boundary. That hook exists
+to exercise the script you would actually deploy, under live session conditions,
+including its own timeout and fail-open path; routing it through Python would
+add a ~30-60ms interpreter start to every row and destroy the very number it is
+there to produce. It keeps its own 22-key schema and its own run_context, and it
+is analysed separately from the worker's streams -- never pooled with them.
+
+`data/captures/` rows come in two shapes, and readers must tolerate that:
+
+    worker.py   16 keys -- live captures, carrying the hook payload's context
+                (prompt_id, tool_use_id, agent_type, permission_mode, cwd)
+    replay.py   14 keys plus `stratum` -- synthetic items, which have no hook
+                payload and therefore none of that context to carry
+
+The difference is provenance, not drift: a synthetic item never passed through
+a hook, so the five payload-derived keys have no value to record and are absent
+rather than null. Any reader of data/captures/ must treat those five as optional
+and must not infer that an absent key means an absent fact.
 
 `data/states/` holds the EXACT bytes sent to every arm. Redaction is a
 publish-time export step (decision #9), not a capture-time one -- scrubbing the

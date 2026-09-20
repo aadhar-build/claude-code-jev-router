@@ -498,6 +498,18 @@ in full above and are not restated here. The additions this spec makes:
 
 - **Issue tracker is `ISSUES.md`** in the folder. Flat markdown, `##` per issue, `JEV-nn` ids,
   `Status:` and `Labels:` lines, never renumbered. No external tracker; git history is issue history.
+- **`data/` has five streams and one deliberate boundary violation.** `store.py`
+  writes `captures/`, `states/`, `runs/` and `labels/`. `data/inline/` is written
+  **directly by `hooks/inline_shadow_bash.sh`**, bypassing Python entirely — and
+  the bypass is the measurement, not a violation: that hook exists to exercise
+  the script you would actually deploy, so adding a ~30–60ms interpreter start to
+  every row would destroy the number it is there to produce. It carries its own
+  schema and is analysed separately, never pooled. Separately, `captures/` rows
+  come in **two shapes** — live rows carry five payload-derived context keys
+  (`prompt_id`, `tool_use_id`, `agent_type`, `permission_mode`, `cwd`) that
+  synthetic rows cannot have, because a synthetic item never passed through a
+  hook. Absent, not null; readers must treat them as optional and must not read
+  an absent key as an absent fact.
 - **Module boundaries.** `hooks/` is bash and owns only spooling. `src/arms/` owns all **outbound
   calls to a model** and is the only place either an HTTP client or a `claude -p` subprocess spawn
   appears. (The original wording said "the only place an HTTP client appears", which stopped being

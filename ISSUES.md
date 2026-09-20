@@ -614,6 +614,35 @@ chosen after results are visible are not evidence.
 
 ---
 
+## JEV-30: The worker reads config once, and nothing says so
+
+**Status:** ready-for-agent
+**Labels:** defect, science, blocking
+**Blocked by:** None
+
+**What happened, on live data.** The running worker started at **15:49:55**.
+`config/arms.json` gained `cc_sonnet5` to its `enabled` list at **15:55:26** —
+six minutes later. The worker loads config once at startup and has been running
+on the stale three-arm set ever since, so **every row collected in that window
+silently omits `cc_sonnet5`**. Nothing warned, nothing failed, and the omission
+is invisible in the data: the rows look complete because `arm_order` records the
+three arms the process knew about.
+
+This is the same shape as the `question_set` field that looks like configuration
+and is inert (JEV-31): a config change that appears to take effect and does not.
+
+**The data consequence has to be recorded, not just fixed.** The collection
+window now contains a configuration boundary. Rows before a restart carry a
+different arm set from rows after it, and the analysis must condition on that or
+report it.
+
+- [ ] Log the resolved arm set, config version and config file mtime at worker startup — the operator should be able to see what the process actually loaded
+- [ ] Fail loudly, or at minimum warn on every drain cycle, if a config file's mtime is newer than the process start time
+- [ ] Record the configuration boundary in the collection log: which rows were collected under which arm set
+- [ ] Decide and document whether a mid-window config change requires a restart, a new `arms_config_version` on every row, or is forbidden outright during a collection window
+
+---
+
 ## JEV-27: Power analysis for the routing A/B stopping rule
 
 **Status:** ready-for-agent
