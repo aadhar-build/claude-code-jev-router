@@ -22,7 +22,7 @@
     "claude-opus-4-7": {
       "input": 5e-06,
       "output": 2.5e-05,
-      "_derivation": "NOT guessed and NOT substring-matched from 'opus' -- that is claude-spend#31's 437% over-report. Solved from first-party accounting: 5e-06/2.5e-05 is the unique rate pair that reproduces cost-state.modelUsage['claude-opus-4-7'].costUSD to the cent in all 28 sessions of this project that report one, with cache writes at 1.25x and cache reads at 0.10x. Worked example, session 0982af7b: in 9, out 4969, cache write 49379, cache read 126594 -> 0.49618575, against a reported 0.49618575. JEV-49."
+      "_derivation": "NOT guessed and NOT substring-matched from 'opus' -- that is claude-spend#31's 437% over-report. Solved from first-party accounting: 5e-06/2.5e-05 is the unique rate pair that reproduces cost-state.modelUsage['claude-opus-4-7'].costUSD to the cent in EVERY session of this project that reports one (40 at the time of writing; the corpus grows, the claim is universal not a count), with cache writes at 1.25x and cache reads at 0.10x. Worked example, session 0982af7b: in 9, out 4969, cache write 49379, cache read 126594 -> 0.49618575, against a reported 0.49618575. JEV-49."
     },
     "claude-opus-5[1m]": {
       "input": 5e-06,

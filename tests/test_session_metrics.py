@@ -347,8 +347,10 @@ class TestUnpricedModelIsAHardFailure(unittest.TestCase):
         """217 rows in the baseline window were excluded for want of a rate.
 
         The rate was not guessed: it is the unique solution that reproduces
-        `cost-state.modelUsage['claude-opus-4-7'].costUSD` to the cent in all
-        28 sessions that report one.
+        `cost-state.modelUsage['claude-opus-4-7'].costUSD` to the cent in every
+        session of this project that reports one -- 40 of them at the time of
+        writing, and the corpus keeps growing, so the claim is universal rather
+        than a count.
         """
         rate = cl.pricing()["models"]["claude-opus-4-7"]
         self.assertEqual(rate["input"], 5e-06)

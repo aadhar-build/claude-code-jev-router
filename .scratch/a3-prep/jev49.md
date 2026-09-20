@@ -52,7 +52,7 @@ Four corrections, all in `src/session_metrics.py`, all tested:
 | `normalise_usage` | token fields summed from `iterations[]`; cache scalars NOT; TTL sub-object summed | +$4.69 |
 | `merge_copies` | duplicate copies folded per-field max — the **first** copy is a streaming placeholder (`input_tokens: 2`, no iterations) | **+$29.84** |
 | `call_cost` | 1-hour cache writes at 2×, 5-minute at 1.25×, read per row | +$6.75 |
-| `pricing.json` | `claude-opus-4-7` priced by solving cost-state (exact in 28 sessions) | +$8.50 |
+| `pricing.json` | `claude-opus-4-7` priced by solving cost-state (exact in every cost-state session; 40 at the time of writing) | +$8.50 |
 
 Total **$125.582946 → $175.354996 (+39.6%)**. `config/pricing.json` is now
 **`pricing-2026-09-20b`**; rows stamped `pricing-2026-09-20` were costed under
@@ -117,3 +117,11 @@ half is OPEN; PREREGISTRATION A8.4 lists exactly what the operator must pull.
 * **`test_validation.py` failed once, intermittently, in `run_all.sh`** and did
   not reproduce in 17 direct runs or 3 full-suite runs. Not JEV-49's file;
   flagged, not repaired. Suspect a randomised test in `OptimismGap`.
+
+## 6. Where the stale $125.58 is quoted (checked, 2026-09-20)
+
+`grep -rn "125\.58|42\.57|unpriced" FINDINGS.md SPEC.md README.md docs/ reports/`
+returns **nothing**. The pre-fix headline lives in exactly two places, both of
+which now say so: `data/baseline/manifest.json` (not regenerated — see §4) and
+the ISSUES.md JEV-49 table, which shows it as the "was" column. No prose
+anywhere quotes a cost figure that this ticket invalidated.

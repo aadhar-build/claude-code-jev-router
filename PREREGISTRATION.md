@@ -1120,8 +1120,9 @@ for a published headline when the exclusion is that large.
 The rate was not guessed and not substring-matched from "opus" — that is
 `claude-spend#31`'s 437% over-report. It was **solved**: `$5/MTok` input and
 `$25/MTok` output is the unique pair that reproduces
-`cost-state.modelUsage['claude-opus-4-7'].costUSD` **to the cent in all 28
-sessions that report one**, with cache writes at 1.25× and reads at 0.10× — the
+`cost-state.modelUsage['claude-opus-4-7'].costUSD` **to the cent in every session
+of this project that reports one — 40 at the time of writing, and the corpus
+is still growing, so the claim is universal rather than a count**, with cache writes at 1.25× and reads at 0.10× — the
 same method `pricing.json:_verification` already used for Haiku 4.5 and Sonnet
 5. Worked example (session `0982af7b`): in 9, out 4,969, cache write 49,379,
 cache read 126,594 → $0.49618575 computed against $0.49618575 reported.
