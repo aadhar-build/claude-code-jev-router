@@ -83,20 +83,20 @@ so the shape is proven before any money or any live session is involved.
 
 ## JEV-04: Three real arms, interleaved
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** core
 **Blocked by:** JEV-02, JEV-03
 
 **What to build:** Replace the fake arm with the three real ones and make the
 comparison between them fair by construction.
 
-- [ ] `jev`, `opus5` and `haiku45` all implement `evaluate(state, questions, config) -> Run`
-- [ ] Arm order is randomised per decision point so no arm systematically pays time-of-day network drift
-- [ ] All three arms receive byte-identical state; `state_sha256` recorded per run
-- [ ] Timings decomposed into DNS, TCP, TLS and TTFB
-- [ ] Failures and timeouts are written as rows with `ok:false` and an `error_kind`, never dropped
-- [ ] Cost computed per exact model string with cache multipliers, from version-pinned rates
-- [ ] Demo: one captured command produces three rows and a latency-and-cost table
+- [x] `jev`, `opus5` and `haiku45` all implement `evaluate(state, questions, config) -> Run`
+- [x] Arm order is randomised per decision point so no arm systematically pays time-of-day network drift
+- [x] All three arms receive byte-identical state; `state_sha256` recorded per run
+- [x] Timings decomposed into DNS, TCP, TLS and TTFB
+- [x] Failures and timeouts are written as rows with `ok:false` and an `error_kind`, never dropped
+- [x] Cost computed per exact model string with cache multipliers, from version-pinned rates
+- [x] Demo: one captured command produces three rows and a latency-and-cost table
 
 ---
 
