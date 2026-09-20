@@ -211,8 +211,7 @@ class TestConfiguredQuestionSetVersion(unittest.TestCase):
         self._tmp.cleanup()
 
     def _clear_caches(self):
-        for name in self.CACHED:
-            getattr(cl, name).cache_clear()
+        cl.reset_caches()
 
     def _pin(self, surface, version):
         """Rewrite the temp config so `surface` is pinned to `version`."""
@@ -979,7 +978,10 @@ class TestConfigStaleness(ConfigFixture):
         cl.pricing()
         (self._config / "pricing.json").write_text(text)
         os.utime(self._config / "pricing.json", (0, 0))
-        self.assertEqual(cl.pricing()["version"], "pricing-2026-09-20")
+        # The value is whatever config/pricing.json says (JEV-49 bumped it to
+        # `-b` when the table gained a rate); what this test asserts is that a
+        # byte-identical rewrite does not CHANGE it.
+        self.assertEqual(cl.pricing()["version"], json.loads(text)["version"])
         self.assertEqual(cl.stale_config_files(), {})
 
     def test_stale_config_files_names_every_changed_file_at_once(self):
@@ -1017,7 +1019,8 @@ class TestConfigStaleness(ConfigFixture):
         trusting the hand-maintained `version` string. JEV-32 has to join rows
         to the config that produced them; `pricing_version` alone cannot."""
         first = cl.config_fingerprint()
-        self.assertEqual(first["pricing_version"], "pricing-2026-09-20")
+        self.assertEqual(first["pricing_version"],
+                         json.loads((self._config / "pricing.json").read_text())["version"])
         self._rewrite("pricing.json",
                       lambda b: b["models"]["claude-opus-5"].update({"input": 9e-06}))
         cl.reset_caches()
