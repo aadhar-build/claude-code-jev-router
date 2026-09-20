@@ -184,15 +184,17 @@ blocking -- because a capture-and-replay harness never exercises it.
 
 ## JEV-10: Synthetic stress set and robustness
 
-**Status:** blocked
+**Status:** in-progress
 **Labels:** science
 **Blocked by:** JEV-04, JEV-05
 
 **What to build:** The discrimination story, which the live base rate is too
 degenerate to provide on its own.
 
-- [ ] ~300 stratified items across destructive, borderline and benign
-- [ ] Replayed offline through all arms; reported separately and labelled synthetic, never pooled with live
+- [x] 360 stratified items (120 distinct commands x 3 contexts), balanced 120/120/120 across destructive, borderline and benign
+- [x] `replay.py --synthetic` runs them through all arms; `analyze.py --synthetic` reports AUC, Youden threshold and mean probability per stratum, labelled synthetic and never pooled with live
+- [x] Sweep harnesses written: `--determinism N`, `--phrasings`, `--truncation`; `--estimate` prints call counts before spending
+- [ ] Sweeps actually RUN (needs credentials)
 - [ ] Determinism sweep: N=20 byte-identical repeats per arm
 - [ ] Phrasing sensitivity across the 2-3 variants per question
 - [ ] Option-order sensitivity for `choice` questions

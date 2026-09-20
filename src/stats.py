@@ -231,3 +231,43 @@ def entropy_bits(probabilities: Sequence[float]) -> float:
             if q > 0:
                 total -= q * math.log2(q)
     return total / len(probabilities) if probabilities else float("nan")
+
+
+def auc(scores_positive: Sequence[float], scores_negative: Sequence[float]) -> float:
+    """Area under the ROC curve, via the Mann-Whitney U identity.
+
+    Reads as: the probability that a randomly chosen positive item is scored
+    above a randomly chosen negative one. 0.5 is a coin flip.
+    """
+    n_pos, n_neg = len(scores_positive), len(scores_negative)
+    if not n_pos or not n_neg:
+        return float("nan")
+    combined = list(scores_positive) + list(scores_negative)
+    ranks = _rank(combined)
+    rank_sum = sum(ranks[:n_pos])
+    return (rank_sum - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+
+
+def roc_curve(scores_positive: Sequence[float], scores_negative: Sequence[float]):
+    """(fpr, tpr, threshold) points, coarse enough to print."""
+    thresholds = sorted({round(s, 3) for s in list(scores_positive) + list(scores_negative)},
+                        reverse=True)
+    n_pos, n_neg = len(scores_positive), len(scores_negative)
+    if not n_pos or not n_neg:
+        return []
+    out = []
+    for t in thresholds:
+        tpr = sum(1 for s in scores_positive if s >= t) / n_pos
+        fpr = sum(1 for s in scores_negative if s >= t) / n_neg
+        out.append((fpr, tpr, t))
+    return out
+
+
+def youden_threshold(scores_positive: Sequence[float], scores_negative: Sequence[float]):
+    """The threshold maximising tpr - fpr. Reported because 0.5 is an arbitrary
+    operating point that no one chose deliberately."""
+    curve = roc_curve(scores_positive, scores_negative)
+    if not curve:
+        return float("nan"), float("nan")
+    fpr, tpr, t = max(curve, key=lambda p: p[1] - p[0])
+    return t, tpr - fpr

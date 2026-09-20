@@ -465,6 +465,73 @@ class TestStatistics(unittest.TestCase):
         self.assertEqual((first.lo, first.hi), (second.lo, second.hi))
 
 
+class TestDiscrimination(unittest.TestCase):
+    def test_auc_is_one_when_perfectly_separable(self):
+        self.assertEqual(stats.auc([0.9, 0.8, 0.7], [0.3, 0.2, 0.1]), 1.0)
+
+    def test_auc_is_zero_when_perfectly_inverted(self):
+        self.assertEqual(stats.auc([0.1, 0.2], [0.8, 0.9]), 0.0)
+
+    def test_auc_is_a_half_for_a_coin_flip(self):
+        """Identical distributions must read 0.5, not something flattering."""
+        self.assertAlmostEqual(stats.auc([0.5] * 50, [0.5] * 50), 0.5)
+
+    def test_auc_handles_ties_via_mid_ranks(self):
+        """pos={0.6,0.5}, neg={0.5,0.4}: of the four pairs, three are wins and
+        one is a tie, so 3.5/4 = 0.875. A tie must count half, not zero."""
+        self.assertAlmostEqual(stats.auc([0.6, 0.5], [0.5, 0.4]), 0.875)
+
+    def test_auc_is_nan_without_both_classes(self):
+        self.assertTrue(math.isnan(stats.auc([0.9, 0.8], [])))
+
+    def test_youden_finds_the_separating_threshold(self):
+        tau, j = stats.youden_threshold([0.9, 0.85, 0.8], [0.2, 0.15, 0.1])
+        self.assertAlmostEqual(j, 1.0)
+        self.assertGreater(tau, 0.2)
+        self.assertLessEqual(tau, 0.8)
+
+    def test_roc_curve_is_monotone_in_threshold(self):
+        curve = stats.roc_curve([0.9, 0.7, 0.5], [0.4, 0.2, 0.1])
+        tprs = [tpr for _, tpr, _ in curve]
+        self.assertEqual(tprs, sorted(tprs))
+
+
+class TestSyntheticSet(unittest.TestCase):
+    def test_strata_are_balanced_and_populated(self):
+        path = paths.DATA / "synthetic" / "pre_bash-v1.jsonl"
+        if not path.exists():
+            self.skipTest("synthetic set not built")
+        items = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+        counts = {}
+        for item in items:
+            counts[item["stratum"]] = counts.get(item["stratum"], 0) + 1
+        self.assertEqual(set(counts), {"destructive", "borderline", "benign"})
+        self.assertGreaterEqual(min(counts.values()), 100,
+                                "minority class too small for a tight interval")
+
+    def test_labeller_notes_never_reach_an_arm(self):
+        """The note is for a human in Phase 2. Leaking it into state would
+        hand every arm the answer."""
+        path = paths.DATA / "synthetic" / "pre_bash-v1.jsonl"
+        if not path.exists():
+            self.skipTest("synthetic set not built")
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            state = sb.build("pre_bash", item["payload"])
+            self.assertNotIn(item["labeller_note"], state)
+            self.assertNotIn(item["stratum"], state)
+
+    def test_every_item_builds_a_state(self):
+        path = paths.DATA / "synthetic" / "pre_bash-v1.jsonl"
+        if not path.exists():
+            self.skipTest("synthetic set not built")
+        for line in path.read_text().splitlines():
+            if line.strip():
+                self.assertTrue(sb.build("pre_bash", json.loads(line)["payload"]))
+
+
 class TestReport(TempStorage):
     def populate(self, n=12):
         for i in range(n):
