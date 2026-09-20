@@ -1091,7 +1091,7 @@ board — counts, not a second list:
 |---|---|
 | done | JEV-01…08, 11, 13 *(superseded)*, 14, 21, 26 |
 | in-progress | JEV-09, 10 |
-| **ready now** (no unmet blockers) | **JEV-15, 16, 22, 24a, 27, 28, 29, 30, 31, 31b, 32, 33, 34, 37** |
+| **ready now** (no unmet blockers) | **JEV-15, 16, 22, 24a, 27, 28, 29, 30, 31, 31b, 32, 33, 34, 37, 38, 39** |
 | blocked | JEV-12, 17, 18, 19, 20, 23, 24b, 25, 35, 36 |
 
 **The routing work is three tickets, not one.** JEV-34 builds `agent_route` in
@@ -1111,6 +1111,13 @@ Two of the four ready tickets gate almost everything else:
   measures something that ceases to exist the moment the delegation rule or the
   A/B starts. It was previously a checkbox inside JEV-24, which was blocked by
   JEV-23 — an ordering inversion that would have destroyed the measurement.
+- **JEV-38 is the most time-sensitive thing on the board.** The "before"
+  baseline was recorded as done and does not exist — `session_metrics.py` prints
+  on demand and accumulates nothing. Worse, its source transcripts live in
+  `~/.claude/projects/`, outside this folder, under a retention policy we do not
+  control and have never written down. Every other artifact here is
+  self-contained; the one number the entire before-versus-after comparison rests
+  on is the exception. If those rotate, it cannot be reconstructed at any price.
 - **Four tickets describe losses invisible to the count built to catch them** —
   JEV-31 (claimed spool files are never reaped), JEV-32 (analysis reads current
   config against older rows), JEV-33 (backpressure drops captures silently) and

@@ -139,6 +139,7 @@ ever be differenced against, so it starts collecting on day 0.
 - [x] Runs against a real completed transcript read in place; only DERIVED numbers are frozen into `data/fixtures/` — no third-party transcript content is copied into this folder
 - [x] Subagent transcripts under `<session>/subagents/` are included (found via the reconciliation check; worth 4.4 points of delta)
 - [x] Findings written up in `FINDINGS.md` Appendix B
+- [ ] **NOT DONE, and the ticket said it was.** "It starts collecting on day 0" never happened. `session_metrics.py` is a *viewer*: it reads a transcript on demand and prints. Nothing accumulates. There is no `data/baseline/`, and `--freeze` writes to `data/fixtures/` as a **test regression fixture**, not as a growing record. Split out as **JEV-38**, which is urgent for a reason this ticket did not state: the source transcripts live in `~/.claude/projects/`, outside this folder, under retention we do not control
 
 ---
 
@@ -946,6 +947,68 @@ wrapper, no instruction and no record of whether it ran exists.
 - [ ] Record each sweep's date so a **missed day is visible**. A gap in the canary record is itself drift evidence lost, and it must not be silently smoothed over
 - [ ] Report the sweep calendar in the writeup: how many days of the window were actually covered, out of how many
 - [ ] Decide and document what a missed day means for the drift claim — the honest answer is probably that drift can only be bounded over the days actually sampled
+
+---
+
+## JEV-38: Persist the "before" baseline — the source is outside the folder and not ours
+
+**Status:** ready-for-agent
+**Labels:** metrics, blocking, science
+**Blocked by:** None — and it is the most time-sensitive ticket on the board
+
+**What to build:** An accumulating, append-only, **in-repo** record of
+per-session metrics for every session in this repository, snapshotted from the
+transcripts before they can go away.
+
+**Why this is urgent rather than tidy.** JEV-06 claimed the "before" baseline
+"starts collecting on day 0". It does not exist. `session_metrics.py` reads a
+transcript on demand and prints; nothing accumulates anywhere. And the
+transcripts it reads are in **`~/.claude/projects/` — outside this folder, under
+a retention policy we neither control nor have written down.** Every other
+artifact in this study is self-contained by design; the one number the entire
+enforce-vs-shadow and before-vs-after comparison rests on is the exception, and
+it is held somewhere we do not own.
+
+**If those transcripts rotate, the "before" is gone and cannot be reconstructed
+at any price.** JEV-24a's pre-rule delegation baseline has exactly the same
+dependency and the same exposure.
+
+- [ ] Append-only `data/baseline/sessions.jsonl`: one row per session, keyed by `session_id`, idempotent so re-running never double-counts
+- [ ] Derived numbers only — **no third-party transcript content copied into the folder**, the rule that already governs `data/fixtures/`
+- [ ] Snapshot every session in this repo **that still exists**, now, before anything else is scheduled
+- [ ] Record, for each session, the transcript's mtime and size, so a later re-read can prove it is the same file
+- [ ] Record the count of sessions that were **already unrecoverable** at first snapshot. An unknown gap reported as zero is worse than a gap reported honestly
+- [ ] Establish what Claude Code's transcript retention actually is, and write it down — the study currently depends on an unstated assumption about someone else's storage
+- [ ] Commit the baseline to git. `data/` is gitignored for state blobs; this is aggregate and is the one thing that must survive losing the folder
+
+---
+
+## JEV-39: Stats exist only as raw rows and ad-hoc reports
+
+**Status:** ready-for-agent
+**Labels:** analysis, ops
+
+**Blocked by:** None
+
+**What to build:** A dated, committed snapshot of the collection's statistics,
+produced on a schedule rather than when someone happens to run `analyze.py`.
+
+**What persists today, precisely.** Raw rows survive in `data/runs/*.jsonl` and
+friends — they are on disk across sessions, but `data/` is **gitignored**, so
+nothing statistical is in version control. `reports/` *is* tracked, deliberately,
+and contains seven files that are whatever someone ran by hand, with
+inconsistent naming: some dated (`determinism-2026-09-20.txt`), some not
+(`canary.txt`, which **overwrites itself** on every sweep and has already lost
+its own history).
+
+So the answer to "does it persist beyond sessions" is: the raw data does, on
+this disk only; the *statistics* mostly do not.
+
+- [ ] A dated snapshot — `reports/window/YYYY-MM-DD-analyze.txt` — produced on a cadence, covering the primary metric, cluster count, base rate, attrition and spool high-water mark
+- [ ] Every generated report carries a **date and the git hash of the code that produced it**. A report that cannot say which code made it cannot be reproduced
+- [ ] Fix the overwriting ones: `canary.txt` should be dated like the others
+- [ ] Decide the cadence and write it into the pre-registration, so the snapshot series is not itself a post-hoc choice
+- [ ] The snapshot must print `INCONCLUSIVE BY RULE` where the A1.1 guard applies, rather than a bare interval — an interim number read without its guard is exactly what the guard exists to prevent
 
 ---
 
