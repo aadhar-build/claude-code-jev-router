@@ -260,6 +260,12 @@ def run_sweep(fixture: dict[str, Any], arms: list[ArmConfig],
         )
 
     known = {c.get("decision_id") for c in store.captures()}
+    # JEV-16, the one authorised line here: the capture rows this writes must
+    # carry the same join key `worker.py` stamps, or canary captures cannot be
+    # joined to a config. Resolved ONCE before the loop, not per row --
+    # `config_fingerprint()` calls `assert_config_fresh()` and raises, and a
+    # raise inside the loop would land after arm calls had been paid for.
+    config_fp = cl.config_fingerprint()["config_sha256"]
     for entry in fixture["states"]:
         state = entry["state"]
         if sb.sha256(state) != entry["state_sha256"]:
@@ -291,6 +297,7 @@ def run_sweep(fixture: dict[str, Any], arms: list[ArmConfig],
                 "stratum": entry["stratum"],
                 "canary_set_id": fixture["canary_set_id"],
                 "is_sidechain": False,
+                "config_fingerprint": config_fp,
             })
             known.add(decision_id)
 

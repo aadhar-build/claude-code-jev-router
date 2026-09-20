@@ -81,12 +81,31 @@ FAR = 0.10             # |p - tau| beyond which a flip is no longer a boundary e
 
 @dataclass
 class Group:
-    """One (decision, arm, question) evaluated repeatedly on identical bytes."""
+    """One (decision, arm, arm_config_id, question) repeated on identical bytes.
+
+    `arm_config_id` and `origin_context` are part of the identity, not
+    decoration. Without the first, a re-run under a changed configuration is
+    reported as non-determinism -- which is precisely the conflation
+    PREREGISTRATION A7.5 is stuck in ("the configuration changed the answer"
+    and "the model is non-deterministic" are the same number), reproduced
+    inside the instrument built to resolve it. Without the second, live and
+    synthetic repeats pool, while the occupancy half of this same report is
+    carefully keyed on run_context because section 4 forbids exactly that.
+
+    `origin_context` is the CAPTURE's run_context -- where the decision point
+    came from -- not the run row's. Every designed-sweep row has
+    run_context == "replay", so keying on the row's own value separates
+    nothing at all.
+    """
     decision_id: str
     arm: str
     question: str
     stratum: str | None
+    # `probabilities` keeps its position: it was the fifth positional field
+    # before JEV-16 and existing callers construct Groups positionally.
     probabilities: list[float] = field(default_factory=list)
+    arm_config_id: str | None = None
+    origin_context: str | None = None
 
     @property
     def n(self) -> int:
@@ -126,8 +145,12 @@ def collect(surface: str, *, min_repeats: int = MIN_REPEATS
             ) -> tuple[list[Group], dict[str, dict[str, dict[str, list[float]]]], dict[str, Any]]:
     """Return (repeat groups, single-shot score distribution, diagnostics).
 
-    A repeat group is keyed on (decision_id, arm, question_set_id,
-    state_sha256): identical bytes, identical question, same arm. Rows written
+    A repeat group is keyed on (decision_id, arm, arm_config_id,
+    origin_context, question_set_id, state_sha256, question): identical bytes,
+    identical question, same arm IN THE SAME CONFIGURATION, from the same kind
+    of capture. Dropping either of the middle two -- as this did until JEV-16 --
+    reports a config change, or the difference between the balanced synthetic
+    set and live traffic, as non-determinism. Rows written
     by `replay.py --determinism` are preferred, because those were produced on
     purpose; if none exist, any group of >=2 rows on identical state is used
     instead and the report says loudly that it is not a designed sweep.
@@ -162,16 +185,20 @@ def collect(surface: str, *, min_repeats: int = MIN_REPEATS
             continue                       # phrasing / truncation change the input
         diagnostics["contexts"].add(r.get("run_context"))
         stratum = captures[did].get("stratum")
+        origin = captures[did].get("run_context") or "unknown"
 
         for q, a in (r.get("answers") or {}).items():
             if a.get("type") != "boolean":
                 continue
             p = a["probability"]
-            key = (did, r["arm"], r.get("question_set_id"), r.get("state_sha256"), q)
+            key = (did, r["arm"], r.get("arm_config_id"), origin,
+                   r.get("question_set_id"), r.get("state_sha256"), q)
             target = designed if sweep == "determinism" else incidental
             g = target.get(key)
             if g is None:
-                g = target[key] = Group(did, r["arm"], q, stratum)
+                g = target[key] = Group(did, r["arm"], q, stratum,
+                                        arm_config_id=r.get("arm_config_id"),
+                                        origin_context=origin)
             g.probabilities.append(p)
 
             if sweep is None and r.get("question_set_id") == primary_qsid:
@@ -222,6 +249,8 @@ class ArmQuestion:
     tau: float
     groups: list[Group]
     bands: list[BandRow]
+    arm_config_id: str | None = None
+    origin_context: str | None = None
 
     @property
     def n_groups(self) -> int:
@@ -262,9 +291,22 @@ def bucket(groups: Sequence[Group], tau: float) -> list[BandRow]:
     return rows
 
 
-def analyse(groups: Sequence[Group], arm: str, question: str, tau: float) -> ArmQuestion:
-    subset = [g for g in groups if g.arm == arm and g.question == question]
-    return ArmQuestion(arm, question, tau, list(subset), bucket(subset, tau))
+def analyse(groups: Sequence[Group], arm: str, question: str, tau: float, *,
+            arm_config_id: str | None, origin: str | None) -> ArmQuestion:
+    """One arm, one configuration, one origin, one question, one tau.
+
+    `arm_config_id` and `origin` are REQUIRED keyword arguments and there is no
+    "all" value, deliberately. This function used to filter on (arm, question)
+    alone, which silently pooled two configurations of one arm and pooled live
+    with synthetic; a default that restored either would restore the defect for
+    every caller that forgot to pass it.
+    """
+    subset = [g for g in groups
+              if g.arm == arm and g.question == question
+              and g.arm_config_id == arm_config_id
+              and g.origin_context == origin]
+    return ArmQuestion(arm, question, tau, list(subset), bucket(subset, tau),
+                       arm_config_id=arm_config_id, origin_context=origin)
 
 
 def occupancy(scores: Sequence[float], tau: float) -> list[BandRow]:
@@ -340,9 +382,11 @@ def render(results: list[ArmQuestion],
         L.append("   every rate below as indicative only.")
         L.append("")
 
-    for r in sorted(results, key=lambda x: (x.question, x.arm, x.tau)):
+    for r in sorted(results, key=lambda x: (x.question, x.arm,
+                                           x.arm_config_id or "", x.origin_context or "", x.tau)):
         L.append("-" * 78)
-        L.append(f"ARM {r.arm}   QUESTION {r.question}   tau={r.tau:.2f}")
+        L.append(f"ARM {r.arm} [{r.arm_config_id}]   from {r.origin_context} captures")
+        L.append(f"QUESTION {r.question}   tau={r.tau:.2f}")
         L.append("-" * 78)
         if r.n_groups < MIN_GROUPS:
             L.append(f"  only {r.n_groups} repeated item(s) -- below the {MIN_GROUPS} "
@@ -446,7 +490,8 @@ def _render_no_repeats(L: list[str],
     L.append("")
     L.append("  To collect it (this spends real money on the cc_* arms -- estimate first):")
     L.append("      uv run src/replay.py --estimate")
-    L.append("      uv run src/replay.py --determinism 20 --limit 10 --arms jev")
+    L.append("      uv run src/replay.py --determinism 20 --arms jev \\")
+    L.append("          --context synthetic --ids syn-syn-0121,syn-syn-0242")
     L.append("")
     L.append("  20 repeats resolves a flip rate to 5 percentage points, which is enough")
     L.append("  to separate 'never' from 'sometimes' and not enough to put a decimal on")
@@ -550,14 +595,22 @@ def main() -> int:
     if args.question:
         questions = [q for q in questions if q == args.question]
 
+    # The cells are (arm, arm_config_id, origin) triples, never (arm) alone.
+    cells = sorted({(g.arm, g.arm_config_id, g.origin_context) for g in groups})
+    if args.arm:
+        cells = [c for c in cells if c[0] == args.arm]
+
     tau_map: dict[tuple[str, str], list[float]] = {}
     results: list[ArmQuestion] = []
     for arm in arms:
         for question in questions:
             taus = _taus(question, per_question, flat)
             tau_map[(arm, question)] = taus
-            for tau in taus:
-                r = analyse(groups, arm, question, tau)
+    for arm, acid, origin in cells:
+        for question in questions:
+            for tau in tau_map.get((arm, question)) or _taus(question, per_question, flat):
+                r = analyse(groups, arm, question, tau,
+                            arm_config_id=acid, origin=origin)
                 if r.n_groups:
                     results.append(r)
 

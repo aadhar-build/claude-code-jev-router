@@ -341,7 +341,7 @@ class Bucketing(unittest.TestCase):
 
     def test_arm_question_rollup(self):
         groups = self.build(10, 10, flips_near=4, flips_far=0)
-        r = det.analyse(groups, "jev", "q", 0.5)
+        r = det.analyse(groups, "jev", "q", 0.5, arm_config_id=None, origin=None)
         self.assertEqual(r.n_groups, 20)
         self.assertEqual(r.n_calls, 200)
         self.assertAlmostEqual(r.flip_rate, 0.2)
@@ -354,7 +354,7 @@ class Bucketing(unittest.TestCase):
         which every flip had happened, because all of them were in a bucket of
         four. Suppressing a RATE must never suppress the FACT."""
         groups = self.build(4, 30, flips_near=4, flips_far=0)
-        r = det.analyse(groups, "jev", "q", 0.5)
+        r = det.analyse(groups, "jev", "q", 0.5, arm_config_id=None, origin=None)
         summary = det._interpret_bands(r)
         self.assertNotIn("no flips", summary)
         self.assertIn("CONFINED", summary)
@@ -362,7 +362,7 @@ class Bucketing(unittest.TestCase):
 
     def test_flips_everywhere_is_reported_as_the_bad_case(self):
         groups = self.build(10, 10, flips_near=4, flips_far=6)
-        r = det.analyse(groups, "jev", "q", 0.5)
+        r = det.analyse(groups, "jev", "q", 0.5, arm_config_id=None, origin=None)
         self.assertIn("bad case", det._interpret_bands(r))
 
 
@@ -395,13 +395,13 @@ class DeterminismDegradation(TempStorage):
         groups, single, diag = det.collect("pre_bash")
         self.assertEqual(len(groups), 1)
         self.assertIn("NOT a designed sweep", diag["source"])
-        r = det.analyse(groups, "jev", "destructive", 0.5)
+        r = det.analyse(groups, "jev", "destructive", 0.5, arm_config_id=None, origin=None)
         text = det.render([r], single, diag, surface="pre_bash", tau_map={})
         self.assertIn("NOT produced by a determinism sweep", text)
 
     def test_too_few_groups_is_withheld_rather_than_estimated(self):
         groups = [det.Group("d1", "jev", "q", None, [0.4] * 5 + [0.6] * 5)]
-        r = det.analyse(groups, "jev", "q", 0.5)
+        r = det.analyse(groups, "jev", "q", 0.5, arm_config_id=None, origin=None)
         text = det.render([r], {}, {"source": "designed determinism sweep"},
                           surface="pre_bash", tau_map={})
         self.assertIn("Withheld", text)

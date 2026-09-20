@@ -23,6 +23,11 @@ Modes:
   --synthetic          run the stress set
   --decisions          re-run stored captures
   --determinism N      the same call N times, to see which arms are stable
+  --seed-synthetic     store captures for named synthetic items; spends nothing
+
+Item selection (JEV-16): --ids and --context. A sweep without either slices
+`store.captures()` in append order with every run context pooled, which is an
+accident of write order rather than a sample.
   --phrasings          every phrasing variant of each question
   --truncation         states cut to 50% and 75%
 
@@ -68,6 +73,14 @@ def _emit(
     state_sha = sb.sha256(state)
     store.write_state(state, state_sha)
 
+    # JEV-16, following worker.py's pattern (see the comment at worker.py:438).
+    # Resolved ONCE, here, BEFORE any arm is called. `config_fingerprint()`
+    # calls `assert_config_fresh()`, which raises; reading it inside the arm
+    # loop would let a config edit landing mid-sweep raise after the calls had
+    # already been paid for, and would let two rows from one _emit disagree
+    # about the config they ran under. Raising here costs nothing.
+    config_fp = cl.config_fingerprint()["config_sha256"]
+
     order = list(arms)
     rng.shuffle(order)
     written = 0
@@ -85,6 +98,7 @@ def _emit(
             "arm_order": [c.name for c in order],
             "evaluated_at": store.utcnow(),
             "pricing_version": cl.pricing()["version"],
+            "config_fingerprint": config_fp,
             "cost_usd": cl.cost_usd(run.response_model or "", row["usage"]) if run.ok else None,
         })
         if extra:
@@ -92,6 +106,103 @@ def _emit(
         store.append_run(row)
         written += 1
     return written
+
+
+def _synthetic_items(surface: str) -> dict[str, dict[str, Any]]:
+    path = paths.DATA / "synthetic" / f"{surface}-v1.jsonl"
+    if not path.exists():
+        return {}
+    return {i["synthetic_id"]: i
+            for i in (json.loads(line) for line in path.read_text().splitlines() if line.strip())}
+
+
+def _write_synthetic_capture(surface: str, item: dict[str, Any], *,
+                             config_fp: str, known: set[str]) -> tuple[str, str, str]:
+    """Record that a synthetic decision point exists. Zero API calls.
+
+    Returns `(decision_id, state, state_sha256)`. Idempotent against `known`,
+    which the caller seeds from `store.captures()`: a capture is an immutable
+    decision point, and a second sweep over the same item re-evaluates it
+    rather than observing a new one.
+
+    The `syn-` prefix is applied to a `synthetic_id` that already begins
+    `syn-`, so ids on disk read `syn-syn-0121`. That is a defect and it is NOT
+    fixed here: the 60 existing synthetic captures and their 180 run rows all
+    carry the doubled form, and renaming would orphan every one of them from
+    its rows. Reported, not repaired.
+    """
+    state = sb.build(surface, item["payload"])
+    state_sha = sb.sha256(state)
+    decision_id = f"syn-{item['synthetic_id']}"
+    if decision_id not in known:
+        store.write_state(state, state_sha)
+        store.append_capture({
+            "decision_id": decision_id,
+            "picked_at": store.utcnow(),
+            "surface": surface,
+            "session_id": item["payload"]["session_id"],
+            "state_sha256": state_sha,
+            "state_chars": len(state),
+            "state_builder_version": sb.STATE_BUILDER_VERSION,
+            "state_source": sb.STATE_SOURCE[surface],
+            "run_context": "synthetic",
+            "stratum": item["stratum"],
+            "is_sidechain": False,
+            "config_fingerprint": config_fp,
+        })
+        known.add(decision_id)
+    return decision_id, state, state_sha
+
+
+def seed_synthetic(surface: str, synthetic_ids: list[str]) -> list[str]:
+    """Materialise stored captures and states for named synthetic items.
+
+    Needed because `--determinism` replays STORED captures, and only the 60
+    items of the original stratified sample were ever stored. The nine states
+    the Amendment 7 thinking-token probe used are in the synthetic file and
+    seven of them are not in the store, so without this the sweep cannot be
+    pointed at the exact states whose cross-config delta it is meant to
+    explain. Writes capture rows only; spends nothing.
+    """
+    items = _synthetic_items(surface)
+    missing = [s for s in synthetic_ids if s not in items]
+    if missing:
+        raise KeyError(f"not in the {surface} synthetic set: {missing}")
+    config_fp = cl.config_fingerprint()["config_sha256"]
+    known = {c.get("decision_id") for c in store.captures()}
+    out = []
+    for sid in synthetic_ids:
+        decision_id, _, _ = _write_synthetic_capture(
+            surface, items[sid], config_fp=config_fp, known=known)
+        out.append(decision_id)
+    return out
+
+
+def _select(surface: str, *, limit: int, ids: list[str] | None = None,
+            context: str | None = None) -> list[dict[str, Any]]:
+    """Which stored captures a sweep runs over.
+
+    Before JEV-16 every sweep did `store.captures()[:limit]` in FILE ORDER with
+    every run context pooled, which is not a sample of anything: the first 50
+    happened to be 48 synthetic and 2 live, an accident of the order rows were
+    appended in. `--ids` names the items; `--context` restricts to one origin,
+    because `PREREGISTRATION.md` section 4 forbids pooling live with synthetic
+    and a sweep that silently mixes them produces a flip rate belonging to
+    neither.
+    """
+    captures = [c for c in store.captures() if c["surface"] == surface]
+    if context:
+        captures = [c for c in captures if (c.get("run_context") or "live") == context]
+    if ids:
+        by_id = {c["decision_id"]: c for c in captures}
+        unknown = [i for i in ids if i not in by_id]
+        if unknown:
+            raise KeyError(
+                f"no stored capture for {unknown} on surface {surface}"
+                + (f" with run_context={context}" if context else "")
+                + ". For synthetic items use --seed-synthetic first.")
+        return [by_id[i] for i in ids]
+    return captures[:limit]
 
 
 def stratified_sample(items: list[dict], n: int, rng: random.Random) -> list[dict]:
@@ -160,22 +271,11 @@ def run_synthetic(arms: list[ArmConfig], surface: str, limit: int | None,
     questions = cl.questions_for(surface, version=version)
     qsid = cl.question_set_id(surface, version=version)
     written = 0
+    config_fp = cl.config_fingerprint()["config_sha256"]
+    known = {c.get("decision_id") for c in store.captures()}
     for i, item in enumerate(items, 1):
-        state = sb.build(surface, item["payload"])
-        decision_id = f"syn-{item['synthetic_id']}"
-        store.append_capture({
-            "decision_id": decision_id,
-            "picked_at": store.utcnow(),
-            "surface": surface,
-            "session_id": item["payload"]["session_id"],
-            "state_sha256": sb.sha256(state),
-            "state_chars": len(state),
-            "state_builder_version": sb.STATE_BUILDER_VERSION,
-            "state_source": sb.STATE_SOURCE[surface],
-            "run_context": "synthetic",
-            "stratum": item["stratum"],
-            "is_sidechain": False,
-        })
+        decision_id, state, _ = _write_synthetic_capture(
+            surface, item, config_fp=config_fp, known=known)
         written += _emit(
             decision_id=decision_id, surface=surface,
             session_id=item["payload"]["session_id"], state=state,
@@ -189,10 +289,15 @@ def run_synthetic(arms: list[ArmConfig], surface: str, limit: int | None,
 
 
 def run_determinism(arms: list[ArmConfig], surface: str, repeats: int, limit: int,
-                    rng: random.Random, version: str | None = None) -> int:
+                    rng: random.Random, version: str | None = None,
+                    ids: list[str] | None = None, context: str | None = None) -> int:
     """The same bytes, N times. If Jev is deterministic and temperature-zero
-    LLMs are not, that deserves its own section in the writeup."""
-    captures = [c for c in store.captures() if c["surface"] == surface][:limit]
+    LLMs are not, that deserves its own section in the writeup.
+
+    `ids` and `context` select the items; see `_select`. Without them this
+    slices the capture file in append order, which is not a sample.
+    """
+    captures = _select(surface, limit=limit, ids=ids, context=context)
     version = version or cl.surface_question_version(surface)
     questions = cl.questions_for(surface, version=version)
     qsid = cl.question_set_id(surface, version=version)
@@ -211,14 +316,15 @@ def run_determinism(arms: list[ArmConfig], surface: str, repeats: int, limit: in
 
 
 def run_phrasings(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random,
-                  version: str | None = None) -> int:
+                  version: str | None = None, ids: list[str] | None = None,
+                  context: str | None = None) -> int:
     """Every phrasing variant. If an arm is phrasing-insensitive while another
     is not, that is itself a result -- and it is why the baseline prompts are
     pre-registered."""
     version = version or cl.surface_question_version(surface)
     spec = cl.question_set(surface, version)
     phrasings = sorted({p for q in spec["questions"].values() for p in q["phrasings"]})
-    captures = [c for c in store.captures() if c["surface"] == surface][:limit]
+    captures = _select(surface, limit=limit, ids=ids, context=context)
     written = 0
     for capture in captures:
         state = store.read_state(capture["state_sha256"])
@@ -235,9 +341,10 @@ def run_phrasings(arms: list[ArmConfig], surface: str, limit: int, rng: random.R
 
 
 def run_truncation(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random,
-                   version: str | None = None) -> int:
+                   version: str | None = None, ids: list[str] | None = None,
+                   context: str | None = None) -> int:
     """How much of the state does each arm actually need?"""
-    captures = [c for c in store.captures() if c["surface"] == surface][:limit]
+    captures = _select(surface, limit=limit, ids=ids, context=context)
     version = version or cl.surface_question_version(surface)
     questions = cl.questions_for(surface, version=version)
     qsid = cl.question_set_id(surface, version=version)
@@ -257,8 +364,9 @@ def run_truncation(arms: list[ArmConfig], surface: str, limit: int, rng: random.
 
 
 def run_decisions(arms: list[ArmConfig], surface: str, limit: int, rng: random.Random,
-                  version: str | None = None) -> int:
-    captures = [c for c in store.captures() if c["surface"] == surface][:limit]
+                  version: str | None = None, ids: list[str] | None = None,
+                  context: str | None = None) -> int:
+    captures = _select(surface, limit=limit, ids=ids, context=context)
     version = version or cl.surface_question_version(surface)
     questions = cl.questions_for(surface, version=version)
     qsid = cl.question_set_id(surface, version=version)
@@ -292,6 +400,21 @@ def main() -> int:
     parser.add_argument("--determinism", type=int, metavar="N")
     parser.add_argument("--phrasings", action="store_true")
     parser.add_argument("--truncation", action="store_true")
+    parser.add_argument("--ids", metavar="ID[,ID...]",
+                        help="run over exactly these decision_ids, in this order. Without it a "
+                             "sweep slices the capture file in APPEND ORDER, which is not a "
+                             "sample: the first 50 today are 48 synthetic and 2 live by accident "
+                             "of when rows were written.")
+    parser.add_argument("--context", choices=("live", "synthetic", "canary", "replay"),
+                        metavar="{live,synthetic,canary}",
+                        help="restrict to captures with this run_context. PREREGISTRATION section "
+                             "4 forbids pooling live with synthetic; a sweep that mixes them "
+                             "yields a rate belonging to neither.")
+    parser.add_argument("--seed-synthetic", metavar="SID[,SID...]",
+                        help="write capture rows and states for these synthetic_ids (e.g. "
+                             "syn-0000) and exit. ZERO API calls. Needed because --determinism "
+                             "replays STORED captures and only the original stratified sample "
+                             "was ever stored.")
     parser.add_argument("--estimate", action="store_true",
                         help="print the call count and projected cost, then exit")
     args = parser.parse_args()
@@ -300,19 +423,35 @@ def main() -> int:
     names = args.arms.split(",") if args.arms else cl.arms_config()["enabled"]
     arms = [cl.arm(n.strip()) for n in names]
     rng = random.Random(args.seed)
+    ids = [i.strip() for i in args.ids.split(",") if i.strip()] if args.ids else None
+
+    if args.seed_synthetic:
+        sids = [i.strip() for i in args.seed_synthetic.split(",") if i.strip()]
+        written = seed_synthetic(args.surface, sids)
+        print(f"captures available for {len(written)} synthetic item(s), 0 API calls:")
+        for did in written:
+            print(f"    {did}")
+        return 0
 
     if args.estimate:
         synthetic_path = paths.DATA / "synthetic" / f"{args.surface}-v1.jsonl"
         n_syn = len(synthetic_path.read_text().splitlines()) if synthetic_path.exists() else 0
-        n_cap = len([c for c in store.captures() if c["surface"] == args.surface])
+        # Honour the selection, or the estimate describes a different run than
+        # the one about to be made -- which is how a 90-call budget becomes 360.
+        n_cap = len(_select(args.surface, limit=args.limit, ids=ids, context=args.context))
+        n_all = len([c for c in store.captures() if c["surface"] == args.surface])
         print(f"synthetic items : {n_syn}")
-        print(f"stored captures : {n_cap}")
+        print(f"stored captures : {n_all} ({n_cap} selected"
+              + (f", --ids {len(ids)}" if ids else "")
+              + (f", --context {args.context}" if args.context else "")
+              + ")")
         print(f"arms            : {[a.name for a in arms]}")
+        reps = args.determinism or 20
         print(f"\n--synthetic      -> {n_syn * len(arms):>6} calls")
-        print(f"--decisions      -> {min(n_cap, args.limit) * len(arms):>6} calls")
-        print(f"--determinism 20 -> {min(n_cap, args.limit) * len(arms) * 20:>6} calls")
-        print(f"--phrasings      -> {min(n_cap, args.limit) * len(arms) * 3:>6} calls")
-        print(f"--truncation     -> {min(n_cap, args.limit) * len(arms) * 3:>6} calls")
+        print(f"--decisions      -> {n_cap * len(arms):>6} calls")
+        print(f"--determinism {reps:<2} -> {n_cap * len(arms) * reps:>6} calls")
+        print(f"--phrasings      -> {n_cap * len(arms) * 3:>6} calls")
+        print(f"--truncation     -> {n_cap * len(arms) * 3:>6} calls")
         print("\nEvery call spends real money on the Claude arms. Estimate before running.")
         return 0
 
@@ -324,16 +463,16 @@ def main() -> int:
                                version=args.question_version)
     if args.decisions:
         total += run_decisions(arms, args.surface, args.limit, rng,
-                               version=args.question_version)
+                               version=args.question_version, ids=ids, context=args.context)
     if args.determinism:
         total += run_determinism(arms, args.surface, args.determinism, args.limit, rng,
-                                 version=args.question_version)
+                                 version=args.question_version, ids=ids, context=args.context)
     if args.phrasings:
         total += run_phrasings(arms, args.surface, args.limit, rng,
-                               version=args.question_version)
+                               version=args.question_version, ids=ids, context=args.context)
     if args.truncation:
         total += run_truncation(arms, args.surface, args.limit, rng,
-                                version=args.question_version)
+                                version=args.question_version, ids=ids, context=args.context)
 
     if total == 0:
         parser.print_help()
