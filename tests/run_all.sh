@@ -20,5 +20,8 @@ python3 "$ROOT/tests/test_baseline.py" 2>&1 | tail -4 || exit 1
 
 echo "--- canary: frozen set stability, drift flags, row-schema identity ---"
 python3 "$ROOT/tests/test_canary.py" 2>&1 | tail -4 || exit 1
+echo
+echo "=== JEV-40: reversibility -- one switch, and OFF proven equal to vanilla ==="
+"$ROOT/tests/reversibility.sh" | tail -4 || exit 1
 echo "=== doctor ==="
 python3 "$ROOT/src/doctor.py" | tail -3

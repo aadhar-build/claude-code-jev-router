@@ -930,7 +930,14 @@ first task runs.
 3. As a researcher, I want the hook to fail open on every error path, so that a bad API key or a
    full disk can never wedge my editor.
 4. As a researcher, I want a single-file kill switch, so that I can stop the experiment instantly
-   without editing config or restarting a session.
+   without editing config or restarting a session. **Verified live 2026-09-20** (JEV-40): a session
+   already running honours `.jev-disabled` at the very next hook invocation, no restart — the switch
+   is a file test made by the hook SCRIPT, which is re-read from disk on every fire, so hook-config
+   caching cannot affect it. Two bounds travel with the claim: a hook already in flight finishes,
+   and the switch stops THESE hooks because THESE scripts test it, not because Claude Code enforces
+   it (the harness-native equivalent is `"disableAllHooks": true`). And for an ACTUATOR, "stopped"
+   has to mean the tool input left behind is byte-identical to the untouched one — proved, not
+   asserted, in `tests/reversibility.sh`. See `docs/REVERSIBILITY.md`.
 5. As a researcher, I want hooks registered only for this folder, so that my other projects and my
    cloud sessions are provably untouched.
 6. As a researcher, I want every artifact under one directory, so that deleting the directory

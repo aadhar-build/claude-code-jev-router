@@ -26,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import paths  # noqa: E402
+import reversibility  # noqa: E402
 
 USER_SETTINGS = Path.home() / ".claude" / "settings.json"
 PROJECT_LOCAL_SETTINGS = paths.ROOT / ".claude" / "settings.local.json"
@@ -205,10 +206,35 @@ def check_no_outside_writes_in_source() -> None:
 
 
 def check_kill_switch() -> None:
-    if paths.killed():
-        record("WARN", "kill-switch", ".jev-disabled present — capture is OFF")
+    # JEV-40: agree with the hooks' own fail-safe test, which treats ANY entry
+    # at the path as ON. `paths.killed()` uses `.exists()`, which reads a
+    # dangling symlink as absent -- so ask reversibility.switch_state(), the one
+    # function that mirrors the shipped block.
+    is_set, desc = reversibility.switch_state()
+    if is_set:
+        record("WARN", "kill-switch", f".jev-disabled {desc} — every hook exits on line one")
     else:
         record("PASS", "kill-switch", "absent (capture enabled when hooks are registered)")
+
+
+def check_switch_on_every_hook() -> None:
+    """JEV-40: one switch, all surfaces. A registered hook without the canonical
+    block is a surface that cannot be turned off."""
+    hooks, err = reversibility.registered_hooks()
+    if err:
+        record("FAIL", "switch-coverage", err)
+        return
+    if not hooks:
+        record("PASS", "switch-coverage", "no hooks registered — nothing to cover")
+        return
+    bad = [f"{h['event']}/{h['matcher']}" for h in hooks
+           if not h["checks_switch"] or not h["anchored"]]
+    if bad:
+        record("FAIL", "switch-coverage",
+               f"registered without an anchored kill-switch check: {', '.join(bad)}")
+    else:
+        record("PASS", "switch-coverage",
+               f"all {len(hooks)} registered hook(s) check the anchored switch on line one")
 
 
 def check_hook_registration() -> None:
@@ -236,6 +262,7 @@ def main() -> int:
     check_no_outside_writes_in_source()
     check_kill_switch()
     check_hook_registration()
+    check_switch_on_every_hook()
 
     width = max(len(name) for _, name, _ in results)
     print(f"\njev doctor — {paths.ROOT}\n")
@@ -245,7 +272,17 @@ def main() -> int:
 
     fails = sum(1 for s, _, _ in results if s == "FAIL")
     warns = sum(1 for s, _, _ in results if s == "WARN")
-    print(f"\n{len(results) - fails - warns} passed, {warns} warned, {fails} failed\n")
+    # JEV-40. The full reversibility state, in one place: which hooks are
+    # registered, whether the switch is set, what is inside the folder, what has
+    # been written outside it, and the one command that undoes the first two.
+    # It is printed rather than recorded as a check because it is not a
+    # pass/fail question -- it is the answer to "how do I stop this".
+    #
+    # Printed BEFORE the summary line, so that `doctor.py | tail -3` still ends
+    # on the pass/warn/fail counts.
+    print("\n".join(reversibility.lines()))
+
+    print(f"{len(results) - fails - warns} passed, {warns} warned, {fails} failed\n")
     return 1 if fails else 0
 
 

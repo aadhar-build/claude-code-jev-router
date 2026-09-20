@@ -35,10 +35,23 @@ ROOT="${CLAUDE_PROJECT_DIR:-}"
 [ -n "$ROOT" ] || exit 0
 [ -d "$ROOT" ] || exit 0
 
-# Kill switch. Anchored, not cwd-relative: a hook fires with whatever cwd the
+# --- jev kill switch: canonical block, byte-identical in every hook ----------
+# One switch, all surfaces. `tests/reversibility.sh` enumerates the registered
+# hooks and fails if any of them lacks this block, so a new surface cannot be
+# added without it.
+#
+# Anchored on $ROOT, never cwd-relative: a hook fires with whatever cwd the
 # session happens to have, and a relative test silently stops working the moment
 # you cd into a subdirectory.
-[ -f "$ROOT/.jev-disabled" ] && exit 0
+#
+# FAIL SAFE (JEV-40): ANY entry at this path means OFF. `-f` alone reads a
+# directory as absent, so an operator who ran `mkdir .jev-disabled` would
+# believe the switch was set while the hook kept firing; `-e` alone reads a
+# dangling symlink as absent. An unreadable file still stats, so it too reads as
+# present. When the state of the switch cannot be established, the answer is
+# OFF, not ON -- the switch is never given the benefit of the doubt.
+{ [ -e "$ROOT/.jev-disabled" ] || [ -L "$ROOT/.jev-disabled" ]; } && exit 0
+# --- end jev kill switch ----------------------------------------------------
 
 # Defensive cwd guard. settings.local.json should never load outside this repo,
 # but the isolation requirement is hard enough to be worth enforcing twice.

@@ -1241,7 +1241,7 @@ this disk only; the *statistics* mostly do not.
 
 ## JEV-40: One master switch, and a proof that OFF means vanilla
 
-**Status:** ready-for-agent
+**Status:** done
 **Labels:** safety, blocking, hooks
 **Blocked by:** None — and it blocks JEV-35
 
@@ -1264,12 +1264,53 @@ A hook that exits early still ran; what matters is whether the tool input it
 leaves behind is byte-identical to the one Claude Code would have produced
 untouched. That has never been asserted, because until now nothing rewrote it.
 
-- [ ] **One switch, all surfaces.** Every current and future hook checks it on line one, anchored, before anything else — and a test that **enumerates the registered hooks and fails if any one of them lacks the check**, so a new surface cannot be added without it
-- [ ] **Prove OFF equals vanilla, do not assert it.** With the switch on, capture a subagent spawn's tool input and assert it is **byte-identical** to the same spawn with the hooks unregistered entirely. An actuator that "exits early" is not the same as one that never ran, and only the byte comparison can tell them apart
-- [ ] **A documented teardown** — one command, printed by `doctor.py`, that unregisters the hooks and states plainly what it does and does not undo
-- [ ] **Establish whether a RUNNING session honours the switch**, or whether hook config is read once at session start. If a live session keeps firing a hook after the switch is set, the switch is not an emergency stop and must not be described as one. This is a fact to check, not to assume
-- [ ] **Assert the switch fails safe**: if the file cannot be read — permissions, a full disk — the hook must behave as though it were present, not absent
-- [ ] `doctor.py` prints the full reversibility state in one place: which hooks are registered, whether the switch is set, what is inside the folder and what has been written outside it
+- [x] **One switch, all surfaces.** Every current and future hook checks it on line one, anchored, before anything else — and a test that **enumerates the registered hooks and fails if any one of them lacks the check**, so a new surface cannot be added without it
+- [x] **Prove OFF equals vanilla, do not assert it.** With the switch on, capture a subagent spawn's tool input and assert it is **byte-identical** to the same spawn with the hooks unregistered entirely. An actuator that "exits early" is not the same as one that never ran, and only the byte comparison can tell them apart
+- [x] **A documented teardown** — one command, printed by `doctor.py`, that unregisters the hooks and states plainly what it does and does not undo
+- [x] **Establish whether a RUNNING session honours the switch**, or whether hook config is read once at session start. If a live session keeps firing a hook after the switch is set, the switch is not an emergency stop and must not be described as one. This is a fact to check, not to assume
+- [x] **Assert the switch fails safe**: if the file cannot be read — permissions, a full disk — the hook must behave as though it were present, not absent
+- [x] `doctor.py` prints the full reversibility state in one place: which hooks are registered, whether the switch is set, what is inside the folder and what has been written outside it
+
+**Done 2026-09-20.** `tests/reversibility.sh`, 39 assertions, offline, no spend.
+Write-up in `docs/REVERSIBILITY.md`; teardown is `./teardown.sh --yes`
+(`--dry-run` first), printed by `uv run src/doctor.py` alongside the full
+reversibility state.
+
+Four things are worth carrying forward:
+
+1. **A running session DOES honour the switch**, at the very next hook
+   invocation, with no restart. Probed live in an already-running session at
+   20:05-20:06 on 2026-09-20 (captured / not captured / captured, across a
+   touch and an `rm`), and two captures were deliberately forgone to get it.
+   The reason it generalises is the mechanism, not the probe: the switch is not
+   hook *configuration*, it is a file test made by the hook *script*, and a
+   fresh process reads that script from disk on every fire. So the existing
+   "instantly, without restarting a session" wording is correct and stays —
+   with two bounds now attached to it wherever it appears: a hook already in
+   flight finishes, and the switch stops THESE hooks because THESE scripts test
+   it, not because Claude Code enforces it. The harness-native equivalent is
+   `"disableAllHooks": true`.
+
+2. **The switch did NOT fail safe, and now does.** `[ -f ]` reads a directory
+   as absent, so an operator who typed `mkdir .jev-disabled` would have
+   believed the experiment was off while every hook kept firing. The canonical
+   block is now `{ [ -e ... ] || [ -L ... ]; } && exit 0` — any entry at the
+   path means OFF, including a directory, a dangling symlink and an unreadable
+   file. All four forms asserted, on both hooks, against a control that proves
+   the sandbox captures when the switch is genuinely absent.
+
+3. **OFF-equals-vanilla is now measured.** `src/hook_dispatch.py` models the
+   documented `PreToolUse` dispatch and returns the tool input that survives;
+   the gate compares its canonical serialisation across four arms. The
+   load-bearing one is the POSITIVE CONTROL: an actuator fixture with the
+   switch off must change the input. Without it every other assertion would
+   pass on a test incapable of detecting a rewrite — which is the state the
+   repo was in before this ticket.
+
+4. **`tests/gates.sh` line 10 still reads "one file stops everything,
+   instantly"**, which is true for an observer and is now underspecified for an
+   actuator. It was not edited because another agent owned that file during
+   this work. `tests/reversibility.sh` is the superset.
 
 ### What a flag cannot undo, stated plainly
 

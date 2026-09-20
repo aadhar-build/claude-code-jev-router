@@ -72,9 +72,22 @@ Deleting this folder reverts the machine completely.
 ## Stopping it
 
 ```sh
-touch .jev-disabled     # kill switch: every hook exits immediately
+touch .jev-disabled     # kill switch: every hook exits on line one
 rm .jev-disabled        # resume
+
+./teardown.sh --dry-run # the full way back: see what it would change
+./teardown.sh --yes     # set the switch AND unregister the hooks
 ```
+
+A session that is already running honours the switch at its very next hook
+invocation — verified live, not assumed, because the switch is a file test made
+by the hook script rather than hook configuration. A hook already in flight
+finishes. It stops *these* hooks because *these scripts* test it; the
+harness-native equivalent is `"disableAllHooks": true`.
+
+`uv run src/doctor.py` prints the whole reversibility state in one block.
+`docs/REVERSIBILITY.md` has the detail, including how "OFF equals vanilla" is
+proved rather than asserted — which is what JEV-35 is gated on.
 
 ## Claim discipline
 
