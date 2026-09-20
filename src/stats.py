@@ -29,6 +29,16 @@ from typing import Callable, Hashable, Sequence
 Cluster = Hashable
 
 
+# Pre-committed guard, fixed BEFORE the collection window closed. Below roughly
+# 40 sessions, 6-67% of simulated bootstrap intervals come back degenerate and
+# zero-width, because every resample happens to draw sessions that agree
+# completely. That point sits above the hypothesised threshold and would pass
+# the test trivially. A narrow interval at small N is more likely degenerate
+# than precise, so narrowness must never be read as precision.
+MIN_CLUSTERS_FOR_INFERENCE = 30
+ZERO_WIDTH_EPSILON = 1e-9
+
+
 @dataclass
 class Interval:
     point: float
@@ -37,8 +47,32 @@ class Interval:
     n: int
     n_clusters: int
 
+    @property
+    def width(self) -> float:
+        if self.lo != self.lo or self.hi != self.hi:
+            return float("nan")
+        return self.hi - self.lo
+
+    @property
+    def inconclusive_reason(self) -> str | None:
+        """Why this interval must NOT be read as a result. None means usable."""
+        if self.n_clusters < MIN_CLUSTERS_FOR_INFERENCE:
+            return f"only {self.n_clusters} cluster(s); {MIN_CLUSTERS_FOR_INFERENCE} pre-committed as the minimum"
+        w = self.width
+        if w != w:
+            return "interval undefined (too few clusters to resample)"
+        if w <= ZERO_WIDTH_EPSILON:
+            return "zero-width interval — every resample agreed, which is degeneracy, not precision"
+        return None
+
+    @property
+    def conclusive(self) -> bool:
+        return self.inconclusive_reason is None
+
     def __str__(self) -> str:
-        return f"{self.point:.3f} [{self.lo:.3f}, {self.hi:.3f}]"
+        base = f"{self.point:.3f} [{self.lo:.3f}, {self.hi:.3f}] (n={self.n}, clusters={self.n_clusters})"
+        reason = self.inconclusive_reason
+        return base if reason is None else f"{base}  INCONCLUSIVE BY RULE: {reason}"
 
 
 def raw_agreement(a: Sequence[bool], b: Sequence[bool]) -> float:

@@ -151,3 +151,64 @@ if the clustered 95% interval lies entirely below 0.80. An interval spanning
 0.80 is reported as **inconclusive at this sample size** — which, given the
 expected base rate, is the most probable outcome of a one-week single-repository
 collection, and saying so now is the point of pre-registering it.
+
+---
+
+# Amendment 1 — 2026-09-20
+
+Committed the same day as the original, **before the collection window closed**
+and before any live analysis was run. Both changes are recorded here rather than
+edited into the text above, so the original commitments remain readable and the
+diff is the audit trail.
+
+## A1.1 — Degenerate-interval guard (an addition, not a relaxation)
+
+A power analysis run after the original registration found a trap in the test as
+written. Below roughly 40 sessions, **6–67% of simulated bootstrap intervals come
+back degenerate and zero-width**: every resample happens to draw sessions that
+agree completely, the interval collapses to a point, and that point sits above
+0.80. **It would pass the hypothesis trivially.**
+
+A narrow interval at small N is more likely degenerate than precise. So, fixed
+now, before any live interval has been computed:
+
+1. **Minimum-cluster rule.** Fewer than **30 distinct `session_id` clusters** →
+   the result is **inconclusive by rule**, whatever the interval says.
+2. **Zero-width rule.** Any interval of zero width is **inconclusive by rule**,
+   whatever the cluster count.
+3. **The cluster count is printed beside every interval**, always.
+
+This is strictly *harder* to pass than the original test. It cannot manufacture a
+positive result; it can only prevent one. Implemented in
+`stats.Interval.inconclusive_reason`.
+
+## A1.2 — Stopping rule changed from calendar to cluster count
+
+**The original rule was seven calendar days, with N explicitly not a stopping
+criterion.** That is amended. The new rule:
+
+> **Collect until 30 distinct sessions have contributed live `pre_bash`
+> decisions, or until 2026-10-20, whichever comes first.**
+
+**Why, stated plainly.** The original rule was written to prevent stopping early
+when the numbers looked good — the classic garden-of-forking-paths failure. The
+power analysis showed it has the opposite problem here: at the observed rate
+(37 decisions in **one** session) seven days plausibly yields 5–20 sessions
+against the 30–40 needed, and below 30 clusters the primary metric is not merely
+imprecise but **undefined** — `clustered_bootstrap` returns `nan` with one
+cluster, verified directly.
+
+**What protects against the original hazard.** The new rule is still blind to
+the *result*: it fixes a **cluster count**, not a target for the statistic, and
+30 was derived from a power analysis run before any live interval was computed.
+The hard calendar stop at 2026-10-20 prevents indefinite extension. **No interim
+analysis of the live primary metric will be run before the stopping condition is
+met** — the guard in A1.1 makes any such interim look inconclusive anyway.
+
+**The honest cost of this amendment.** Changing a stopping rule mid-study is a
+recognised way to bias a result, and a sceptical reader is right to discount it.
+The mitigation is that it is recorded here, dated, committed before the window
+closed, with the reasoning and the arithmetic that motivated it — and that it
+moves the bar **up**, not down. A reader who rejects the amendment can read the
+seven-day result instead; it will be reported alongside, and it will almost
+certainly say "inconclusive".
