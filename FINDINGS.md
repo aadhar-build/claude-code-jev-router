@@ -685,6 +685,72 @@ conservative threshold over complexity rather than asking Jev to name a model.
 
 ---
 
+## Part 5b — Three-tier routing, and the inflation pattern repeating [PRELIMINARY — n=7]
+
+Sonnet added as a third routing tier and as a fourth arm (`cc_sonnet5`).
+Question set `questions/user_prompt/v2.json`: a 1–5 `complexity` score, a
+`needs_frontier` boolean cross-check, and the original `route` choice carried
+forward unchanged.
+
+### Why a score with two thresholds, not a "which model" question
+
+With three tiers a direct model-choice question would bake **one** policy into
+the measurement — you could evaluate exactly that policy and no other. A
+complexity score plus two thresholds partitions into three tiers and lets every
+routing policy be evaluated offline from one set of rows, including policies
+invented after collection ends.
+
+### The middle tier is where the realisable value sits
+
+| move | saving per turn | leverage vs one Jev call |
+|---|---|---|
+| opus → sonnet | $0.0390 | **2,755×** |
+| opus → haiku | $0.0520 | 3,674× |
+| sonnet → haiku | $0.0130 | 918× |
+
+**opus → sonnet captures 75% of the opus → haiku saving at a far smaller
+capability drop.** Adding Sonnet is not a marginal third option; it is probably
+where most of the safely-realisable value is, because the downgrade that is safe
+to make often is worth more than the one that is risky to make rarely.
+
+### `needs_frontier` caught the case the original probe got wrong
+
+Part 5.3 recorded that the day-0 probe routed *"3× p99 latency after a deploy,
+p50 unchanged, only a pool config changed"* to `sonnet` at 0.76 confidence —
+confidently wrong on the hardest item. Under v2 that prompt scores **complexity
+3.98 and needs_frontier 0.70**, and routes to `opus`.
+
+The paired-question design — one question optimised for ranking, one for catching
+the case that must not be downgraded — is the same structure that worked on
+`pre_bash` (`destructive` / `needs_review`), and it worked again here.
+
+### But the inflation pattern repeats, on a brand-new question
+
+At the default τ=0.5, `needs_frontier` escalated **5 of 7 prompts**, including a
+simple test-writing request — which would route nearly everything to Opus and
+destroy the economics entirely.
+
+| tier | needs_frontier |
+|---|---|
+| trivial / simple | 0.47, 0.48, 0.50 |
+| moderate / hard | 0.70, 0.73, 0.77, 0.78 |
+
+**Clean separation — but not at 0.5.** Any threshold in 0.51–0.69 separates them
+perfectly. At τ=0.65 the routing is sensible end to end: trivial → haiku, simple
+→ sonnet, moderate and hard → opus, including the p99 item.
+
+This is the **third independent instance** of the same finding: `needs_review`
+(Part 4b), the 41%-occupancy concern (Part 4d), and now `needs_frontier`. The
+pattern is consistent and is now the study's most reliable claim about Jev:
+
+> **Jev ranks well and calibrates badly on boolean questions, hugging the upper
+> range. Every boolean threshold must be derived, never defaulted. τ=0.5 has
+> been wrong on every boolean question we have asked it.**
+
+**Caveat, seriously:** n=7, one run, my own prompts, and 0.65 is a constant read
+off seven points — exactly the overfit Part 4d quantified at +0.10 for a set
+eight times larger. It is a starting value for a rule, not a threshold.
+
 ## Part 6 — Methodological notes worth publishing on their own
 
 - **Pre-registration before collection.** `PREREGISTRATION.md`, committed at

@@ -65,11 +65,31 @@
       "timeout_s": 180.0,
       "role": "secondary_baseline",
       "_comment": "As cc_opus5, on Haiku."
+    },
+    "cc_sonnet5": {
+      "arm_config_id": "cc-sonnet5-cli-v1",
+      "kind": "claude_cli",
+      "model": "claude-sonnet-5",
+      "effort": "low",
+      "timeout_s": 180.0,
+      "role": "mid_tier_baseline",
+      "_comment": "The middle routing tier, and the one that matters most for the economics: opus->sonnet captures 75% of the opus->haiku saving at a far smaller capability drop. Also a baseline arm in its own right -- if Sonnet classifies as well as Opus, the 'frontier model as reference' framing weakens."
+    },
+    "sonnet5": {
+      "arm_config_id": "sonnet5-api-v1",
+      "kind": "anthropic",
+      "model": "claude-sonnet-5",
+      "effort": "low",
+      "max_tokens": 256,
+      "timeout_s": 60.0,
+      "role": "metered_api_baseline (DISABLED)",
+      "_comment": "Metered-API twin of cc_sonnet5. Disabled with the other metered arms; needs ANTHROPIC_API_KEY."
     }
   },
   "enabled": [
     "jev",
     "cc_opus5",
+    "cc_sonnet5",
     "cc_haiku45"
   ]
 }
