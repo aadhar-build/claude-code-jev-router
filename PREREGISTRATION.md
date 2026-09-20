@@ -806,8 +806,22 @@ assertion blocks**, against the real project root, while the worker drains that
 directory. `tests/run_all.sh` invokes it — so "run the test suite", the
 instruction in every agent brief written that day, was the destructive command.
 
-**It was run against the live tree three times: approximately 14:10Z, 14:44Z and
-14:46Z on 2026-09-20.** Each invocation wiped `spool/ready/` repeatedly.
+**Two agents disclosed running it against the live tree, on request, after the
+defect was found:**
+
+| approx. time (UTC, 2026-09-20) | what ran |
+|---|---|
+| 14:10Z, 14:44Z, 14:46Z | `run_all.sh` x3 |
+| ~14:40Z – 15:05Z | `test_hook.sh` x4 (one direct, three via `run_all.sh`), plus one run of the **pre-fix** `gates.sh`, which additionally moved `spool/ready` aside and wrote 501 filler files into the directory the worker was draining |
+
+**At least seven invocations across roughly 14:10Z–15:05Z**, each wiping
+`spool/ready/` several times over. A third agent confirmed it had never run
+either, which is how the window is bounded at all.
+
+Both disclosures were volunteered in response to a direct request to report
+rather than repair. That is recorded because the alternative — an agent quietly
+tidying up — would have left this undiscoverable, and the study's whole claim to
+credibility is that losses of this shape get declared.
 
 **The number of captures lost is unknown and unrecoverable.** A file deleted
 from the spool leaves no capture row and no run row; there is nothing to count
@@ -829,7 +843,15 @@ primary metric loses a small amount of power and nothing else.
 
 **Cause, stated plainly.** The test suite was written before the surface went
 live, when there was no live spool to destroy, and was never revisited when
-collection opened. Tracked as JEV-42.
+collection opened. The instruction that triggered it — "the full test suite must
+pass" — was written into four agent briefs by the study's own author on the day
+it happened. Tracked as JEV-42.
+
+**One further capture pair was forgone deliberately**, not lost: the live probe
+that established whether a running session honours the kill switch necessarily
+suppressed the two Bash calls made while the switch was set. Those are recorded
+in `docs/REVERSIBILITY.md` as an intentional gap rather than left to look like
+attrition.
 
 ## A6.2 — Correction to A2.6 #1
 
