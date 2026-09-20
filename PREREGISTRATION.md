@@ -904,3 +904,116 @@ were found already unrecoverable, and that is a **lower bound, not a proof of
 zero loss**: the index used to detect missing transcripts records only sessions
 that received a *typed* prompt, so a reaped non-interactive session would be
 invisible to it.
+
+
+---
+
+# Amendment 7 — a misconfigured Haiku arm, and the third boundary it creates
+
+**2026-09-20.** A defect in the `cc_haiku45` arm's configuration, found and fixed
+mid-window, recorded here because it changes what two reported quantities mean
+and because **the arm it damages is a baseline, not the treatment — which is the
+direction a reader is least likely to suspect and most entitled to be told
+about.**
+
+## A7.1 — What was wrong
+
+`cc_haiku45` ran at `effort: low` and emitted a median **741 thinking tokens**
+per call, where `cc_opus5` and `cc_sonnet5` emitted **0** on identical bytes at
+the same setting.
+
+The cause is a model-generation split inside Claude Code, read out of the shipped
+2.1.278 binary rather than inferred. Claude Code **enables thinking by default
+for every model** — there is no "off" default to fall back to. It resolves to
+`{type: "adaptive"}` on 4.6+ models and to a **fixed `budget_tokens`** on
+pre-4.6 models. Haiku 4.5 is pre-4.6. Adaptive thinking spends nothing on a
+two-question classification; a fixed budget is spent. And `output_config.effort`
+is a 4.6+ control that is **not supported on Haiku 4.5 at all**, so `--effort
+low` could never have reached it.
+
+So the zeros on Opus and Sonnet were honest adaptive behaviour, not a flag
+working — and the lever we believed was controlling all three arms was
+structurally inert on one of them.
+
+Fixed by `max_thinking_tokens: 0`, which Claude Code maps to
+`thinking: {type: "disabled"}`, on that arm alone.
+
+## A7.2 — What was NOT fixed, and why
+
+`cache_read_input_tokens` is **0 on every `cc_haiku45` call** while `cc_opus5`
+reads 10,777. Haiku 4.5's minimum cacheable prefix is **4,096 tokens** against
+512 on Opus 5. The stable prefix of our deliberately lean invocation falls below
+it, so the only cache entry created sits *after* the per-decision state and no
+two decisions ever share one.
+
+This is **fixable** — padding the system prompt past 4,096 tokens produces
+12,744-token cross-state reads immediately, and API time falls to 1.8–4.1s — and
+it is **deliberately not fixed.** Padding a classifier's prompt with 9K tokens of
+filler to buy cache reads would change what the arm measures, and the arm exists
+to measure Claude Code as it ships. It is published as a finding about deploying
+a pre-4.6 model behind `claude -p` on short prompts, not engineered away.
+
+## A7.3 — The measured effect, and what it does not rescue
+
+Paired on 9 existing synthetic states, old and new interleaved on the same state
+so hour-of-day and machine load are paired:
+
+| | v1 probe | **v2 fix** | `cc_opus5` |
+|---|---|---|---|
+| output tokens | 764 | **333** | 174 |
+| thinking tokens | 647 | **0** | 0 |
+| API ms | 9,254 | **4,557** | 3,476 |
+
+**`cc_haiku45` remains slower than `cc_opus5` after the fix.** Roughly half the
+original gap was our misconfiguration and half is the cache miss that remains.
+
+"The cheaper tier is the faster tier" is therefore **not** restored by this
+correction. A3.5's decision to make wall-clock a **co-primary outcome measured
+rather than assumed** stands on stronger ground than when it was written.
+
+## A7.4 — The third boundary
+
+| timestamp | change | what it affects |
+|---|---|---|
+| **2026-09-20T12:07:24Z** | three arms → four (`cc_sonnet5` added) | rows before it carry no `cc_sonnet5` |
+| **2026-09-20T14:24:13Z** | sequential → concurrent dispatch | per-arm latency only; marked by `arm_dispatch` |
+| **2026-09-20T15:15:33Z** | `cc_haiku45` thinking disabled | `cc_haiku45` cost and latency only; marked by `arm_config_id` |
+
+The third boundary is the **worker restart**, not the commit that changed the
+config — the worker reads `arms.json` once at startup (JEV-30), so until it
+restarted every new row was still v1. Its marker is the row's own
+`arm_config_id`: `cc-haiku45-cli-v1` before, **`cc-haiku45-cli-v2-nothink`**
+after. That is a stronger marker than a clock, because the row carries it.
+
+**334 live and 60 synthetic rows carry v1.** Live v1 window:
+2026-09-20T06:34:47Z → 14:51:21Z.
+
+**`cc_haiku45` cost and latency are never pooled across this boundary.** Both are
+reported per `arm_config_id`, with row counts, and no `cc_haiku45` cost or
+latency figure is quoted without its configuration named. These are not
+known-bad numbers — they are correct measurements of a configuration nobody
+would deploy.
+
+## A7.5 — Agreement is treated more cautiously here than at Amendment 5's boundaries
+
+At those boundaries the arms received identical bytes and identical questions,
+and nothing about dispatch timing could touch an answer, so agreement pooled
+freely. **Here it cannot: thinking is part of the inference, not decoration.**
+
+On 18 paired answers the change produced **1 decision flip at τ=0.5** and a mean
+|Δp| of **0.078**, with one large move (0.85 → 0.02). That is small — and it is
+**not distinguishable from run-to-run noise**, because `cc_haiku45` has no
+determinism baseline: JEV-16 has never been run on it. Without one, "the
+configuration changed the answer" and "the model is non-deterministic" are the
+same number.
+
+So: v1 agreement is **retained and labelled a v1-era measurement**; v1 and v2
+answers are **not pooled as one arm**; and the writeup states that the two eras
+were **not shown to be equivalent**, rather than implying they were. The cheap
+purchase that would close this properly is a determinism sweep on `cc_haiku45`
+at v2, and it is named as such rather than left implicit.
+
+## A7.6 — The primary metric is untouched
+
+It is PABAK between `jev` and `cc_opus5` on `pre_bash.destructive`. Neither arm
+is involved in this defect and neither changed configuration at this boundary.
