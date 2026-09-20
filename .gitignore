@@ -1,0 +1,20 @@
+# credentials — never commit
+.env
+.env.*
+
+# hook registration: project-local, must not travel to clones or cloud sessions
+.claude/settings.local.json
+
+# kill switch is a local runtime flag
+.jev-disabled
+
+# collected data, spool, logs — local only, never published from git
+data/
+spool/
+logs/
+reports/
+
+# python
+__pycache__/
+*.pyc
+.venv/
