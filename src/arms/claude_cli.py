@@ -20,7 +20,7 @@ is why this arm exists.
 
 It is NOT a measurement of Opus 5 or Haiku 4.5 as classifiers. Measured on the
 leanest invocation we could construct (custom system prompt, empty settings, no
-MCP servers, every tool disallowed, effort low):
+MCP servers, every tool disallowed, effort low), **on Haiku 4.5**:
 
     Claude Code preamble   5,193 cache-creation tokens for a 10-token question
     thinking               317 tokens, despite --effort low
@@ -32,6 +32,52 @@ against roughly 386 input tokens, ~25 output and well under a second for the
 same question posted directly to the Messages API. Thirteen times the tokens,
 twenty-five times the cost, several times the latency -- none of it attributable
 to the model.
+
+**The thinking line above does NOT generalise across the cc_* arms, and reading
+it as if it did was a defect (JEV-41).** It was measured on Haiku 4.5 and stated
+in prose about "the arm". On 335 live calls per arm at the same `effort: low`,
+median thinking was 741 tokens on `cc_haiku45` and **0** on both `cc_opus5` and
+`cc_sonnet5`. The reason is a model-generation split inside Claude Code, not a
+property of the flag:
+
+  * Claude Code turns thinking ON by default for every model. On a 4.6+ model
+    that means `thinking: {type: "adaptive"}`, and adaptive genuinely spends
+    nothing on a trivial classification -- hence Opus 5 and Sonnet 5 at zero.
+  * Haiku 4.5 is pre-4.6 and does not support adaptive thinking (Claude Code
+    2.1.278 names it explicitly in the non-adaptive list, alongside Sonnet 4.5
+    and Opus 4.5). It therefore gets `thinking: {type: "enabled",
+    budget_tokens: N}` -- a FIXED budget, which the model then spends.
+  * `output_config.effort` is not supported on Haiku 4.5 at all, so `--effort
+    low` cannot lower anything there. It is the correct lever on Opus and
+    Sonnet, and inert on Haiku.
+
+The only lever that removes the thinking floor on a pre-4.6 model is turning
+thinking off outright: `MAX_THINKING_TOKENS=0`, which Claude Code maps to
+`thinking: {type: "disabled"}`. That is what `max_thinking_tokens` in
+`config/arms.json` sets, per arm, and why only `cc_haiku45` sets it.
+
+**Prompt-cache reads on Haiku 4.5 are a SEPARATE defect, independent of the
+thinking one, and it is deliberately left unfixed.** Haiku 4.5's minimum
+cacheable prefix is 4,096 tokens against 512 on Opus 5. The stable system+tools
+block of this deliberately lean invocation falls below Haiku's minimum, so that
+breakpoint silently creates no entry; the only entry that does get created is
+the later one, which sits AFTER the per-decision state. Every distinct state
+therefore writes a fresh ~5.5K block and reads nothing, which is exactly what
+335 live calls show.
+
+Two constructions establish the mechanism rather than assert it:
+
+  * The same state twice in a row DOES read the cache (0 -> 5,613). It is only
+    DISTINCT states that miss, so caching is not off for this model.
+  * Padding the system prompt so the stable block clears 4,096 tokens makes
+    cross-state reads appear immediately: on three unrelated states, call 1
+    wrote 14,462 and calls 2 and 3 each read **12,744** while writing ~1,735.
+
+So it IS fixable from this side -- and we are not taking that fix. Buying cache
+reads by padding the classifier's system prompt with ~9K tokens of filler would
+change what this arm measures, and the arm exists to measure Claude Code as it
+actually ships. The zero cache read is reported as a finding about deploying a
+pre-4.6 model behind `claude -p` with a short prompt, not engineered away.
 
 So this arm is named `cc_*` and reported separately. Putting it in the headline
 slot would make "Jev vs Opus 5" a comparison against a 5K-token preamble and a
@@ -102,6 +148,15 @@ def evaluate(state: str, questions: dict[str, Any], config: ArmConfig) -> Run:
     env = dict(os.environ)
     env["JEV_ARM_SUBPROCESS"] = "1"          # recursion guard, read by capture.sh
     env.pop("ANTHROPIC_API_KEY", None)       # force subscription auth, not a key
+    # There is no CLI flag for this on the documented surface; MAX_THINKING_TOKENS
+    # is the supported control. 0 -> thinking:{type:"disabled"}, N>0 -> a fixed
+    # budget. Unset, Claude Code thinks by default on every model. See the module
+    # docstring and JEV-41. Inherited MAX_THINKING_TOKENS is cleared when the arm
+    # does not set one, so the arm's behaviour is a property of its config and not
+    # of whoever's shell started the worker.
+    env.pop("MAX_THINKING_TOKENS", None)
+    if config.max_thinking_tokens is not None:
+        env["MAX_THINKING_TOKENS"] = str(config.max_thinking_tokens)
 
     start = time.perf_counter()
     try:
@@ -174,6 +229,9 @@ def evaluate(state: str, questions: dict[str, Any], config: ArmConfig) -> Run:
             "stop_reason": body.get("stop_reason"),
             "total_cost_usd_list_basis": body.get("total_cost_usd"),
             "thinking_tokens": (usage.get("output_tokens_details") or {}).get("thinking_tokens"),
+            # What we ASKED for, beside what we got -- so a row can be read
+            # without going back to the config that produced it (JEV-41).
+            "max_thinking_tokens_requested": config.max_thinking_tokens,
             "cost_basis": (model_usage.get(response_model) or {}).get("costBasis"),
             "structured_output": parsed,
         },

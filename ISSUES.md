@@ -1346,7 +1346,7 @@ belong in the writeup's limitations rather than in a config file.
 
 ## JEV-41: `cc_haiku45` is the SLOWEST arm, not the fastest — and `--effort low` is not suppressing its thinking
 
-**Status:** ready-for-agent
+**Status:** done — with one half fixed, the other half diagnosed and deliberately left alone
 **Labels:** science, defect, cost
 **Blocked by:** None
 
@@ -1400,12 +1400,96 @@ the configuration under test must be checked for this defect first — otherwise
 the A/B measures a thinking-token misconfiguration and reports it as a property
 of the tier.
 
-- [ ] Confirm the effort/thinking behaviour against a controlled pair of calls, Haiku vs Opus, same state, same effort, thinking tokens recorded
-- [ ] Establish whether `--effort low` is ignored on Haiku 4.5, or whether Haiku's floor genuinely sits at ~740 thinking tokens; check the claude-api skill's docs before concluding
-- [ ] Establish why Haiku's cache read is zero on every call while Opus's is not
-- [ ] Re-time `cc_haiku45` once either is fixed. If it drops below `cc_opus5`, the arm's `arm_config_id` MUST change and that is a **fourth** era boundary in the window — weigh that against leaving it alone until the window closes
-- [ ] Correct `src/arms/claude_cli.py`'s docstring: its "317 tokens despite `--effort low`" was measured on Haiku and does not hold for Opus or Sonnet, both of which emit zero
-- [ ] Report the finding in the writeup whatever the cause: "the cheap tier was the slow tier, and the reason was configuration, not capability" is a useful result about hook-gate deployment and is directly relevant to JEV-23's co-primary
+- [x] Confirm the effort/thinking behaviour against a controlled pair of calls, Haiku vs Opus, same state, same effort, thinking tokens recorded
+- [x] Establish whether `--effort low` is ignored on Haiku 4.5, or whether Haiku's floor genuinely sits at ~740 thinking tokens; check the claude-api skill's docs before concluding
+- [x] Establish why Haiku's cache read is zero on every call while Opus's is not
+- [x] Re-time `cc_haiku45` once either is fixed. If it drops below `cc_opus5`, the arm's `arm_config_id` MUST change and that is a **fourth** era boundary in the window — weigh that against leaving it alone until the window closes
+- [x] Correct `src/arms/claude_cli.py`'s docstring: its "317 tokens despite `--effort low`" was measured on Haiku and does not hold for Opus or Sonnet, both of which emit zero
+- [ ] Report the finding in the writeup whatever the cause: "the cheap tier was the slow tier, and the reason was configuration, not capability" is a useful result about hook-gate deployment and is directly relevant to JEV-23's co-primary — **still open, and it is now a two-part finding: half configuration, half a model property we chose not to engineer around**
+
+---
+
+### Resolved 2026-09-20. Two defects, two different answers.
+
+**Defect A — thinking. Root cause found, fixed, measured.** It is not that
+`--effort low` is "ignored" on Haiku 4.5, and it is not a ~740-token floor
+either. It is a model-generation split inside Claude Code 2.1.278, read out of
+the shipped binary rather than inferred:
+
+- Claude Code turns thinking **on by default for every model**. The resolution
+  is `thinking ??= supportsAdaptive(model) ? {type:"adaptive"} : {type:"enabled", budget_tokens: N}`.
+- `supportsAdaptive()` returns **false** for `claude-haiku-4-5`, which the
+  binary names explicitly alongside `claude-sonnet-4-5` and `claude-opus-4-5`.
+- So Opus 5 and Sonnet 5 get **adaptive** thinking, which genuinely spends
+  nothing on a two-question classification — hence their honest zeros. Haiku 4.5
+  gets a **fixed budget**, and a fixed budget is spent.
+- `output_config.effort` is a 4.6+ control and is not supported on Haiku 4.5 at
+  all, so `--effort low` cannot lower anything there. `arms.json`'s note that
+  "low effort is the correct lever" was right about Opus and wrong as a general
+  rule. Both notes are now corrected.
+
+The only lever that reaches a pre-4.6 model is turning thinking off outright.
+`MAX_THINKING_TOKENS=0` maps to `thinking: {type:"disabled"}`; it is now a
+per-arm config field, `max_thinking_tokens`, set on `cc_haiku45` only.
+
+**Defect B — cache reads. Root cause found, fixable here, deliberately NOT
+fixed.** Haiku 4.5's minimum cacheable prefix is **4,096 tokens** against 512 on
+Opus 5. The stable system+tools block of this deliberately lean invocation sits
+below that minimum, so that breakpoint silently creates no entry and the only
+entry that exists sits **after** the per-decision state. Distinct states
+therefore never hit. Two constructions, not one argument:
+
+- the same state twice in a row **does** read (0 → 5,613), so caching is not off
+  for this model;
+- padding the system prompt past 4,096 tokens makes cross-state reads appear at
+  once — **12,744 read** on two unrelated states, writes collapsing to ~1,735.
+
+So it is fixable from our side, by padding a classifier's system prompt with
+~9K tokens of filler. That is declined: it would change what the arm measures,
+and the arm exists to measure Claude Code as it ships. Defect B is published as
+a finding about deploying a pre-4.6 model behind `claude -p` on a short prompt.
+
+**Measured, paired on 9 existing synthetic states (3 per stratum), same states,
+interleaved old/new so hour-of-day and machine load are paired.** 18 calls.
+
+| | v1 (334 live rows) | v1 paired probe | **v2 fix** | `cc_opus5` |
+|---|---|---|---|---|
+| output tokens | 986 | 764 | **333** | 174 |
+| thinking tokens | 726 | 647 | **0** | 0 |
+| cache read | 0 | 0 | **0** | 10,777 |
+| cache write | 5,541 | 5,463 | **5,290** | 2,568 |
+| API ms | 9,960 | 9,254 | **4,557** | 3,476 |
+
+**Haiku is still not the fast arm.** Output tokens fall 56% and API time 51%,
+and it *still* sits above `cc_opus5`. Half of the original gap was our
+misconfiguration; the other half is the cache miss we are choosing to keep. The
+"smaller = faster" premise is not rescued by the fix, which strengthens rather
+than weakens the reason wall-clock was made co-primary in JEV-23.
+
+**Era boundary.** `arm_config_id` goes `cc-haiku45-cli-v1` →
+`cc-haiku45-cli-v2-nothink`. **The boundary is the worker restart, which has
+NOT happened** — the worker was left running per JEV-30 and the operator
+decides when it restarts. Until then every new row is still v1. The
+discriminator is the id on the row, not a wall-clock time, which is the more
+robust form: 334 live + 60 synthetic rows carry v1 and none of them pool with
+v2 on cost or latency.
+
+**Are the 334 live rows still usable for agreement?** Probably yes, and the
+caveat is honest rather than reassuring. Across 18 paired answers: **1 decision
+flip at τ=0.5**, mean |Δp| 0.078, and one large move (`syn-0242`
+`needs_review` 0.85 → 0.02). Thinking is part of the inference, so it *can*
+change an answer and on this evidence sometimes does. But `cc_haiku45` has no
+determinism baseline — JEV-16 has never run on it — so a 1-in-18 flip cannot be
+attributed to the config change rather than to ordinary run-to-run variance.
+The defensible position: keep v1 agreement as a v1-era measurement, label it,
+and do not pool v1 and v2 answers as one arm. The `pre_bash` primary metric is
+`jev` vs `cc_opus5` and is untouched either way.
+
+**Restart required.** The fix takes effect on the worker's next start. Nothing
+about this change reaches live collection until then.
+
+**Amendment 7 is proposed in the handover, not written here** —
+`PREREGISTRATION.md` is the operator's to amend.
 
 ---
 

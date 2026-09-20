@@ -19,7 +19,7 @@
       "max_tokens": 256,
       "timeout_s": 60.0,
       "role": "metered_api_baseline (DISABLED)",
-      "_comment": "Do NOT set thinking:{type:'disabled'} on Opus 5 \u2014 documented failure mode where tool calls leak into visible text. Low effort is the correct lever."
+      "_comment": "Do NOT set thinking:{type:'disabled'} on Opus 5 \u2014 documented failure mode where tool calls leak into visible text. Low effort is the correct lever ON THIS MODEL. It is not a general rule: `effort` is a 4.6+ control, and on a pre-4.6 model such as Haiku 4.5 it is inert. See cc_haiku45 and JEV-41."
     },
     "haiku45": {
       "arm_config_id": "haiku45-effort-low-v1",
@@ -29,7 +29,7 @@
       "max_tokens": 256,
       "timeout_s": 60.0,
       "role": "metered_api_baseline (DISABLED)",
-      "_comment": "The actual incumbent. Nobody deploys Opus as a hook gate, so an Opus-only comparison is a strawman informed readers will discount."
+      "_comment": "The incumbent a reader would EXPECT: nobody deploys Opus as a hook gate, so an Opus-only comparison is a strawman informed readers will discount. Stated as an expectation and not as a measured fact, because our own data contradicts the premise that goes with it. Under `claude -p`, Haiku 4.5 was the SLOWEST and most token-hungry cc_* arm, not the cheapest — partly our misconfiguration (JEV-41, fixed) and partly Haiku 4.5's 4,096-token cache-read minimum (not fixable here). Whether Haiku is the cheap tier in this harness is a question this study answers, not an assumption it starts from."
     },
     "fake": {
       "arm_config_id": "fake-v1",
@@ -59,13 +59,15 @@
       "_comment": "Claude Code on the subscription, as it actually ships. This is the headline baseline. It bundles the model with a ~5.2K-token preamble, a tool round trip and a process spawn, so the study's claim is about Claude Code as deployed, NOT about Opus 5 as a classifier. The report decomposes harness overhead from model work so a reader can see exactly how much of any gap is attributable to which."
     },
     "cc_haiku45": {
-      "arm_config_id": "cc-haiku45-cli-v1",
+      "arm_config_id": "cc-haiku45-cli-v2-nothink",
       "kind": "claude_cli",
       "model": "claude-haiku-4-5",
       "effort": "low",
+      "max_thinking_tokens": 0,
       "timeout_s": 180.0,
       "role": "secondary_baseline",
-      "_comment": "As cc_opus5, on Haiku."
+      "_comment": "As cc_opus5, on Haiku, EXCEPT for max_thinking_tokens -- see JEV-41. Haiku 4.5 is pre-4.6: it has no adaptive thinking and no output_config.effort, so Claude Code gives it a FIXED thinking budget and `effort: low` cannot lower it. Measured at v1: 741 median thinking tokens against 0 for cc_opus5 and cc_sonnet5 on identical state at the same effort. max_thinking_tokens: 0 maps to thinking:{type:'disabled'} and is the only lever that reaches a pre-4.6 model. `effort` is kept, and is INERT on this model -- it is recorded so the argv stays comparable with the other cc_* arms, not because it does anything here. arm_config_id bumped v1 -> v2 at this change: rows carrying cc-haiku45-cli-v1 are a different configuration and their cost and latency do not pool with v2's.",
+      "_not_fixed": "cache_read_input_tokens is 0 on every v1 call and stays 0 on v2 -- a SEPARATE defect from the thinking one, left unfixed ON PURPOSE. Haiku 4.5's minimum cacheable prefix is 4,096 tokens against 512 on Opus 5, so the stable system+tools breakpoint of this deliberately lean invocation silently creates no entry and the only entry that exists sits after the per-decision state. Distinct states never hit; the same state repeated DOES hit (0 -> 5,613), and padding the system prompt past 4,096 makes cross-state reads appear at once (12,744 read on two unrelated states, writes falling to ~1,735). It is therefore fixable here, by adding ~9K tokens of filler to a classifier prompt -- which would change what this arm measures. The arm measures Claude Code as it ships. The zero cache read is published as a finding about pre-4.6 models behind `claude -p`, not engineered away."
     },
     "cc_sonnet5": {
       "arm_config_id": "cc-sonnet5-cli-v1",

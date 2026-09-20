@@ -18,6 +18,13 @@ class ArmConfig:
     endpoint: str | None = None
     effort: str | None = None
     max_tokens: int | None = None
+    # Thinking budget for the `claude_cli` arms, passed through as the
+    # MAX_THINKING_TOKENS environment variable. 0 means thinking DISABLED;
+    # a positive value is a fixed budget (the API floor is 1024). Left None,
+    # Claude Code picks its own default, which is thinking ON for every model
+    # (adaptive where the model supports it, a fixed budget where it does not).
+    # Read by src/arms/claude_cli.py only; ignored by the other arm kinds.
+    max_thinking_tokens: int | None = None
     timeout_s: float = 30.0
     role: str = ""
 
