@@ -34,7 +34,7 @@ beats the static rule on realised cost at equal task success.**
 | | |
 |---|---|
 | **3,674×** | leverage of one routing decision: a delegation moved Opus→Haiku saves $0.0520 against a $0.000014 Jev call. This is why the project is worth doing |
-| **34%** | of the bill is addressable. $42.57 delegated of $125.58 total. Per-turn routing is impossible; only `Agent` calls can be routed |
+| **~24%** | of the bill is addressable — delegated work. Per-turn routing is impossible; only `Agent` calls can be routed. *(Corrected 2026-09-21: the frozen baseline's rate of 0.162 understated delegated spend by 45%; the rule-corrected figure is **0.238**. See `data/baseline/delegation-pre-rule-v1-corrected.json`.)* |
 | **+337 tokens, +557ms** | what a synchronous Jev call in a hook *costs*, per call, measured here. Any per-tool-call optimization must remove far more than it adds |
 
 ## What we do not claim

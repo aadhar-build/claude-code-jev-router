@@ -54,7 +54,9 @@ through.** Any per-tool-call Jev hook must therefore *remove far more than it
 adds*, which means it may only fire on large payloads, never by default.
 
 **(d) The addressable surface is ~a third of the bill.**
-`data/baseline/manifest.json`: total $125.58, delegated $42.57 — **34%**.
+delegated work is **~24%** of spend by the rule-corrected figure
+(`delegation_rate_by_spend` 0.238, up from the frozen record's 0.162 — see §11).
+The frozen manifest's 34% was computed under a defective costing rule.
 `agent_route` fires only on `Agent` calls; everything the main session does
 itself is out of reach, and per-turn routing is impossible.
 
@@ -688,8 +690,8 @@ request and never reads `iterations[]`, while `session_metrics.py` keeps the
 **last/COMPLETED** copy (early copies are placeholders with `input_tokens: 2`).
 All 48 growing keys are inside **subagent** transcripts. Re-running both rules
 over identical files: delegated cost **$105.09 frozen vs $171.94 corrected —
-+38.9%.** So `delegation_rate_by_spend: 0.162` in the frozen baseline is
-**probably biased low** — *probably*, because the denominator moves too.
++38.9%.** **Superseded by §11 — the real figure under the frozen record's own
+cut is +45.2%, and 38.9% must not be quoted against it.**
 
 ### Consequences for the board
 
@@ -699,3 +701,85 @@ over identical files: delegated cost **$105.09 frozen vs $171.94 corrected —
 - **`JEV-24b` remains killed** — but on the grounds that it is a confound and an
   unmeasured behaviour change, *not* on the AqueGen cost argument, which has now
   failed to replicate.
+
+---
+
+## 11. The "before" anchor was wrong by 45%, and is now corrected
+
+**Found 2026-09-21, fixed in `98979a7`.** This is the most consequential number
+in the pivot, because it is the baseline every future saving is measured
+against.
+
+`src/baseline.py:197` kept the **first** copy of a duplicated request and never
+read `iterations[]`; `src/session_metrics.py` keeps the **last / COMPLETED**
+copy, because early copies are placeholders carrying `input_tokens: 2`. Two
+costing rules that had to agree, didn't.
+
+### Why it mattered more than a costing bug
+
+| | frozen | corrected | movement |
+|---|---|---|---|
+| **cost per delegated task** | **$1.58** | **$2.88** | **+82.6%** |
+| delegated spend | $11.04 | $20.16 | +82.6% *(frozen understates by 45.2%)* |
+| main-session spend | $56.96 | $64.56 | +13.4% |
+| total | $68.00 | $84.72 | +24.6% |
+| `delegation_rate_by_spend` | 0.162356 | **0.237947** | +46.6% relative |
+
+**A real 20% saving, measured against the old $1.58 anchor, would have been
+published as a 46% *increase*.** Counts do not move — 7 tasks / 37 prompts, and
+`delegation_rate_by_task_count` is unchanged, so this is purely a pricing-rule
+effect.
+
+### Two corrections to what was recorded in §10
+
+1. **W0's "+38.9%" is the wrong window.** Those figures ($105.09 vs $171.94)
+   reproduce exactly but are **whole-corpus, no cut** — not the frozen record's
+   window. Under the JEV-24a cut the effect is **+45.2%**. Do not quote 38.9%
+   against `delegation-pre-rule-v1.json`.
+2. **The addressable surface is ~24%, not 34%.** The 34% came from the frozen
+   manifest, computed under the defective rule.
+
+### How we know it is the rule and not drift
+
+The corrected companion carries **three** scopes: `as_frozen`,
+`frozen_rule_today`, and `corrected`. The middle one re-runs the *old* rule
+today and is **bit-identical to the published record** — which is the proof
+that the movement is the rule, not corpus growth or pricing drift. The
+`all_sessions` scope differs from `interactive_sessions_only` only because
+`config/pricing.json` later priced `claude-opus-4-7`; the two effects are kept
+separate rather than blended.
+
+### What is protected
+
+- **The frozen record is not rewritten.** `delegation-pre-rule-v1.json` is
+  verified byte-identical, and `delegation_baseline(force=True)` now **raises**
+  rather than overwriting it. Analysis reads the `-corrected.json` companion.
+- **The divergence cannot silently recur.** `baseline.requests()` is now a thin
+  projection of `session_metrics.billable_requests()` and owns no counting rules;
+  a source-level test asserts it re-implements none of them, and a guard
+  compares both modules on a fixture and on every fully priced real transcript.
+
+### A second bug, which would have bitten us today
+
+`project_dir()` built Claude Code's transcript slug with `replace("/", "-")`.
+Claude Code replaces **every** non-alphanumeric character — so any path
+containing a dot, **which is every git worktree under `.claude/worktrees/`**,
+resolved to a directory that does not exist, `transcripts()` returned `[]`, and
+the module would have written **a baseline of zeros that looks like a finished
+answer**. All current work happens in such a worktree.
+
+That is the **fourth** failure-that-looks-like-success in this repository's
+history, after the inert config fields, the kill switch that stopped one writer
+of two, and the jq-comment apostrophe that made a broken hook exit 0 silently.
+The pattern is now explicit enough to be a design rule: **every silent path
+needs a positive assertion that it did something, not merely that it did not
+error.**
+
+### Open, needs a ticket
+
+`data/baseline/sessions.jsonl` and `manifest.json` still carry costs computed
+under the defective rule, and because they are **fingerprint-idempotent** a
+re-snapshot appends nothing for an unchanged session — **the wrong numbers will
+not self-correct.** Wants a `costing_rule` field on the row schema plus a
+one-off forced re-snapshot. That is a schema change to a committed append-only
+stream, so it is its own ticket, not a footnote.
