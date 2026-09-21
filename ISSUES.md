@@ -13,7 +13,79 @@ run and look at, rather than finishing one layer at a time.
 
 ---
 
-## Execution plan
+# THE PIVOT — 2026-09-21
+
+**The publication goal is retired.** The new goal, and the only one, is in
+`SPEC.md`:
+
+> **Lower realised cost per delegated task, at equal task success, with no added
+> felt latency** — plus context reduction where it removes more than it costs.
+
+The operator's original wording was *"reduce token usage and execution time"*.
+That was corrected on our own evidence and the correction was accepted: routing
+cuts **cost**, not token count; the latency claim is unmeasured and partly
+contradicted by JEV-41; and `FINDINGS.md:563` already established that a
+synchronous gate **"cannot make Claude Code faster or more token-efficient, by
+construction"** (+337 tokens, +557ms p50 per call, removing nothing).
+
+**Every ticket below now carries a `PIVOT TRIAGE` line.** The old execution plan
+that follows this section is **SUPERSEDED** and retained only so the waves it
+describes remain readable where tickets reference them.
+
+## The new workstreams
+
+| # | workstream | state |
+|---|---|---|
+| **W0** | **Measure inline vs delegated on our own corpus.** Does AqueGen's result replicate — is delegating *at all* more expensive than working inline? **Blocks W4** | in progress |
+| **W1** | **The static floor.** `PreToolUse` on `Agent`, `subagent_type → tier` map, **zero Jev calls, zero added latency**. The first shippable thing, and the baseline Jev must beat | in progress |
+| **W2** | **Safe install + teardown**, opt-in per project. Must work *before* the router is armed | not started |
+| **W3** | **The accuracy gate** — per-task pass/fail, blinded by construction (JEV-29 + JEV-36) | not started |
+| **W4** | **Jev enters**, aimed at the 65% `general-purpose` residue. **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3 |
+| **W5** | **Context reduction.** Must clear the +337-token / +557ms bar, so it fires only on large payloads | not started |
+| **W6** | **Operate** — canary on a schedule, latency SLO, weekly cost report | not started |
+
+## Four operator decisions, 2026-09-21
+
+1. **Corrected goal statement — ACCEPTED.**
+2. **Fail to FRONTIER, not open.** On any router error the task goes to the
+   frontier tier, never a cheap one. Quality protected on the error path, cost
+   is not — so a **circuit breaker is mandatory**, because a sustained outage
+   would otherwise bill frontier rates indefinitely.
+3. **RESTART on escalation, do not continue.** The higher tier starts from the
+   original task, not from the first attempt's reasoning. **An escalation
+   therefore pays for the work twice**, which is what makes *uplift* (choosing
+   the tier before anything runs) the cheap option and escalation the expensive
+   one — the `CONTEXT.md` distinction, now load-bearing for cost.
+4. **Measure inline-vs-delegated FIRST** (W0). If delegation is net-negative,
+   the first recommendation is *delegate less*, not *route better*.
+
+## Triage tally
+
+**24 KEEP · 13 REPURPOSE · 4 PARK · 17 KILL**, across all 58 headings.
+
+> Note: the audit that produced this triage reported its own tally as
+> "16 KEEP · 15 REPURPOSE · 6 PARK · 21 KILL". **That summary disagrees with
+> the audit's own per-ticket table**, which is the version applied here and
+> which counts 24 KEEP. The table was taken as authoritative over the summary.
+> The board's long-standing "57 tickets" is also off by one — there are 58
+> headings (01–56 plus the 24a/24b and 31b splits).
+
+Three verdicts **invert** under the new goal and are worth reading directly:
+
+- **JEV-46** rejected a static `subagent_type→tier` map. That map is now **W1**,
+  the product's zero-cost floor.
+- **JEV-45** (the ~245ms gateway hop) was park-worthy; under a latency goal it
+  is the largest recoverable chunk of Jev's own 437ms.
+- **JEV-24b** is not merely obsolete but **actively harmful**: a standing
+  "delegate where possible" rule grows the routed surface *while raising the
+  bill*.
+
+---
+
+## Execution plan — **SUPERSEDED 2026-09-21**
+
+*Retained for reference only. The wave tables below describe the cancelled
+measurement programme. Use the workstream table above.*
 
 **Restructured 2026-09-20 on a new constraint from the operator: the system is
 dev-complete before ANY part of it goes live.** The previous eight-wave plan
@@ -193,6 +265,8 @@ adds a second checkpoint in the same chain, which is the point.
 
 ## JEV-01: Skeleton and self-containment
 
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** Layout and doctor.py survive; 'self-containment' becomes 'minimal enumerated footprint'
+
 **Status:** done
 **Labels:** setup
 **Blocked by:** None (can start immediately)
@@ -211,6 +285,8 @@ demand that it writes nothing outside itself.
 ---
 
 ## JEV-02: Jev API spike
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** The vendor contract three bugs depended on; --selftest is a standing regression test
 
 **Status:** done
 **Labels:** spike, blocking
@@ -244,6 +320,8 @@ automated test suite.
 
 ## JEV-03: Offline tracer bullet
 
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** Same end-to-end-with-no-network discipline, retargeted at agent_route
+
 **Status:** done
 **Labels:** core, test
 **Blocked by:** JEV-01
@@ -261,6 +339,8 @@ so the shape is proven before any money or any live session is involved.
 ---
 
 ## JEV-04: Three real arms, interleaved
+
+**PIVOT TRIAGE 2026-09-21 — KILL.** The cc_* arms exist to be compared against Jev. The product has one classifier
 
 **Status:** done
 **Labels:** core
@@ -281,6 +361,8 @@ comparison between them fair by construction.
 
 ## JEV-05: Statistics and report v1
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Agreement statistics for a publication that is cancelled
+
 **Status:** done
 **Labels:** analysis, test
 **Blocked by:** JEV-03
@@ -299,6 +381,8 @@ against known answers before any real data exists.
 ---
 
 ## JEV-06: The "before" baseline
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** session_metrics.py is the measuring stick for the entire cost claim
 
 **Status:** done
 **Labels:** metrics, test
@@ -323,6 +407,8 @@ ever be differenced against, so it starts collecting on day 0.
 
 ## JEV-07: Pre-registration
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Pre-registration exists to stop you moving the goalposts on a published result
+
 **Status:** done
 **Labels:** science, blocking
 **Blocked by:** JEV-04, JEV-05
@@ -346,6 +432,8 @@ pre-register metrics you have already demonstrated you can compute.
 
 ## JEV-08: Go live on pre_bash
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Dead surface. Its gating discipline is inherited by the install gate
+
 **Status:** done
 **Labels:** hooks, verification, blocking
 **Blocked by:** JEV-07
@@ -367,6 +455,8 @@ three verification tests that must all pass before the hook is enabled.
 
 ## JEV-09: True inline shadow
 
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** The SCRIPT is the product's ancestor; the ticket (inline shadow on pre_bash) dies
+
 **Status:** blocked
 **Labels:** hooks, hot-path
 **Blocked by:** **JEV-52** (the activation gate — this registers a hook, so it cannot happen in Phase A). **Two decisions are also still open** and must be settled during Phase A rather than at the gate: whether to register the inline hook live alongside `capture.sh`, and what `--max-time` should be given the 2.0s default sits BELOW Jev's 2,681ms p99
@@ -386,6 +476,8 @@ blocking -- because a capture-and-replay harness never exercises it.
 ---
 
 ## JEV-10: Synthetic stress set and robustness
+
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** 360 items become the offline regression corpus, rebuilt from delegated-task payloads
 
 **Status:** ready-for-agent
 **Labels:** science
@@ -407,6 +499,8 @@ degenerate to provide on its own.
 
 ## JEV-11: Enforce-overhead bench and drift canary
 
+**PIVOT TRIAGE 2026-09-21 — KEEP.** bench_inline.py = latency SLO; canary = production drift alarm
+
 **Status:** done
 **Labels:** metrics, science
 **Blocked by:** JEV-08
@@ -427,6 +521,8 @@ retrain. The probability deltas are the only signal for the latter.
 ---
 
 ## JEV-12: Figures and publishable export
+
+**PIVOT TRIAGE 2026-09-21 — KILL.** Publication artifact
 
 **Status:** blocked
 **Labels:** analysis, security
@@ -465,6 +561,8 @@ step that makes publishing safe.
 
 ## JEV-13: Remaining three surfaces — **SUPERSEDED**
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Already superseded; all three are non-routing surfaces
+
 **Status:** done
 **Labels:** hooks, superseded
 **Blocked by:** —
@@ -481,6 +579,8 @@ ticket. Nothing else here is unique.
 ---
 
 ## JEV-14: Subscription-only baseline, and the disclosure that makes it honest
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** The auth path decides the cache-write multiplier. Costing is wrong without it
 
 **Status:** done
 **Labels:** core, science
@@ -499,6 +599,8 @@ Anthropic API key, and make the resulting confound impossible to miss.
 - [x] Verified live: 10 state tokens against 5,460 preamble tokens, 1.5s spawn on 4.6s API
 
 ## JEV-15: GATE 4 — the future-leakage test that does not exist
+
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** Becomes the 'state is a pure function of the payload' guard that makes offline policy replay valid
 
 **Status:** done
 **Labels:** verification, blocking, science
@@ -567,6 +669,8 @@ ticket's file). Now that the gates are sandboxed they are safe to add.
 
 ## JEV-16: Determinism sweep — the enforcement blocker
 
+**PIVOT TRIAGE 2026-09-21 — KEEP.** Flip-rate-vs-distance-from-tau becomes a PRODUCT RULE: do not route inside the flip band
+
 **Status:** done (Run A). **Runs B and C deferred to Phase B / B1.**
 **Labels:** science, blocking
 **Blocked by:** None. Avoid running it at the same moment as another process writing `data/runs/` — see the execution plan.
@@ -598,6 +702,8 @@ checkboxes describe is **Run B, deferred to B1**.
 ---
 
 ## JEV-17: Replace the fitted thresholds with a rule
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** You are about to pick tier thresholds. 'A rule, never a memorised constant' is exactly the lesson
 
 **Status:** ready-for-agent — **unblocked 2026-09-21, with a stated limit**
 **Labels:** science
@@ -643,6 +749,8 @@ as data accumulates.
 
 ## JEV-18: `user_prompt` / routing — FIRST of the remaining surfaces
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Doubly dead: per-turn routing is impossible, and it is a shadow counterfactual by design
+
 **Status:** blocked
 **Labels:** hooks, science
 **Blocked by:** **JEV-52** (the activation gate), JEV-15
@@ -677,6 +785,8 @@ Strongest economics, thinnest evidence.
 
 ## JEV-19: `stop` — resolve the blocker, or cancel the surface
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Non-routing surface; its own ticket already offers 'cancel'
+
 **Status:** blocked
 **Labels:** hooks, science
 **Blocked by:** **JEV-52** (the activation gate), JEV-18
@@ -701,6 +811,8 @@ transcript before the hook fires?
 
 ## JEV-20: `post_edit` — risk scoring
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Non-routing surface, no cost or latency leverage
+
 **Status:** blocked
 **Labels:** hooks
 **Blocked by:** **JEV-52** (the activation gate), JEV-19
@@ -717,6 +829,8 @@ transcript before the hook fires?
 ---
 
 ## JEV-21: Degenerate-interval guard and stopping-rule amendment
+
+**PIVOT TRIAGE 2026-09-21 — KILL.** Pure pre-registration statistics hygiene
 
 **Status:** done
 **Labels:** science, blocking
@@ -736,6 +850,8 @@ live analysis ran.
 ---
 
 ## JEV-22: Complete the five-arm matrix on the existing 60 synthetic items
+
+**PIVOT TRIAGE 2026-09-21 — KILL.** Exists to compare arms for the paper
 
 **Status:** ready-for-agent
 **Labels:** science
@@ -777,6 +893,8 @@ same cost; nothing is discarded, only deferred.
 ---
 
 ## JEV-23: Routing A/B — per delegated task
+
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** The A/B becomes a SHIP GATE on one optimization. Drop ITT/clustering/pre-registration; keep the control arm
 
 **Status:** blocked
 **Labels:** science, hooks
@@ -840,6 +958,8 @@ after the data.
 
 ## JEV-24a: Pre-rule delegation baseline — **measure this first or lose it**
 
+**PIVOT TRIAGE 2026-09-21 — KEEP.** Done and frozen, and it is the ONLY 'before' the product has
+
 **Status:** done
 **Labels:** science, blocking
 **Blocked by:** None (can start immediately — and must, before JEV-23 or JEV-24b). **Do it in the same pass as JEV-38**: both read the same transcript corpus, both are destroyed by the same retention risk, and reading it twice is wasted work on data that may not survive.
@@ -863,6 +983,8 @@ cannot be scheduled after the thing that erases it.
 
 ## JEV-24b: "Delegate where possible" working rule — and its confound
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** ACTIVELY HARMFUL. A standing 'delegate where possible' rule grows the routed surface WHILE RAISING THE BILL
+
 **Status:** blocked
 **Labels:** science
 **Blocked by:** **JEV-52** (the activation gate), JEV-24a
@@ -876,6 +998,8 @@ practical, raising the share of spend that is routable at all.
 ---
 
 ## JEV-25: `verbosity` question — the second routing dimension
+
+**PIVOT TRIAGE 2026-09-21 — PARK.** Correct insight, but it is optimization #3 and Fable pricing is unverified
 
 **Status:** ready-for-agent — **unblocked 2026-09-21**, JEV-34 landed (`652d3e8`)
 **Labels:** questions, science
@@ -897,6 +1021,8 @@ turns — below ~300 output tokens at 30k cache read, ~1,000 at 100k, ~3,000 at
 ---
 
 ## JEV-26: Correct the refuted mechanism claim in FINDINGS.md
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** The correction IS the product: PreToolUse on Agent + updatedInput rewriting model
 
 **Status:** done
 **Labels:** science, publication, blocking
@@ -929,6 +1055,8 @@ the wrong conclusion from it.
 ---
 
 ## JEV-27: Power analysis for the routing A/B stopping rule
+
+**PIVOT TRIAGE 2026-09-21 — KILL.** Sizing a study nobody will publish
 
 **Status:** blocked
 **Labels:** science, blocking
@@ -966,6 +1094,8 @@ The derivation is specified in A2.4 so it cannot be tuned after the fact.
 
 ## JEV-28: Reconcile Fable pricing — it is now inside the primary outcome
 
+**PIVOT TRIAGE 2026-09-21 — PARK.** Only matters once Fable is in the choice set; its cache multiplier contradicts the verified one
+
 **Status:** ready-for-agent
 **Labels:** science, blocking, cost
 **Blocked by:** None. Cheapest path is to let JEV-22 or JEV-29 produce the Fable session as a by-product rather than generating one for this alone.
@@ -987,6 +1117,8 @@ routable.
 ---
 
 ## JEV-29: The blinded grader — build it, freeze it, prove the blind holds
+
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** PROMOTED. From 'primary quality measure for the A/B' to THE ACCURACY GATE on every optimization. Must become per-task pass/fail
 
 **Status:** ready-for-agent
 **Labels:** science, blocking
@@ -1011,6 +1143,8 @@ chosen after results are visible are not evidence.
 ---
 
 ## JEV-30: The worker reads config once, and nothing says so
+
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** The REFUSAL is wrong for a daily driver; the config_fingerprint-on-every-row half is exactly right
 
 **Status:** in-review — config side done 2026-09-20, one box is the worker agent's
 **Labels:** defect, science, blocking
@@ -1055,6 +1189,8 @@ report it.
 ---
 
 ## JEV-31: Claimed spool files are never reaped — silent, unmeasured data loss
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** Any async outcome-logging path inherits this
 
 **Status:** done
 **Labels:** defect, blocking, science
@@ -1108,6 +1244,8 @@ stranded file that is *visible* is a much smaller problem than this ticket's.
 
 ## JEV-31b: Five more config fields that look live and are inert
 
+**PIVOT TRIAGE 2026-09-21 — KEEP.** 'Config that looks live and is inert' is a worse bug in a shipped tool than in a harness
+
 **Status:** done 2026-09-20 (one follow-up line handed to the worker agent)
 **Labels:** defect, science
 **Blocked by:** None.
@@ -1138,6 +1276,8 @@ because making it live changes what gets written to the row schema.
 ---
 
 ## JEV-32: `analyze.py` reads the current config against rows run under an older one
+
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** Becomes 'never compare two policy versions as if they were one'
 
 **Status:** done
 **Labels:** defect, science
@@ -1204,6 +1344,8 @@ which differ in concurrency regime. Both want their own tickets.
 ---
 
 ## JEV-33: The worker drains slower than the hook captures
+
+**PIVOT TRIAGE 2026-09-21 — PARK.** Backpressure matters only for the async path, which is now secondary
 
 **Status:** done
 **Labels:** defect, science, blocking
@@ -1335,6 +1477,8 @@ in force).
 
 ## JEV-34: `agent_route` in shadow — the surface, deciding nothing
 
+**PIVOT TRIAGE 2026-09-21 — KEEP.** THE PRODUCT'S FOUNDATION. Done. Its deferred box (measure live spawn latency) is now a P0
+
 **Status:** done 2026-09-21 (`652d3e8`) — **one box deferred to Phase B, stated below**
 **Labels:** hooks, science
 **Blocked by:** JEV-15
@@ -1376,6 +1520,8 @@ lands** — JEV-35 must update it deliberately, not delete it.
 ---
 
 ## JEV-35: Make the routing hook an actuator — behind two new gates
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** THIS IS THE PRODUCT. Its five gates become the ship checklist
 
 **Status:** ready-for-agent — **unblocked 2026-09-21**. Both blockers are done: JEV-34 landed (`652d3e8`) and JEV-40 prints `OFF IS PROVEN EQUAL TO VANILLA -- JEV-35 may proceed`
 **Labels:** hooks, science, blocking
@@ -1434,6 +1580,8 @@ fail-open, kill switch, GATE 4 — all apply, plus two written for this one
 
 ## JEV-36: A/B outcome measurement — both primaries, per delegated task
 
+**PIVOT TRIAGE 2026-09-21 — KEEP.** PROMOTED. How you would ever know it worked. Cannot come from PostToolUse - needs SubagentStop
+
 **Status:** blocked
 **Labels:** analysis, science, blocking
 **Blocked by:** JEV-35
@@ -1476,6 +1624,8 @@ intervals, and the arm each was assigned.
 
 ## JEV-37: The canary is pre-registered as daily and has no scheduler
 
+**PIVOT TRIAGE 2026-09-21 — KEEP.** A shipped router needs a real drift alarm, not one that fires when someone remembers
+
 **Status:** ready-for-agent
 **Labels:** science, ops
 **Blocked by:** None.
@@ -1498,6 +1648,8 @@ wrapper, no instruction and no record of whether it ran exists.
 ---
 
 ## JEV-38: Persist the "before" baseline — the source is outside the folder and not ours
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** The only durable record of pre-Jev spend; its source is outside the folder and being reaped
 
 **Status:** done
 **Labels:** metrics, blocking, science
@@ -1532,6 +1684,8 @@ dependency and the same exposure.
 
 ## JEV-39: Stats exist only as raw rows and ad-hoc reports
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** A dated committed stats snapshot is a publication artifact
+
 **Status:** ready-for-agent
 **Labels:** analysis, ops
 
@@ -1560,6 +1714,8 @@ this disk only; the *statistics* mostly do not.
 ---
 
 ## JEV-40: One master switch, and a proof that OFF means vanilla
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** VALUE INCREASES. You are shipping an actuator into daily work. The only thing between a bug and real sessions
 
 **Status:** done
 **Labels:** safety, blocking, hooks
@@ -1662,6 +1818,8 @@ belong in the writeup's limitations rather than in a config file.
 ---
 
 ## JEV-41: `cc_haiku45` is the SLOWEST arm, not the fastest — and `--effort low` is not suppressing its thinking
+
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** Keep the FINDING (it undercuts 'cheaper tier = faster'), drop the ticket's arm-comparison purpose
 
 **Status:** done — with one half fixed, the other half diagnosed and deliberately left alone
 **Labels:** science, defect, cost
@@ -1813,6 +1971,8 @@ about this change reaches live collection until then.
 ---
 
 ## JEV-42: the test suite destroys live collection data
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** audit_live_writes.sh + live_guard.sh protect the baseline, which is now irreplaceable
 
 **Status:** done
 **Labels:** defect, blocking, test, data-loss
@@ -1968,6 +2128,8 @@ same report belongs to JEV-19 and is not addressed here.
 ---
 
 ## JEV-43: `cc_*` wall-clock is contaminated by the operator's own user-level hooks
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** Self-referential now: an installed hook contaminates the wall-clock of every measurement you take
 
 **Status:** done
 **Labels:** science, blocking, metrics
@@ -2127,6 +2289,8 @@ frozen and was not inspected for it.
 
 ## JEV-44: `src/arms/jev.py` does not parse under Python 3.11, and nothing pins the version
 
+**PIVOT TRIAGE 2026-09-21 — KEEP.** A distributed tool runs under whatever interpreter the machine has. The floor test matters MORE
+
 **Status:** done
 **Labels:** defect, test
 
@@ -2207,6 +2371,8 @@ gold labels, Brier with Murphy decomposition, ECE, RPS, decision-curve analysis,
 and the writeup.
 
 ## JEV-45: we may be paying ~245ms per Jev call for a gateway hop we never chose deliberately
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** VERDICT FLIPS. Under a latency goal this is the largest recoverable chunk of Jev's own 437ms
 
 Status: ready-for-agent
 Labels: latency, arms, threat-to-validity, prior-art
@@ -2322,6 +2488,8 @@ unredacted command text changes too.
 
 ## JEV-46: `random_matched` — the third routing arm, and why it is NOT a static heuristic
 
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** INVERTED. The static subagent_type->tier map this ticket REJECTED becomes W1, the floor Jev must beat
+
 Status: ready-for-agent — **unblocked 2026-09-21**, JEV-34 landed (`652d3e8`)
 Labels: science, arms, prior-art
 Blocked by: ~~JEV-34 (the surface)~~ — cleared. Wave A4, and it gates JEV-27.
@@ -2396,6 +2564,8 @@ before the first `random_matched` run.
 
 ## JEV-47: both routing arms must delegate identically, or we measure the delegation penalty
 
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** READ IT AS A WARNING. Its AqueGen citation says delegate-and-route cost 24% MORE than inline
+
 Status: ready-for-agent — **unblocked 2026-09-21**, JEV-34 landed (`652d3e8`)
 Labels: science, threat-to-validity, prior-art
 Blocked by: ~~JEV-34~~ — cleared. Wave A4.
@@ -2438,6 +2608,8 @@ delegation penalty with a routing label on it. Our design randomises assignment
 
 ## JEV-48: are we measuring tier fit, or just task difficulty?
 
+**PIVOT TRIAGE 2026-09-21 — PARK.** A research question about WHY the router works, not whether it ships
+
 Status: blocked
 Labels: science, analysis, prior-art
 Blocked by: JEV-36 (outcome measurement). **Moved from wave A3 to A7 on
@@ -2469,6 +2641,8 @@ and if it is small the study's ceiling is low regardless of how good Jev is.
 - [ ] Stated in the writeup whether the observed headroom bounds the result
 
 ## JEV-49: three known cost-pipeline bugs, and the reconciliation nobody has published
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** Every dollar figure in the new claim flows through these fixes
 
 Status: done
 Labels: cost, correctness, prior-art
@@ -2588,6 +2762,8 @@ blocked on this ticket and not the other way round.
 
 ## JEV-50: retract the novelty claim — eleven independent Jev evaluations already exist
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Nothing to retract with no publication. But .scratch/prior-art.md becomes the SHOPPING LIST
+
 Status: ready-for-agent
 Labels: writeup, correctness, prior-art
 Blocked by: none
@@ -2637,6 +2813,8 @@ and therefore a flattering comparator. Say it before a reviewer does.
       still flagged as unverified
 
 ## JEV-51: the kill switch does not stop the worker, and `stop` is ungraceful
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** 'Disabled must mean quiescent, not merely silent' is a consumer-safety property
 
 Status: done
 Labels: safety, reversibility, defect
@@ -2732,6 +2910,8 @@ nothing. Both corrected, and `worker.py` now uses `paths.SPOOL_CLAIMED` /
 `paths.SPOOL_DEAD` rather than re-deriving the paths.
 
 ## JEV-52: the activation gate — the single deliberate act that turns the experiment on
+
+**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** Becomes the INSTALL GATE. Drop step 5 (the pre-registration amendment) entirely
 
 Status: blocked
 Labels: gate, safety, science
@@ -2835,6 +3015,8 @@ partial live state gets created, and it would be the fifth instance.
 
 ## JEV-53: the writeup — and the seven criteria across the board that have nowhere to land
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** The publication
+
 Status: blocked
 Labels: writeup, science
 Blocked by: JEV-12 (figures and export), JEV-23 (the experiment), JEV-50
@@ -2888,6 +3070,8 @@ document owns them:**
       cannot reproduce because it needs our transcripts or a waitlisted endpoint
 
 ## JEV-54: does Jev do better with richer input? Test it offline before changing the hook
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** A product-quality question, cheap and offline. build_agent_route already took the rich side of the bet
 
 Status: blocked — **on spend, not on the instrument**. Wave B1.
 Labels: science, arms, state
@@ -3025,6 +3209,8 @@ rather than smuggled in here.
 
 ## JEV-55: the clustered bootstrap has ONE cluster — the primary interval cannot be computed
 
+**PIVOT TRIAGE 2026-09-21 — KILL.** Exists solely to make the pre-registered interval computable. Keep its FACTS as limits on the old corpus
+
 Status: ready-for-agent — **leads wave A4**, ahead of JEV-27
 Labels: science, blocking, threat-to-validity
 Blocked by: none. **This gates JEV-27 (power analysis), JEV-52 (the gate) and
@@ -3119,6 +3305,8 @@ than a footnote.
 ---
 
 ## JEV-56: `reversibility.sh` cannot be green on a clean checkout, which is what the gate demands
+
+**PIVOT TRIAGE 2026-09-21 — KEEP.** PROMOTED TO P0. You cannot distribute a tool whose suite cannot go green on a clean checkout
 
 Status: ready-for-agent
 Labels: defect, gate, safety

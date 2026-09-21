@@ -1,11 +1,9 @@
 # SPEC (reworked 2026-09-21) — `jev`: a per-project Claude Code accelerator
 
-> **Status: DRAFT, complete, awaiting the owner's sign-off on §9's four open
-> decisions.** Replaces the measurement-harness SPEC. All four harvest agents
-> have reported: context reduction, provider + routing, quality guard, and the
-> repo audit. **Do not promote to `SPEC.md` until §9 decision 1 — accepting the
-> corrected goal statement in §1 — is settled**, because the phase order in §5
-> depends on it.
+> **Status: ADOPTED 2026-09-21.** All four open decisions settled by the
+> operator (§9). Ready to promote to `SPEC.md`. Replaces the measurement-harness
+> SPEC. All four harvest agents have reported: context reduction, provider +
+> routing, quality guard, and the repo audit.
 >
 > Every repo named here was verified to exist and its licence read. Two
 > licence hazards and one disproven mechanism are recorded in §7.
@@ -25,10 +23,12 @@ The new goal is a **tool**:
 > degrading output quality — assembled from existing open-source code rather
 > than written from scratch.**
 
-### ⚠️ The goal statement is mis-specified in two places, on our own evidence
+### ⚠️ That statement was mis-specified in two places — corrected and ACCEPTED
 
-This must be settled before anything is built on it. `FINDINGS.md` already
-answered part of the new question, and the answer is uncomfortable.
+`FINDINGS.md` had already answered part of the new question, and the answer was
+uncomfortable. The corrected statement below was **put to the operator and
+accepted on 2026-09-21**; it is the target this SPEC is built on. The original
+wording is preserved above so the change is visible rather than silent.
 
 **(a) "Reduces token usage" is wrong for routing — it reduces *cost*.** Routing
 a delegated task Opus→Haiku consumes roughly the same token count at a lower
@@ -107,11 +107,27 @@ reports its own overhead in the same units as its win.
 
 These are hard constraints. A design that violates one is wrong, not a tradeoff.
 
-1. **Fail open, always.** Every hook exits 0. Jev down, slow, rate-limited, or
-   returning nonsense ⇒ the session proceeds exactly as vanilla. *We explicitly
-   reject the fail-closed pattern* seen in the `router` CLI from prior art: that
-   is defensible for a deliberate dispatch tool and indefensible for something
-   sitting in the path of daily work.
+1. **Fail safe, then fail to frontier.** Two separate properties; conflating
+   them is how this repo previously shipped a kill switch that stopped one
+   writer and not the other.
+
+   **(a) Fail safe — absolute.** Every hook exits 0 and never breaks or blocks a
+   session, whatever happens. `trap 'exit 0' EXIT` before anything that can
+   fail. We reject the fail-**closed** pattern seen in prior art: defensible for
+   a deliberate dispatch tool, indefensible in the path of daily work.
+
+   **(b) Fail to frontier — the routing decision.** *Operator decision,
+   2026-09-21, overriding the default recommendation.* When the router cannot
+   decide — provider down, malformed answer, missing config, timeout — the task
+   goes to the **frontier tier**, never to a cheap one. Quality is protected on
+   the error path; cost is not.
+
+   **The risk this accepts, stated plainly:** a sustained provider outage
+   silently bills frontier rates for as long as it lasts. **Therefore a circuit
+   breaker is mandatory, not optional**: after N consecutive failures the router
+   stops rewriting entirely, leaves the input untouched, and makes the condition
+   loudly visible. Breaker state persists to disk, because every hook invocation
+   is a fresh process and an in-memory counter would reset every time.
 2. **Never rewrite content.** Compaction **deletes whole stale items**; it never
    paraphrases, summarises or regenerates. Surviving bytes are identical to the
    originals. File paths, error strings, diffs and stack traces are preserved
@@ -237,6 +253,7 @@ insert a Jev-free phase before everything:
 
 | phase | what | why this order | risk |
 |---|---|---|---|
+| **W0** | **Measure inline vs delegated on our own corpus** | Operator decision 4. **Blocks W4.** Read-only over the existing baseline; costs nothing | none |
 | **W1** | **The static floor — no Jev call at all.** A `PreToolUse` hook on `Agent` applying a `subagent_type → tier` map, rewriting `tool_input.model` | **The first shippable thing.** Zero classifier calls, **zero added latency**, and the prior art says it captures most of the available saving. It also builds every piece of scaffolding W4 needs and produces the "after" corpus that nothing in this repo has ever produced | low |
 | **W2** | **Safe install + teardown**, opt-in per project | Must work *before* the router is armed, not after | — |
 | **W3** | **The accuracy gate** — per-task pass/fail, blinded | Nothing in this repo has ever measured whether a routed subagent did the work correctly | — |
@@ -565,15 +582,33 @@ Three verdicts worth flagging because they **invert**:
   near τ means **the same task gets a different model on retry**, injecting
   noise into the accuracy gate. Rule: **do not route inside the flip band.**
 
-### Open decisions, owner's call
+### Decisions — all four settled by the operator, 2026-09-21
 
-1. **Accept the corrected goal statement** in §2, or reject it and say why.
-2. **Fail-open vs fail-to-frontier.** A known dispatcher fails to frontier — a
-   Jev outage then silently routes everything to Opus and the bill explodes.
-   This SPEC's non-negotiable 1 says fail **open to the default**. Confirm.
-3. **Restart vs continue on escalation.** SWE-Router restarts, *"because
-   conditioning m2 on m1's reasoning has been seen to bias m2 toward m1's
-   mistakes."*
-4. **Measure inline-vs-delegated on our own corpus** before optimising the
-   delegated path at all. If AqueGen's result replicates here, the first
-   recommendation is to delegate less.
+1. **The corrected goal statement is ACCEPTED.** The adopted target is *lower
+   realised cost per delegated task, at equal task success, with no added felt
+   latency.* "Reduce tokens" and "reduce execution time" are retired as
+   headline claims — the first is wrong for routing, the second is unmeasured
+   and partly contradicted by our own JEV-41 result.
+
+2. **Fail to FRONTIER, not open** — see non-negotiable 1(b). The operator
+   accepted the cost risk explicitly, in exchange for never silently
+   downgrading work on an error path. **The circuit breaker is the condition of
+   that acceptance** and is mandatory.
+
+3. **RESTART on escalation, do not continue.** When a task is escalated to a
+   higher tier, the higher-tier model starts from the original task, **not**
+   from the first attempt's output or reasoning. Rationale, from SWE-Router:
+   *"conditioning m2 on m1's reasoning has been seen to bias m2 toward m1's
+   mistakes."* The cost consequence is real and must be carried in the
+   accounting: **an escalation pays for the work twice.** That is what makes
+   escalation expensive and *uplift* (choosing the higher tier before anything
+   runs) cheap — the distinction `CONTEXT.md` draws, now load-bearing for cost
+   rather than for vocabulary.
+
+4. **Measure inline-vs-delegated FIRST.** This is now **W0** and it **blocks
+   W4**. If AqueGen's result replicates on our corpus — delegate-and-route
+   costing ~24% more than staying inline — then the correct first
+   recommendation is *delegate less*, and optimising the delegated path is
+   optimising the wrong thing. W1 proceeds in parallel because the static floor
+   is needed either way and adds no cost, but **its tier map may be rewritten
+   by W0's answer.**

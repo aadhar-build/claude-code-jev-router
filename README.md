@@ -1,26 +1,59 @@
-# Jev shadow-mode measurement harness
+# `jev` — a per-project Claude Code accelerator
 
-Does replacing Claude Code's *decision layer* with [Jev](https://vercel.com/docs/ai-gateway)
-— TypeSafe AI's non-generative "System One" model — actually work? This folder
-is the apparatus built to find out and publish the answer.
+**Goal:** lower realised cost per delegated task, at equal task success, with no
+added felt latency. Assembled from existing open-source work rather than written
+from scratch.
 
-Jev takes state plus typed questions and returns calibrated probabilities. It
-never writes text, so it cannot replace Claude as the coding model. What it can
-do is sit inside a **hook** — which runs synchronously on every turn and has
-therefore never been able to afford an LLM call — at $0.042/1M input tokens with
-output free.
+[Jev](https://docs.typesafe.ai/api) is TypeSafe AI's non-generative "System One"
+model: state plus typed questions in, calibrated probabilities out. It never
+writes prose, so it cannot replace Claude as the coding model. What it can do is
+sit at a decision point and choose — at $0.042/1M input tokens.
 
-**Shadow mode: this harness observes and never blocks.** It records the decision
-each arm *would* have made. No tool call is ever gated by it.
+> **This repository pivoted on 2026-09-21.** It was built as a *measurement
+> harness* to publish agreement statistics comparing Jev against Claude Code's
+> decision layer. That goal is retired. The apparatus is not: it becomes the
+> **regression gate** that proves an optimization did not make the agent worse.
+> The old spec is preserved at `docs/SPEC-measurement-harness-ARCHIVED.md`, and
+> `FINDINGS.md` remains the record of what was measured.
+
+## What is actually being built
+
+A `PreToolUse` hook on the `Agent` tool that chooses the model tier for a
+delegated task before it spawns, opt-in per project, reversible in one command.
+
+**The first shippable thing contains no Jev at all** — a static
+`subagent_type → tier` map, zero classifier calls, zero added latency. Five
+independent sources find classifier routers frequently fail to beat exactly that
+trivial baseline, while published static heuristics already deliver 46% and 28%
+savings. Jev enters as increment two, aimed at the 65% of delegated tasks typed
+`general-purpose` where the static rule has no signal, and **it ships only if it
+beats the static rule on realised cost at equal task success.**
+
+## Three numbers that bound the whole project
+
+| | |
+|---|---|
+| **3,674×** | leverage of one routing decision: a delegation moved Opus→Haiku saves $0.0520 against a $0.000014 Jev call. This is why the project is worth doing |
+| **34%** | of the bill is addressable. $42.57 delegated of $125.58 total. Per-turn routing is impossible; only `Agent` calls can be routed |
+| **+337 tokens, +557ms** | what a synchronous Jev call in a hook *costs*, per call, measured here. Any per-tool-call optimization must remove far more than it adds |
+
+## What we do not claim
+
+Not that Jev is accurate — we never establish ground truth. Not that quality is
+preserved — the gate *fails to detect* a regression at a stated power, and says
+so in its own output. Token *count* may go up even as cost goes down, because a
+subagent starts with empty context and trades cheap cache-reads for expensive
+cache-writes.
 
 ## Reading order
 
 | File | What it is |
 |---|---|
-| `SPEC.md` | Problem, solution, user stories, implementation and testing decisions |
-| `ISSUES.md` | The issue tracker — thirteen vertical slices with blocking edges |
-| `docs/PLAN.md` | The full design, including the nine decisions that shaped it |
-| `PREREGISTRATION.md` | Analysis commitments, committed before collection starts (ticket 7) |
+| `SPEC.md` | **Start here.** The reworked spec: goal, non-negotiables, the harvest ledger, the guard |
+| `ISSUES.md` | The tracker. Every ticket carries a `PIVOT TRIAGE` verdict; the workstream table is at the top |
+| `FINDINGS.md` | What was actually measured. Still authoritative, still the source of the three numbers above |
+| `docs/SPEC-measurement-harness-ARCHIVED.md` | The retired spec — a question that was answered, not a document that was wrong |
+| `PREREGISTRATION.md` | **No longer a live commitment.** Retained as a record; its Amendments 5–8 contain measured facts the cost pipeline still depends on |
 
 ## What is being compared
 

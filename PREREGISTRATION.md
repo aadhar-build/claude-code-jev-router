@@ -1,5 +1,23 @@
 # Pre-registration
 
+> ## ⚠️ NO LONGER A LIVE COMMITMENT — retired 2026-09-21
+>
+> The publication this document governed was cancelled. **Nothing here binds
+> current work**, and no new analysis should cite it as a commitment.
+>
+> It is retained for two reasons, both real:
+>
+> 1. **It is the honest record of what was believed, and when.** Deleting a
+>    pre-registration after the result stops being wanted is precisely the
+>    behaviour pre-registration exists to prevent. It stays.
+> 2. **Amendments 5–8 contain measured facts the cost pipeline still depends
+>    on** — in particular the auth path and the cache-write multiplier (1-hour
+>    TTL at 2× on subscription vs 5-minute on API key). Get that wrong and every
+>    dollar figure in the new goal is wrong.
+>
+> The live spec is `SPEC.md`. See `ISSUES.md` for the pivot and its triage.
+
+
 **Committed before any live decision point is captured.** Its git hash is the
 citation used in the writeup. Everything below is a commitment made while the
 dataset is empty; the point is that none of it can be chosen after seeing the
