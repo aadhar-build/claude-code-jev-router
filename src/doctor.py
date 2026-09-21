@@ -246,6 +246,26 @@ def check_switch_on_every_hook() -> None:
                f"all {len(hooks)} registered hook(s) check the anchored switch on line one")
 
 
+def check_routing_breaker() -> None:
+    """JEV-35 / W1: is the static router's circuit breaker open?
+
+    Fail-to-frontier protects quality on the error path and does NOT protect
+    cost -- a sustained failure bills frontier rates for as long as it lasts.
+    The breaker bounds that by suspending rewriting entirely, and the whole
+    point of a breaker is that somebody finds out. The hook says so in a
+    `systemMessage` at the time; this is the half that is still true tomorrow
+    morning, when the session that saw the message is gone.
+    """
+    marker = paths.AGENT_ROUTE / "BREAKER-OPEN"
+    if not marker.exists():
+        record("PASS", "routing-breaker", "closed (no BREAKER-OPEN marker)")
+        return
+    first = marker.read_text(errors="replace").splitlines()[:1]
+    record("WARN", "routing-breaker",
+           f"OPEN — static routing SUSPENDED, every delegation at its default "
+           f"tier. {first[0] if first else ''}")
+
+
 def check_hook_registration() -> None:
     if not PROJECT_LOCAL_SETTINGS.exists():
         record("PASS", "hook-registration", "not yet registered (expected until ticket 8)")
@@ -270,6 +290,7 @@ def main() -> int:
     check_user_settings_untouched()
     check_no_outside_writes_in_source()
     check_kill_switch()
+    check_routing_breaker()
     check_hook_registration()
     check_switch_on_every_hook()
 

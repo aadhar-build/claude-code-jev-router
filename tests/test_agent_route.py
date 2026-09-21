@@ -257,11 +257,69 @@ class TestTheSurfaceIsNotArmed(unittest.TestCase):
             self.skipTest("no settings.local.json in this tree")
         self.assertNotIn(SURFACE, settings.read_text())
 
-    def test_there_is_no_actuator_in_this_repo_yet(self):
-        """JEV-35 builds the thing that rewrites `updatedInput`. Until then no
-        hook in `hooks/` may emit one."""
+    def test_the_only_actuator_is_the_one_jev_35_deliberately_built(self):
+        """DELIBERATELY UPDATED BY JEV-35. Read the reason before changing it.
+
+        JEV-34 wrote this test as `test_there_is_no_actuator_in_this_repo_yet`,
+        asserting that no hook in `hooks/` contained the string `updatedInput`.
+        It was written to FAIL the moment an actuator existed, so that "we only
+        built the surface" stayed a property of the tree rather than a claim in
+        a commit message. JEV-35 is the ticket that makes an actuator exist, so
+        that test has now done its job and fired exactly as designed.
+
+        It is NOT deleted and NOT weakened, because the thing it really guards
+        is still live: an actuator must never appear by accident. What changes
+        is the assertion it makes. "No hook rewrites input" becomes "EXACTLY ONE
+        hook rewrites input, it is the one named in JEV-35, and every other hook
+        in this repo is still an observer". A second actuator -- or a rewrite
+        quietly added to `capture.sh` -- fails this test just as loudly as the
+        first one used to.
+
+        What the surface being ARMED would look like is asserted separately, by
+        the two tests above: `mode` is still `off`, and no hook entry exists in
+        settings.local.json. Building the actuator is JEV-35; arming it is
+        JEV-52.
+        """
+        ACTUATOR = "agent_route_actuator.sh"
+        rewriting = sorted(
+            hook.name for hook in (ROOT / "hooks").glob("*.sh")
+            if "updatedInput" in hook.read_text())
+        self.assertEqual(
+            rewriting, [ACTUATOR],
+            "exactly one hook may rewrite tool input, and it must be the one "
+            f"JEV-35 built; found: {rewriting}")
+
+        # The observers must still be observers. This is the half of the old
+        # assertion that survives unchanged.
         for hook in (ROOT / "hooks").glob("*.sh"):
+            if hook.name == ACTUATOR:
+                continue
             self.assertNotIn("updatedInput", hook.read_text(), hook.name)
+
+    def test_the_actuator_is_built_but_not_armed(self):
+        """The scope line JEV-35 must not cross: it may build the thing, and it
+        may not register it or flip the surface on."""
+        actuator = ROOT / "hooks" / "agent_route_actuator.sh"
+        self.assertTrue(actuator.is_file(), "JEV-35's actuator is missing")
+        settings = ROOT / ".claude" / "settings.local.json"
+        if settings.is_file():
+            self.assertNotIn("agent_route_actuator", settings.read_text())
+        self.assertEqual(cl.surface_mode(SURFACE), "off")
+
+    def test_the_actuator_carries_the_canonical_kill_switch_block(self):
+        """An actuator changes what runs, not merely what is recorded, so the
+        switch matters more here than on any observer. Compared against
+        capture.sh byte for byte rather than pattern-matched, which is the same
+        thing tests/reversibility.sh does when it builds its fixture."""
+        import re
+        block = re.compile(
+            r"# --- jev kill switch: canonical block.*?# --- end jev kill switch[^\n]*\n",
+            re.S)
+        canonical = block.search((ROOT / "hooks" / "capture.sh").read_text())
+        mine = block.search((ROOT / "hooks" / "agent_route_actuator.sh").read_text())
+        self.assertIsNotNone(canonical)
+        self.assertIsNotNone(mine)
+        self.assertEqual(canonical.group(0), mine.group(0))
 
 
 if __name__ == "__main__":

@@ -1521,6 +1521,28 @@ lands** — JEV-35 must update it deliberately, not delete it.
 
 ## JEV-35: Make the routing hook an actuator — behind two new gates
 
+### ⚠️ W1 FINDING, 2026-09-21 — the bug that would have made treatment identical to control
+
+**`tool_input.model` takes an ALIAS, not a model id.** The `Agent` tool schema
+declares `model` as `enum: ["sonnet", "opus", "haiku", "fable"]`, corroborated
+by the observed corpus: 29 `sonnet` / 2 `opus` / 2 `inherit` / 177 absent, of
+208 spawns. **`resolvedModel`, by contrast, is always a full dated id**
+(`claude-haiku-4-5-20251001`).
+
+Had the hook emitted a model id — **which is exactly what the reversibility
+fixture does** — the field would have been silently rejected and **every
+assignment would have been unhonoured. Treatment would have been byte-identical
+to control, and the experiment would have measured nothing while appearing to
+work.**
+
+This is why gate 3 verifies against `resolvedModel` and not against what was
+asked for, and why the verifier does a **prefix match**: `config/tiers.json`
+carries both forms per tier (`alias` for the write, `resolved_prefix` for the
+check). Caught before arming.
+
+**`model: "inherit"` is treated as routable**, not as a caller's choice — it
+means "the parent's model" and expresses no tier preference.
+
 **PIVOT TRIAGE 2026-09-21 — KEEP.** THIS IS THE PRODUCT. Its five gates become the ship checklist
 
 **Status:** ready-for-agent — **unblocked 2026-09-21**. Both blockers are done: JEV-34 landed (`652d3e8`) and JEV-40 prints `OFF IS PROVEN EQUAL TO VANILLA -- JEV-35 may proceed`
@@ -1542,7 +1564,7 @@ answers and the cost signatures are opposite:
 - **Fail behaviour.** Claude Code's documented hook timeout is **fail-open** (the
   tool proceeds). Anthropic's auto mode is **fail-closed**. togishima's
   dispatcher **fails to frontier** — a Jev outage silently routes everything to
-  Opus and the bill explodes. Ours is fail-open by design; say so explicitly and
+  Opus and the bill explodes. ~~Ours is fail-open by design~~ **SUPERSEDED 2026-09-21 — see the gate-4 note below**; say so explicitly and
   state what it costs.
 - **Escalation semantics.** SWE-Router (arXiv:2607.00053) restarts the strong
   model from the original query rather than continuing the cheap model's
@@ -1571,7 +1593,31 @@ fail-open, kill switch, GATE 4 — all apply, plus two written for this one
 - [ ] **Input-fidelity gate.** `updatedInput` replaces the ENTIRE tool input object, so `prompt`, `description` and `subagent_type` must be echoed back byte-identically. Asserted — a hook that drops `subagent_type` spawns a subagent of the wrong type, which is indistinguishable in the results from a routing quality effect
 - [ ] **Assignment-ledger-before-spawn gate.** The assignment is durably recorded *before* the subagent starts. A ledger written afterwards is missing exactly when it matters most: when the task crashed
 - [ ] Verify against `resolvedModel`, not against what was requested — an `availableModels` allowlist or `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` overrides the hook, and a silently ignored assignment makes the treatment arm identical to the control arm
-- [ ] **Fail open means fall back to the default, which IS the control arm.** Record that it happened; A3.1 charges it to the treatment under intention-to-treat
+- [x] ~~**Fail open means fall back to the default, which IS the control arm.**~~ **SUPERSEDED BY OPERATOR DECISION, 2026-09-21. `SPEC.md` §3.1 is authoritative.**
+
+      The operator chose **fail to FRONTIER** over fail-open, accepting the cost
+      risk to protect quality on the error path. The two are not the same and
+      the difference is exactly the thing this box used to assert: falling back
+      to the default IS the control arm, so a failure is invisible in the
+      comparison; falling back to **frontier** is **not** the control arm, and
+      a failure therefore shows up as treatment-looks-expensive.
+
+      **As built (W1), the distinction is structural, not a flag:**
+      - payload parsed + **config broken** → **frontier**, every field echoed
+      - payload **unparseable** → **zero bytes emitted, input untouched** —
+        because no faithful `updatedInput` can be constructed from a payload
+        that could not be read
+      - a **miss is not an error**: `general-purpose` and unmapped types record
+        a *success*, never a failure, so they can never trip the breaker
+      - **unwritable ledger ⇒ nothing is rewritten** — the ledger is made
+        load-bearing by its failure branch rather than being advisory
+
+      Because fail-to-frontier means a sustained outage would bill frontier
+      rates indefinitely, the **circuit breaker is mandatory**: 3 consecutive
+      failures / 900s TTL, then it stops rewriting entirely. It is an
+      **append-only outcome log, not a counter** — parallel spawns are the
+      normal case here and a read-modify-write counter races. State is derived
+      from the log, so half-open and self-closing come free.
 - [ ] Choice set `{haiku45, sonnet5, opus5, fable51}` per A3.2 — Fable blocked on JEV-28
 - [ ] The `JEV_GRADER` guard, so the blinded grader's own delegations cannot enter the experiment measuring them
 - [ ] Kill switch verified on this hook specifically: `.jev-disabled` must stop it routing, not merely stop it logging

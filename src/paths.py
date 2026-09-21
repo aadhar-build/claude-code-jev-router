@@ -52,6 +52,15 @@ BASELINE = DATA / "baseline"
 DROPS = DATA / "drops"
 SPOOL_WATERMARK = DATA / "spool_watermark.json"
 
+# JEV-35 / W1. The static router's assignment ledger and circuit-breaker log,
+# written by hooks/agent_route_actuator.sh. Under data/ for the same reason
+# DROPS is: an assignment that cannot be joined to an outcome is attrition, and
+# attrition has to outlive a log rotation. The ledger row is written BEFORE the
+# spawn -- a ledger written afterwards is missing exactly when it matters most,
+# which is when the task crashed. See src/assignment_ledger.py.
+AGENT_ROUTE = DATA / "agent_route"
+AGENT_ROUTE_ASSIGNMENTS = AGENT_ROUTE / "assignments"
+
 # The one path outside ROOT, and it is READ-ONLY. Claude Code owns it; we never
 # write there. Fixtures used by tests are copied into FIXTURES.
 CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"
@@ -75,6 +84,8 @@ WRITABLE_DIRS = [
     FIXTURES,
     BASELINE,
     DROPS,
+    AGENT_ROUTE,
+    AGENT_ROUTE_ASSIGNMENTS,
     LOGS,
     REPORTS,
 ]

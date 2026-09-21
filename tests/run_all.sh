@@ -104,6 +104,12 @@ echo
 echo "=== JEV-34: the agent_route surface -- payload-only state, and NOT armed ==="
 guarded "test_agent_route.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_agent_route.py' 2>&1 | tail -4" || exit 1
 echo
+echo "=== JEV-35 / W1: the static floor -- the rule, the ledger, the breaker, the check ==="
+guarded "test_agent_actuator.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_agent_actuator.py' 2>&1 | tail -4" || exit 1
+echo
+echo "=== JEV-35 / W1: the actuator at the hook's process boundary (no network, no spend) ==="
+guarded "test_agent_actuator.sh" bash -c "set -o pipefail; '$ROOT/tests/test_agent_actuator.sh' | tail -3" || exit 1
+echo
 echo "=== JEV-32: analysis joins rows to the config THEY ran under, and never pools ==="
 guarded "test_analyze_config_join.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_analyze_config_join.py' 2>&1 | tail -4" || exit 1
 echo
