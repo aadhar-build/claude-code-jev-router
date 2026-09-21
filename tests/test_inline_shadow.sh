@@ -47,6 +47,23 @@ ln -s "$ROOT/questions" "$SANDBOX/questions"
 # Symlinked rather than copied: a copy of .env under logs/ would be a second
 # home for the API key, at whatever mode the copy happened to land in.
 
+# W5. inline_shadow_bash.sh now carries the canonical GLOBAL kill switch, so it
+# is anchored on $JEV_HOME as well as on $CLAUDE_PROJECT_DIR. It is pointed at
+# the sandbox for the same reason $CLAUDE_PROJECT_DIR already was: without
+# this, $JEV_HOME self-resolves to the LIVE REPO, this suite reads the
+# operator's live `.jev-disabled`, and every assertion below passes or fails
+# for a reason that is not about the hook.
+#
+# $JEV_HOME and $HOME are set PER HOOK INVOCATION, never `export`ed, and that
+# is not fastidiousness -- both were exported first and both broke the test for
+# reasons that had nothing to do with the hook. `export HOME` stopped the
+# loopback fake starting at all ($HOME-relative interpreter shims -- pyenv, uv,
+# ~/.local/bin -- do not resolve under a fake home), and `export JEV_HOME` made
+# `src/bench_inline.py --serve` look for `hooks/` inside the sandbox. Four red
+# assertions each time, none of them about `inline_shadow_bash.sh`. The env a
+# hook is given belongs to the hook's invocation, not to the test process.
+mkdir -p "$SANDBOX/.claude"
+
 WORK="$SANDBOX/work"
 LOGDIR="$WORK/log"
 
@@ -73,6 +90,8 @@ field() { rows | tail -1 | jq -r "$1" 2>/dev/null; }
 run_hook() {
   (cd "$SANDBOX" && printf '%s' "$PAYLOAD" | \
     CLAUDE_PROJECT_DIR="$SANDBOX" \
+    HOME="$SANDBOX" \
+    JEV_HOME="$SANDBOX" \
     JEV_INLINE_LOG_DIR="$LOGDIR" \
     JEV_INLINE_API_KEY="${KEY:-test-key}" \
     JEV_INLINE_ENDPOINT="$ENDPOINT" \
@@ -126,6 +145,8 @@ print(sb.sha256(sb.build_pre_bash(json.loads(sys.stdin.read()))))
 reset
 BIG=$(python3 -c "import json;print(json.dumps({'session_id':'itest','tool_use_id':'big','cwd':'/x','tool_input':{'command':'echo '+'y'*70000}}))")
 (cd "$SANDBOX" && printf '%s' "$BIG" | CLAUDE_PROJECT_DIR="$SANDBOX" \
+  HOME="$SANDBOX" \
+  JEV_HOME="$SANDBOX" \
   JEV_INLINE_LOG_DIR="$LOGDIR" JEV_INLINE_API_KEY=test-key \
   JEV_INLINE_ENDPOINT="$BASE" "$HOOK") >/dev/null 2>&1
 expected_big=$(printf '%s' "$BIG" | python3 -c "
@@ -222,6 +243,8 @@ out=$(run_hook env JEV_ARM_SUBPROCESS=1); rc=$?
 # --- cwd guard --------------------------------------------------------------
 reset
 out=$(cd /usr && printf '%s' "$PAYLOAD" | CLAUDE_PROJECT_DIR="$SANDBOX" \
+  HOME="$SANDBOX" \
+  JEV_HOME="$SANDBOX" \
   JEV_INLINE_LOG_DIR="$LOGDIR" JEV_INLINE_API_KEY=test-key \
   JEV_INLINE_ENDPOINT="$BASE" "$HOOK"); rc=$?
 [ "$rc" -eq 0 ]      && ok "cwd guard: exits 0" || bad "cwd guard: exit $rc"
@@ -231,6 +254,8 @@ out=$(cd /usr && printf '%s' "$PAYLOAD" | CLAUDE_PROJECT_DIR="$SANDBOX" \
 # --- malformed payload ------------------------------------------------------
 reset
 out=$(cd "$SANDBOX" && printf 'not json at all' | CLAUDE_PROJECT_DIR="$SANDBOX" \
+  HOME="$SANDBOX" \
+  JEV_HOME="$SANDBOX" \
   JEV_INLINE_LOG_DIR="$LOGDIR" JEV_INLINE_API_KEY=test-key \
   JEV_INLINE_ENDPOINT="$BASE" "$HOOK"); rc=$?
 [ "$rc" -eq 0 ]      && ok "bad payload: exits 0" || bad "bad payload: exit $rc"

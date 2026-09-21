@@ -103,11 +103,12 @@ LEDGER_SCHEMA_V1 = "agent-route-assignment-v1"
 LEDGER_SCHEMA_V2 = "agent-route-assignment-v2"
 
 #: What the DEPLOYED writer (`hooks/agent_route_actuator.sh`) emits today.
-#: Flip this to `LEDGER_SCHEMA_V2` in the same change that adds `project` to
-#: the hook's two jq row objects -- see the module docstring. It is deliberately
-#: not bumped ahead of the writer: a schema version that claims a field the
-#: rows do not carry is worse than no version at all.
-LEDGER_SCHEMA = LEDGER_SCHEMA_V1
+#: Flipped to `-v2` on 2026-09-21 (W5) in the same change that added `project`
+#: to the hook's two jq row objects, as the comment here required. It is never
+#: bumped ahead of the writer: a schema version that claims a field the rows do
+#: not carry is worse than no version at all, and the parity test in
+#: `tests/test_agent_actuator.py` goes red the moment the two disagree.
+LEDGER_SCHEMA = LEDGER_SCHEMA_V2
 
 #: The partition `-v1` rows land in. Not a project, and never merged with one:
 #: "no project recorded" is a distinct, honest answer to "which repo?", and

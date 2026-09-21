@@ -63,6 +63,17 @@ mkdir -p "$TESTROOT/spool/tmp" "$TESTROOT/spool/ready" "$TESTROOT/logs" "$TESTRO
 cleanup() { chmod -R u+rwX "$SANDBOX" 2>/dev/null; rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
+# W5. capture.sh now carries the canonical GLOBAL kill switch, so it is
+# anchored on $JEV_HOME and $HOME as well as on $CLAUDE_PROJECT_DIR. Both are
+# pointed at the sandbox, for the same reason $CLAUDE_PROJECT_DIR already was
+# and for the same reason tests/test_agent_actuator.py does it: without this,
+# $JEV_HOME self-resolves to the LIVE REPO, this suite reads the operator's
+# live `.jev-disabled` and `~/.claude/jev-disabled`, and every assertion below
+# passes or fails for a reason that has nothing to do with the hook.
+mkdir -p "$TESTROOT/.claude"
+export JEV_HOME="$TESTROOT"
+export HOME="$TESTROOT"
+
 # Unique per run, so the "did anything reach the live window" check at the end
 # is actually capable of finding something. The old fixed "test" would have
 # matched (or not matched) for reasons unrelated to this run.

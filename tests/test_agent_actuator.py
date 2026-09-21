@@ -126,9 +126,10 @@ class SandboxHook:
         (self.root / ".claude").mkdir(parents=True, exist_ok=True)
         shutil.copy(CONFIG, self.root / "config" / "tiers.json")
 
-    def run(self, obj, **env_extra) -> tuple[int, str]:
+    def run(self, obj, cwd: str | None = None, project_dir: str | None = None,
+            **env_extra) -> tuple[int, str]:
         env = dict(os.environ)
-        env["CLAUDE_PROJECT_DIR"] = str(self.root)
+        env["CLAUDE_PROJECT_DIR"] = project_dir or str(self.root)
         # W2: $JEV_HOME is where jev lives and is resolved WITHOUT reference to
         # $CLAUDE_PROJECT_DIR. Point it at the sandbox too, or the hook resolves
         # it from its own path -- the real repo -- and reads the real repo's
@@ -141,11 +142,26 @@ class SandboxHook:
         data = obj if isinstance(obj, str) else json.dumps(obj)
         proc = subprocess.run(
             [str(HOOK)], input=data, capture_output=True, text=True,
-            cwd=str(self.root), env=env, timeout=30)
+            cwd=cwd or str(self.root), env=env, timeout=30)
         return proc.returncode, proc.stdout
 
     def ledger(self) -> list[dict]:
         return al.read_ledger(self.root / "data" / "agent_route" / "assignments")
+
+    def breaker(self) -> list[dict]:
+        return al.breaker_outcomes(
+            self.root / "data" / "agent_route" / "breaker.jsonl")
+
+    def inert_rows(self) -> list[dict]:
+        """The durable record a path that did nothing is obliged to leave."""
+        path = self.root / "data" / "agent_route" / "inert.jsonl"
+        if not path.is_file():
+            return []
+        return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+
+    def inert_marker(self) -> str | None:
+        path = self.root / "data" / "agent_route" / "INERT"
+        return path.read_text() if path.is_file() else None
 
 
 class TestTheRuleExistsTwiceAndTheTwoAgree(unittest.TestCase):
@@ -193,6 +209,179 @@ class TestTheRuleExistsTwiceAndTheTwoAgree(unittest.TestCase):
         decision = tier_map.decide(p["tool_input"], self.config)
         from_python = tier_map.apply(p["tool_input"], decision)
         self.assertEqual(from_hook, from_python)
+
+
+class TestNoPathIsAllowedToBeSilent(unittest.TestCase):
+    """W5. FAIL SAFE and FAIL SILENTLY are not the same thing.
+
+    SPEC non-negotiable 1(b): a router that cannot decide sends the task to
+    FRONTIER. Three paths did neither that nor anything else -- they exited 0
+    having written nothing anywhere, which is a registered hook that is a
+    permanent no-op, byte-identical to the control arm while appearing
+    installed. That is the failure mode the `resolvedModel` check exists to
+    catch, arriving through a different door.
+
+    The rule this class enforces: every path either fails to frontier, or
+    leaves a durable, visible record that it did nothing and why.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.hook = SandboxHook(Path(self.tmp.name))
+        self.addCleanup(self.tmp.cleanup)
+
+    def _break_alias(self):
+        """A tier that exists and has no `alias`. `tier_map.alias_for()` has
+        always RAISED on this; the hook used to sail straight through it."""
+        cfg_path = self.hook.root / "config" / "tiers.json"
+        cfg = json.loads(cfg_path.read_text())
+        cfg["tiers"]["haiku45"]["alias"] = None
+        cfg_path.write_text(json.dumps(cfg))
+        return cfg
+
+    # -- path 1: a tier with no alias -------------------------------------
+    def test_an_aliasless_tier_fails_to_frontier_and_is_not_scored_as_success(self):
+        """It used to fail OPEN: decision `routed`, `assigned_alias: null`, no
+        rewrite emitted -- and the breaker line said `ok: true`, so the one
+        condition that makes routing a permanent no-op was counted as a
+        SUCCESS and could never trip the breaker."""
+        self._break_alias()
+        rc, out = self.hook.run(payload("Explore"))
+        self.assertEqual(rc, 0)
+
+        row = self.hook.ledger()[-1]
+        self.assertEqual(row["decision"], "fail_to_frontier")
+        self.assertEqual(row["assigned_alias"], "opus")
+        self.assertEqual(
+            json.loads(out)["hookSpecificOutput"]["updatedInput"]["model"], "opus")
+
+        outcome = self.hook.breaker()[-1]
+        self.assertFalse(outcome["ok"], "an aliasless tier must not score as a success")
+
+    def test_a_routed_row_never_carries_a_null_alias(self):
+        """The invariant behind the fix, stated once: `routed` means the input
+        was rewritten, so a `routed` row with no alias is a contradiction."""
+        self._break_alias()
+        self.hook.run(payload("Explore"))
+        for row in self.hook.ledger():
+            if row["decision"] == "routed":
+                self.assertIsNotNone(row["assigned_alias"], row)
+
+    def test_the_jq_half_and_the_python_half_agree_on_the_aliasless_config(self):
+        """The parity test did not cover this, and the two implementations
+        disagreed underneath it: Python raised, jq returned `routed`."""
+        cfg = self._break_alias()
+        with self.assertRaises(tier_map.TierConfigError):
+            tier_map.alias_for(cfg, "haiku45")
+        with self.assertRaises(tier_map.TierConfigError):
+            tier_map.decide(payload("Explore")["tool_input"], cfg)
+        self.hook.run(payload("Explore"))
+        self.assertEqual(self.hook.ledger()[-1]["decision"], "fail_to_frontier")
+
+    # -- path 2: the cwd guard --------------------------------------------
+    def test_a_trailing_slash_on_the_project_dir_no_longer_kills_the_hook(self):
+        """`CLAUDE_PROJECT_DIR=/repo/` is the same directory as `/repo`. The
+        guard compared bytes, so the hook exited on EVERY invocation: zero
+        bytes, no ledger row, no breaker line. Installed, and inert."""
+        rc, out = self.hook.run(payload("Explore"),
+                                project_dir=str(self.hook.root) + "/")
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            json.loads(out)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+        self.assertEqual(self.hook.ledger()[-1]["decision"], "routed")
+
+    def test_a_symlinked_project_dir_no_longer_kills_the_hook(self):
+        link = Path(self.tmp.name).resolve().parent / (self.hook.root.name + "-link")
+        link.symlink_to(self.hook.root)
+        self.addCleanup(link.unlink)
+        rc, out = self.hook.run(payload("Explore"), project_dir=str(link))
+        self.assertEqual(rc, 0)
+        self.assertIn("hookSpecificOutput", out)
+
+    def test_a_cwd_genuinely_outside_the_project_leaves_evidence(self):
+        """Doing nothing is right here. Doing nothing INVISIBLY is not."""
+        outside = Path(tempfile.mkdtemp(dir=self.tmp.name)).resolve()
+        project = self.hook.root / "inner"
+        project.mkdir()
+        rc, out = self.hook.run(payload("Explore"), cwd=str(outside),
+                                project_dir=str(project))
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, "", "the tool input must be left untouched")
+
+        rows = self.hook.inert_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reason"], "cwd_outside_project")
+        self.assertEqual(rows[0]["cwd"], str(outside))
+        self.assertEqual(rows[0]["project_dir"], str(project))
+        marker = self.hook.inert_marker()
+        self.assertIsNotNone(marker, "a sticky marker, or nobody finds this tomorrow")
+        self.assertIn("cwd_outside_project", marker)
+
+    # -- path 3: the ledger cannot be written ------------------------------
+    def test_an_unwritable_ledger_directory_says_so_out_loud(self):
+        """No disk to write the evidence to, so the evidence goes down the
+        loudest channel a hook has. What it must NOT do is exit 0 in silence,
+        which is what it did: no rewrite, no ledger row, no breaker line, no
+        marker -- a router that had quietly stopped routing."""
+        data = self.hook.root / "data"
+        data.mkdir(exist_ok=True)
+        data.chmod(0o500)
+        self.addCleanup(data.chmod, 0o700)
+
+        rc, out = self.hook.run(payload("Explore"))
+        self.assertEqual(rc, 0)
+        self.assertNotEqual(out.strip(), "", "a silent no-op is never acceptable")
+        emitted = json.loads(out)
+        self.assertIn("systemMessage", emitted)
+        self.assertIn("INERT", emitted["systemMessage"])
+        # And it is a message, never a permission decision or a rewrite.
+        self.assertNotIn("hookSpecificOutput", emitted)
+
+    # -- path 4: a relative $JEV_HOME ---------------------------------------
+    def test_a_relative_jev_home_is_refused_rather_than_resolved_against_the_cwd(self):
+        """W5, from the install agent's finding. Bash uses `$JEV_HOME`
+        VERBATIM after an `is_dir` test, so `JEV_HOME=.` makes every jev asset
+        cwd-relative -- including `$JEV_HOME/.jev-disabled`, the GLOBAL kill
+        switch. A switch whose path depends on where the caller happened to be
+        standing is exactly what the per-project block says must never happen.
+
+        `paths.resolve_jev_home()` RAISES on the same value. A hook cannot
+        raise, so it refuses: no rewrite, and -- the part that matters -- no
+        ledger, no config read and no switch test anywhere under the cwd.
+        """
+        rc, out = self.hook.run(payload("Explore"), JEV_HOME=".")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, "", "a relative JEV_HOME must not produce a rewrite")
+        # Nothing was resolved against the cwd. `self.hook.root` IS the cwd
+        # here, so had the hook used "." verbatim it would have written its
+        # ledger into ./data/agent_route/ -- which is what this asserts did
+        # not happen.
+        self.assertEqual(self.hook.ledger(), [])
+        self.assertFalse((self.hook.root / "data" / "agent_route").exists())
+
+    def test_the_python_half_refuses_the_same_relative_value(self):
+        """One rule, both readers -- including on the value both must reject.
+        `tests/test_jev_home.sh` §1 compares the two on paths they agree on;
+        this is the case where agreement means BOTH refuse."""
+        import paths
+        with self.assertRaises(RuntimeError):
+            paths.resolve_jev_home({"JEV_HOME": "."})
+
+    def test_an_absolute_jev_home_is_still_accepted(self):
+        """The control. Without it, the two assertions above would pass on a
+        hook that had simply stopped working."""
+        rc, out = self.hook.run(payload("Explore"), JEV_HOME=str(self.hook.root))
+        self.assertEqual(rc, 0)
+        self.assertIn("hookSpecificOutput", json.loads(out))
+
+    def test_the_happy_path_is_still_silent_about_being_inert(self):
+        """The control for all of the above. If `inert` fired on the ordinary
+        path, every assertion here would pass for the wrong reason."""
+        rc, out = self.hook.run(payload("Explore"))
+        self.assertEqual(rc, 0)
+        self.assertIn("hookSpecificOutput", json.loads(out))
+        self.assertEqual(self.hook.inert_rows(), [])
+        self.assertIsNone(self.hook.inert_marker())
 
 
 class TestInputFidelity(unittest.TestCase):
@@ -416,11 +605,21 @@ class TestVerifyAgainstResolvedModel(unittest.TestCase):
         self.config = tier_map.load()
 
     def rows(self):
+        # `assigned_alias` is present on every row because THE HOOK PUTS IT
+        # THERE, and because it is now what `verify()` keys "did we rewrite?"
+        # on. A fixture missing a field the writer always emits is a fixture
+        # that can agree with a reader the writer disagrees with -- which is
+        # exactly how the fail-to-frontier misclassification survived a test
+        # that claimed to cover it.
         return [
-            {"tool_use_id": "a", "decision": "routed", "tier": "haiku45"},
-            {"tool_use_id": "b", "decision": "routed", "tier": "haiku45"},
-            {"tool_use_id": "c", "decision": "routed", "tier": "opus5"},
-            {"tool_use_id": "d", "decision": "no_rule", "tier": None},
+            {"tool_use_id": "a", "decision": "routed", "tier": "haiku45",
+             "assigned_alias": "haiku"},
+            {"tool_use_id": "b", "decision": "routed", "tier": "haiku45",
+             "assigned_alias": "haiku"},
+            {"tool_use_id": "c", "decision": "routed", "tier": "opus5",
+             "assigned_alias": "opus"},
+            {"tool_use_id": "d", "decision": "no_rule", "tier": None,
+             "assigned_alias": None},
         ]
 
     def test_a_dated_resolved_model_still_counts_as_honoured(self):
@@ -433,7 +632,8 @@ class TestVerifyAgainstResolvedModel(unittest.TestCase):
 
     def test_a_suffixed_resolved_model_still_counts_as_honoured(self):
         out = al.verify(
-            [{"tool_use_id": "c", "decision": "routed", "tier": "opus5"}],
+            [{"tool_use_id": "c", "decision": "routed", "tier": "opus5",
+              "assigned_alias": "opus"}],
             {"c": "claude-opus-5[1m]"}, self.config)
         self.assertEqual(out["summary"]["honoured"], 1)
 
@@ -462,11 +662,76 @@ class TestVerifyAgainstResolvedModel(unittest.TestCase):
 
     def test_a_frontier_failure_is_verified_too(self):
         """fail_to_frontier rewrites, so it is an assignment like any other and
-        it has to be checked against what actually ran."""
+        it has to be checked against what actually ran.
+
+        THIS TEST USED TO HAND-BUILD ITS OWN ROW -- `{"decision":
+        "fail_to_frontier", "tier": "opus5"}` -- and the hook has never
+        produced one. `JQ_FRONTIER` writes **`tier: null`**, because that
+        branch is reached exactly when `config/tiers.json` could not be read,
+        so there is no tier key it could honestly name. Under the real row,
+        `verify()` read `if not tier -> not_routed` and classified every real
+        fail-to-frontier assignment as "we deliberately left the input alone":
+        the branch that bills FRONTIER RATES scored as the control arm, and
+        was invisible.
+
+        So the row is now GENERATED BY RUNNING THE HOOK. A fixture that the
+        writer cannot produce tests the fixture, not the writer.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        hook = SandboxHook(Path(tmp.name))
+        (hook.root / "config" / "tiers.json").write_text("{ not json")
+        rc, out = hook.run(payload("Explore"))
+        self.assertEqual(rc, 0)
+
+        row = hook.ledger()[-1]
+        # The shape the hook actually emits, asserted before it is relied on.
+        self.assertEqual(row["decision"], "fail_to_frontier")
+        self.assertIsNone(row["tier"])
+        self.assertEqual(row["assigned_alias"], "opus")
+        self.assertEqual(
+            json.loads(out)["hookSpecificOutput"]["updatedInput"]["model"], "opus")
+
+        # Honoured: the frontier model is what ran.
+        good = al.verify([row], {row["tool_use_id"]: "claude-opus-5[1m]"},
+                         self.config)
+        self.assertEqual(good["summary"]["honoured"], 1)
+        self.assertEqual(good["summary"]["not_routed"], 0,
+                         "a fail-to-frontier row is NOT the control arm")
+
+        # Overridden: we rewrote to frontier and something else won.
+        bad = al.verify([row], {row["tool_use_id"]: "claude-sonnet-5"},
+                        self.config)
+        self.assertEqual(bad["summary"]["overridden"], 1)
+        self.assertEqual(bad["summary"]["not_routed"], 0)
+        self.assertEqual(bad["detail"][0]["tier"], "opus5",
+                         "the tier is recovered from the alias the row does carry")
+
+    def test_a_routed_row_with_no_alias_rewrote_nothing_and_is_not_counted(self):
+        """The mirror image, and the reason the test above is keyed on
+        `assigned_alias` rather than on `decision` alone. A `routed` row with a
+        null alias is a pre-W5 ledger row: the hook can no longer emit one, but
+        the ones already on disk must not be counted as assignments that
+        happened."""
         out = al.verify(
-            [{"tool_use_id": "e", "decision": "fail_to_frontier", "tier": "opus5"}],
-            {"e": "claude-sonnet-5"}, self.config)
-        self.assertEqual(out["summary"]["overridden"], 1)
+            [{"tool_use_id": "z", "decision": "routed", "tier": "haiku45",
+              "assigned_alias": None}],
+            {"z": "claude-opus-5"}, self.config)
+        self.assertEqual(out["summary"]["not_routed"], 1)
+        self.assertEqual(out["routed_total"], 0)
+
+    def test_a_rewrite_we_cannot_join_to_a_prefix_is_never_read_as_honoured(self):
+        """An alias no tier in `config` claims. The join cannot be made, and
+        `unverifiable` says that -- rather than `honoured`, which would be a
+        lie, or `not_routed`, which would hide a rewrite that did happen."""
+        out = al.verify(
+            [{"tool_use_id": "q", "decision": "fail_to_frontier", "tier": None,
+              "assigned_alias": "a-tier-nobody-configured"}],
+            {"q": "claude-opus-5"}, self.config)
+        self.assertEqual(out["summary"]["unverifiable"], 1)
+        self.assertEqual(out["summary"]["honoured"], 0)
+        self.assertEqual(out["summary"]["not_routed"], 0)
+        self.assertEqual(out["routed_total"], 1)
 
 
 class TestTheLedgerRowSchema(unittest.TestCase):
@@ -482,9 +747,37 @@ class TestTheLedgerRowSchema(unittest.TestCase):
         decision = tier_map.decide(payload("Explore")["tool_input"], tier_map.load())
         from_python = al.ledger_row(
             decision, timestamp="t", session_id="s", tool_use_id="u",
-            config_sha256="x", config_version="v", hook_ms=1.0)
+            config_sha256="x", config_version="v", hook_ms=1.0,
+            # JEV-57. `project` is passed because THE HOOK NOW EMITS IT, and
+            # that is the whole point of this assertion: `LEDGER_SCHEMA` names
+            # what the deployed writer writes, so the day the two disagree --
+            # in either direction -- this test goes red and names both files.
+            project="p")
         self.assertEqual(sorted(from_hook), sorted(from_python))
         self.assertEqual(from_hook["schema"], al.LEDGER_SCHEMA)
+        self.assertEqual(from_hook["schema"], al.LEDGER_SCHEMA_V2)
+
+    def test_the_hooks_row_records_the_project_the_decision_was_made_in(self):
+        """JEV-57. The ledger is shared by every repo jev is installed in, so a
+        row that cannot name its repo pools one project's delegations with
+        another's -- the JEV-32 confound, and it would look like a result.
+
+        Recorded RAW from $CLAUDE_PROJECT_DIR, never the `pwd -P`-resolved
+        path: a worktree's path is not its repository's path, and collapsing
+        the two is an analysis decision this hook cannot make.
+        """
+        self.hook.run(payload("Explore"))
+        self.assertEqual(self.hook.ledger()[-1]["project"], str(self.hook.root))
+
+    def test_a_fail_to_frontier_row_names_its_project_too(self):
+        """The fallback path needs it just as much: an unattributable
+        frontier-rate assignment is the expensive branch pooling silently."""
+        (self.hook.root / "config" / "tiers.json").write_text("{ not json")
+        self.hook.run(payload("Explore"))
+        row = self.hook.ledger()[-1]
+        self.assertEqual(row["decision"], "fail_to_frontier")
+        self.assertEqual(row["project"], str(self.hook.root))
+        self.assertEqual(row["schema"], al.LEDGER_SCHEMA_V2)
 
     def test_the_ledger_is_append_only_across_invocations(self):
         for _ in range(3):

@@ -87,7 +87,7 @@ export LC_ALL=C
 # opt-out and the cwd guard are anchored on, and nothing else.
 ROOT="${CLAUDE_PROJECT_DIR:-}"
 
-# --- jev home: canonical block, byte-identical in every installable hook -----
+# --- jev home: canonical block, byte-identical in every hook ----------------
 # W2/JEV-56. $JEV_HOME is WHERE JEV ITSELF LIVES, resolved WITHOUT reference to
 # $CLAUDE_PROJECT_DIR. The two are the same directory only when jev is running
 # in its own repo; once `jev install` registers this hook in somebody else's
@@ -109,7 +109,23 @@ ROOT="${CLAUDE_PROJECT_DIR:-}"
 #
 # FAIL SAFE, like everything else here: a $JEV_HOME that cannot be established
 # is not guessed at, it is an exit.
+#
+# W5. A RELATIVE $JEV_HOME IS REFUSED, NOT NORMALISED, AND THE REASON IS THE
+# KILL SWITCH. Bash uses the value VERBATIM after an `is_dir` test, so
+# `JEV_HOME=.` makes every jev asset cwd-relative -- config/tiers.json, the
+# ledger, the breaker log, and `$JEV_HOME/.jev-disabled`, which is the GLOBAL
+# kill switch. A switch whose path depends on where the caller happened to be
+# standing is precisely what the per-project block below says must never
+# happen: "anchored on $ROOT, never cwd-relative". `src/paths.py` RAISES on
+# the same value rather than silently `.resolve()`-ing it against the cwd, so
+# the two readers agree that there is exactly one kind of $JEV_HOME that means
+# the same thing to both -- an absolute one. A hook cannot raise, so it
+# refuses. Not a fallback: falling back to the derived path would be this
+# reader guessing where the other one declines to, and `jev` and
+# `paths.resolve_jev_home()` already reject the value loudly at the point a
+# human sets it.
 JEV_HOME="${JEV_HOME:-}"
+case "$JEV_HOME" in ""|/*) ;; *) exit 0 ;; esac
 [ -d "$JEV_HOME" ] || JEV_HOME="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd -P)"
 [ -n "$JEV_HOME" ] || exit 0
 [ -d "$JEV_HOME" ] || exit 0
@@ -178,27 +194,106 @@ fi
 { [ -e "$ROOT/.jev-disabled" ] || [ -L "$ROOT/.jev-disabled" ]; } && exit 0
 # --- end jev kill switch ----------------------------------------------------
 
-# Defensive cwd guard, as capture.sh. settings.local.json should never load
-# outside this repo, but the isolation requirement is hard enough to be worth
-# enforcing twice -- and this hook changes what runs, not merely what is logged.
-case "$PWD/" in
-  "$ROOT"/*) ;;
-  *) exit 0 ;;
-esac
-
-# jq is the only way to echo an arbitrary tool input back byte-faithfully. With
-# no jq there is no faithful updatedInput to build, so the hook goes inert
-# rather than guessing -- see the fail-safe/fail-to-frontier note above.
-command -v jq >/dev/null 2>&1 || exit 0
-
 # Jev's own assets, under $JEV_HOME and never under the routed project. The
 # rule table is jev's, the ledger is jev's, and an install into somebody else's
 # repo must not put either of them in their working tree.
+#
+# These are defined HERE, above the cwd guard rather than below it, because the
+# guard now has to be able to write down that it fired. See `inert` below.
 CFG="$JEV_HOME/config/tiers.json"
 DIR="$JEV_HOME/data/agent_route"
 LEDGER_DIR="$DIR/assignments"
 BREAKER="$DIR/breaker.jsonl"
 MARKER="$DIR/BREAKER-OPEN"
+INERT_LOG="$DIR/inert.jsonl"
+INERT_MARKER="$DIR/INERT"
+
+# ---------------------------------------------------------------------------
+# A SILENT NO-OP IS NEVER AN ACCEPTABLE ANSWER
+# ---------------------------------------------------------------------------
+# FAIL SAFE and FAIL SILENTLY are not the same thing, and this repo has now
+# been bitten four times by the second one wearing the first one's clothes.
+#
+# Several paths in this hook cannot fail to frontier: there is no faithful
+# `updatedInput` to build (no jq), or the hook has decided it is out of scope
+# (cwd guard), or it cannot write the ledger that a rewrite must be
+# attributable to. Doing nothing is the RIGHT action on all of them. Doing
+# nothing INVISIBLY is not: a registered hook that is a permanent no-op is
+# byte-identical to the control arm while appearing installed, which is
+# precisely the state the `resolvedModel` check exists to catch, arriving
+# through a different door.
+#
+# So every such path comes through here, and the contract is:
+#
+#   a DURABLE record (a jsonl row plus a sticky marker file), or -- if the
+#   disk will not take one -- the LOUDEST channel a hook has, a systemMessage.
+#
+# Never both-fail quietly. The systemMessage carries no interpolated paths: it
+# is assembled from literals so it cannot be made into malformed JSON by a
+# directory name, and stdout on a PreToolUse hook is a permission decision.
+inert() { # reason, detail
+  _reason="$1"; _detail="$2"; _wrote=""
+  _its=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || _its="unknown"
+  # Paths go into JSON, so the two characters that could tear the row are
+  # escaped. Parameter expansion, not a fork: this path is already the
+  # unhappy one and does not need to be slow as well.
+  _j="$JEV_HOME"; _j="${_j//\\/\\\\}"; _j="${_j//\"/\\\"}"
+  _r="$ROOT";     _r="${_r//\\/\\\\}"; _r="${_r//\"/\\\"}"
+  _w="$PWD";      _w="${_w//\\/\\\\}"; _w="${_w//\"/\\\"}"
+  if mkdir -p "$DIR" 2>/dev/null; then
+    if printf '{"schema":"agent-route-inert-v1","timestamp":"%s","reason":"%s","detail":"%s","jev_home":"%s","project_dir":"%s","cwd":"%s","pid":%s}\n' \
+         "$_its" "$_reason" "$_detail" "$_j" "$_r" "$_w" "$$" >> "$INERT_LOG" 2>/dev/null; then
+      _wrote="yes"
+      printf '%s jev agent_route is INERT: %s\n%s\nThe hook is registered and is routing nothing. No assignment is being recorded, so this condition is invisible in the ledger -- which is why this file exists. Remove it once the cause is fixed; it is rewritten on every occurrence.\n' \
+        "$_its" "$_reason" "$_detail" > "$INERT_MARKER" 2>/dev/null
+    fi
+  fi
+  if [ -z "$_wrote" ]; then
+    case "$_reason" in
+      cwd_outside_project) printf '%s\n' '{"systemMessage":"jev agent_route is INERT (the session cwd is outside $CLAUDE_PROJECT_DIR) and cannot write its own record of that. No delegation is being routed."}' >&3 ;;
+      project_dir_unresolvable) printf '%s\n' '{"systemMessage":"jev agent_route is INERT ($CLAUDE_PROJECT_DIR does not resolve) and cannot write its own record of that. No delegation is being routed."}' >&3 ;;
+      no_jq)               printf '%s\n' '{"systemMessage":"jev agent_route is INERT (jq is not on PATH) and cannot write its own record of that. No delegation is being routed."}' >&3 ;;
+      ledger_dir_unwritable|ledger_write_failed) printf '%s\n' '{"systemMessage":"jev agent_route is INERT (it cannot write its assignment ledger, and an unattributable rewrite is forbidden) -- so no delegation is being routed. Check the permissions on $JEV_HOME/data/agent_route."}' >&3 ;;
+      *)                   printf '%s\n' '{"systemMessage":"jev agent_route is INERT and cannot write its own record of that. No delegation is being routed."}' >&3 ;;
+    esac
+  fi
+  exit 0
+}
+
+# Defensive cwd guard, as capture.sh. settings.local.json should never load
+# outside this repo, but the isolation requirement is hard enough to be worth
+# enforcing twice -- and this hook changes what runs, not merely what is logged.
+#
+# TWO DEFECTS FIXED HERE, AND THE SECOND IS THE DANGEROUS ONE.
+#
+# 1. It was a BYTE comparison of two paths that are only semantically equal.
+#    `CLAUDE_PROJECT_DIR=/repo/` (a trailing slash) or a symlinked checkout
+#    made "$PWD/" fail to match "$ROOT"/* for a session that was squarely
+#    inside the project, and the hook exited here on every single invocation.
+#    Both sides are now resolved with `pwd -P`, which normalises the slash and
+#    the symlink at once. Two subshells, paid once per Agent spawn, against a
+#    250ms budget.
+# 2. Exiting here was TOTALLY SILENT: zero bytes, no ledger row, no breaker
+#    line, no marker. A permanent no-op with nothing on disk, treatment
+#    byte-identical to control while appearing installed. Now it goes through
+#    `inert`, which leaves a record or says so out loud.
+ROOT_P=$(cd "$ROOT" 2>/dev/null && pwd -P) || ROOT_P=""
+[ -n "$ROOT_P" ] || inert "project_dir_unresolvable" \
+  "CLAUDE_PROJECT_DIR names a directory that could not be resolved with cd/pwd -P"
+PWD_P=$(pwd -P 2>/dev/null) || PWD_P="$PWD"
+case "$PWD_P/" in
+  "$ROOT_P"/*) ;;
+  *) inert "cwd_outside_project" \
+       "the resolved cwd is not inside the resolved CLAUDE_PROJECT_DIR; this hook routes nothing outside the project it was registered for" ;;
+esac
+
+# jq is the only way to echo an arbitrary tool input back byte-faithfully. With
+# no jq there is no faithful updatedInput to build, so the hook goes inert
+# rather than guessing -- see the fail-safe/fail-to-frontier note above. Inert,
+# and SAYING SO: "no jq on this machine" is a fixable condition, and a router
+# that silently stops routing because of it is a router nobody fixes.
+command -v jq >/dev/null 2>&1 || inert "no_jq" \
+  "jq is not on PATH, so no byte-faithful updatedInput can be built"
 
 # THE ONE TIER LITERAL IN THIS SCRIPT, AND IT IS DELIBERATE.
 # Everything else is configuration. This is the fail-to-frontier target used
@@ -233,7 +328,15 @@ case "$PAYLOAD" in
   *) exit 0 ;;
 esac
 
-mkdir -p "$LEDGER_DIR" 2>/dev/null
+# THE LEDGER DIRECTORY, AND THE THIRD SILENT NO-OP.
+# This `mkdir` used to be unchecked. With `$JEV_HOME/data/agent_route/`
+# unwritable it failed, then the ledger append failed, then the breaker append
+# that was supposed to record THAT failed too -- and the hook exited 0 having
+# left nothing anywhere. A routing layer that cannot record an assignment must
+# not make one (an unattributable rewrite is what the before-spawn ledger
+# exists to forbid), but it must not be quiet about it either.
+mkdir -p "$LEDGER_DIR" 2>/dev/null || inert "ledger_dir_unwritable" \
+  "mkdir -p on the assignment ledger directory failed; no assignment can be recorded, so none is made"
 LEDGER="$LEDGER_DIR/${TS%%T*}.jsonl"
 
 # Content hash of the rule table, so a decision can later be joined to the exact
@@ -286,6 +389,18 @@ JQ_DECIDE='
   | if (($c.tiers | type) != "object") or (($c.rules | type) != "object")
        or (($c.tiers[$c.frontier_tier] | type) != "object")
     then error("unusable tiers.json") else . end
+  # A TIER WITH NO `alias` IS A BROKEN RULE TABLE, NOT A ROUTING DECISION.
+  # This branch used to be missing and the hook FAILED OPEN through it: the
+  # decision came out `routed` with `assigned_alias: null`, nothing was
+  # rewritten, nothing was emitted, and the breaker line said `ok: true` -- so
+  # the one condition that makes routing a permanent no-op was counted as a
+  # SUCCESS and could never trip the breaker. `src/tier_map.alias_for()` has
+  # always RAISED on exactly this config, so the two implementations disagreed
+  # and the parity test did not cover it. Raising here sends it to
+  # JQ_FRONTIER, which is what non-negotiable 1(b) requires: a router that
+  # cannot decide sends the task to frontier.
+  | if (($c.tiers[$c.frontier_tier].alias // "") == "")
+    then error("frontier tier has no alias") else . end
   | (($c.breaker.max_consecutive_failures // 3) | floor) as $bn
   | (($c.breaker.ttl_s // 900) | tonumber) as $bttl
   | breaker_state($breaker; $bn; $bttl; now) as $br
@@ -321,12 +436,26 @@ JQ_DECIDE='
             rule: ("rules[" + ($st | tojson) + "].tier=null (no routing signal)")}
          elif (($c.tiers[$rule.tier] | type) != "object") then
            error("rule names unknown tier")
+         elif (($c.tiers[$rule.tier].alias // "") == "") then
+           # The tier exists and has no alias: there is nothing to put in
+           # tool_input.model. Same class as an unknown tier, so the same
+           # answer -- and the same answer src/tier_map.alias_for() has always
+           # given, which is to raise.
+           error("rule names tier with no alias")
          else
            {outcome: "routed", tier: $rule.tier, alias: $c.tiers[$rule.tier].alias,
             rule: ("rules[" + ($st | tojson) + "].tier=" + ($rule.tier | tojson))}
          end
      end) as $d
-  | {schema: "agent-route-assignment-v1",
+  # BELT AND BRACES, because this is the shape that failed open once already.
+  # `routed` means "the input was rewritten". A `routed` decision carrying no
+  # alias rewrites nothing, emits nothing, and -- worst of all -- logs
+  # `ok: true`, so the router is permanently inert AND scored as succeeding.
+  # No config can reach here any more; if a future edit finds a way, this
+  # raises and the task goes to frontier instead of quietly doing nothing.
+  | (if (($d.outcome == "routed") and ($d.alias == null))
+     then error("routed with no alias") else . end)
+  | {schema: "agent-route-assignment-v2",
      timestamp: $ts,
      session_id: (.session_id // null),
      tool_use_id: (.tool_use_id // null),
@@ -338,7 +467,21 @@ JQ_DECIDE='
      original_model: $orig,
      config_version: ($c.version // null),
      config_sha256: (if $sha == "" then null else $sha end),
-     hook_ms: ((now - ($t0 | tonumber)) * 1000)} as $row
+     hook_ms: ((now - ($t0 | tonumber)) * 1000),
+     # JEV-57. WHICH REPO THIS DECISION WAS MADE IN, recorded at decision
+     # time and never inferred later. The ledger lives at
+     # $JEV_HOME/data/agent_route/ -- ONE directory shared by every repo jev
+     # is installed in -- so without this field the delegations of two
+     # different repos pool into one rate, which is the JEV-32 confound
+     # wearing a different hat. It looks like a result.
+     #
+     # $ROOT RAW, not the `pwd -P`-resolved $ROOT_P the cwd guard uses: the
+     # path of a worktree is not the path of its repository, and normalising
+     # the two together is an analysis decision made with knowledge this hook
+     # does not have. Recording where the decision happened, exactly, leaves
+     # that decision to the reader who can make it.
+     # (No apostrophes in this program: it is a single-quoted shell string.)
+     project: (if $project == "" then null else $project end)} as $row
   | $row,
     (if $d.alias != null then
        # `$ti + {model: ...}` is a RIGHT-BIASED MERGE over the whole object, so
@@ -384,7 +527,7 @@ JQ_FRONTIER='
        {outcome: "fail_to_frontier", alias: $frontier,
         rule: ("fail_to_frontier: " + $why)}
      end) as $d
-  | {schema: "agent-route-assignment-v1",
+  | {schema: "agent-route-assignment-v2",
      timestamp: $ts,
      session_id: (.session_id // null),
      tool_use_id: (.tool_use_id // null),
@@ -396,7 +539,12 @@ JQ_FRONTIER='
      original_model: (if (($ti.model // "") == "") then null else $ti.model end),
      config_version: null,
      config_sha256: (if $sha == "" then null else $sha end),
-     hook_ms: ((now - ($t0 | tonumber)) * 1000)},
+     hook_ms: ((now - ($t0 | tonumber)) * 1000),
+     # JEV-57, as above. The fallback path needs it just as much: a
+     # fail-to-frontier row that cannot be attributed to a repo is a
+     # frontier-rate assignment pooled across installs.
+     # (No apostrophes in this program either.)
+     project: (if $project == "" then null else $project end)},
     (if $d.alias != null then
        ({hookSpecificOutput: {hookEventName: "PreToolUse",
                               permissionDecision: "allow",
@@ -414,6 +562,7 @@ JQ_FRONTIER='
 RESULT=$(printf '%s' "$PAYLOAD" | jq -r -c \
   --slurpfile cfg "$CFG" \
   --arg ts "$TS" --arg sha "$CFG_SHA" --arg t0 "$T0" \
+    --arg project "$ROOT" \
   --arg breaker "$BREAKER_TAIL" \
   "$JQ_BREAKER $JQ_DECIDE" 2>/dev/null)
 
@@ -422,6 +571,7 @@ if [ -z "$RESULT" ]; then
   [ -f "$CFG" ] || WHY="tiers.json not found at config/tiers.json"
   RESULT=$(printf '%s' "$PAYLOAD" | jq -r -c \
     --arg ts "$TS" --arg sha "$CFG_SHA" --arg t0 "$T0" \
+    --arg project "$ROOT" \
     --arg breaker "$BREAKER_TAIL" \
     --arg frontier "$FRONTIER_FALLBACK_ALIAS" --arg why "$WHY" \
     --arg bn "$BREAKER_N_FALLBACK" --arg bttl "$BREAKER_TTL_FALLBACK" \
@@ -455,10 +605,18 @@ if [ "$LEDGER_RC" -ne 0 ]; then
   # anyway (an unattributable assignment, which is precisely what the
   # before-spawn gate forbids), block the call (never -- fail safe is
   # absolute), or leave the input untouched. Untouched wins: it is the control
-  # arm, and its absence from the ledger is itself the honest record.
+  # arm.
+  #
+  # What was NOT true is the sentence that used to end that paragraph: "its
+  # absence from the ledger is itself the honest record". An absence is not a
+  # record. If the breaker append below also fails -- and it fails for exactly
+  # the same reason the ledger append did, an unwritable directory -- the hook
+  # has done nothing and said nothing. So the breaker line is still attempted,
+  # and then `inert` guarantees either a durable row or a systemMessage.
   printf '{"ts":%s,"ok":false,"error":"ledger_write_failed"}\n' \
     "${T0:-0}" >> "$BREAKER" 2>/dev/null
-  exit 0
+  inert "ledger_write_failed" \
+    "the assignment ledger could not be appended to; a rewrite that cannot be attributed is forbidden, so the input was left untouched"
 fi
 
 [ "$OUTCOME" = "-" ] || printf '%s\n' "$OUTCOME" >> "$BREAKER" 2>/dev/null

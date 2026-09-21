@@ -85,8 +85,16 @@ echo "  0. IT PARSES AT ALL"
 # 0' EXIT` means the hook still exits 0 and still emits nothing, which is
 # exactly what a correctly-behaving no-rule decision looks like. It happened
 # once during development and was caught only by reading stderr.
+#
+# W5 CORRECTION. This check used to claim that such an apostrophe "would fail
+# here, and nowhere else". IT WOULD NOT, and it did not: two apostrophes in one
+# comment pair with each other, the file stays syntactically valid bash, and
+# `bash -n` passes while the hook emits nothing at all. The real detector is
+# the explicit scan in section 11, plus the behavioural tests. A guard that
+# names a failure it cannot actually see is worse than no guard, because it
+# stops anyone looking for a real one.
 bash -n "$HOOK" 2>/dev/null \
-  && ok "the hook is syntactically valid bash (an apostrophe inside an embedded jq program would fail here, and nowhere else)" \
+  && ok "the hook is syntactically valid bash" \
   || bad "the hook does not parse as bash: $(bash -n "$HOOK" 2>&1 | head -2)"
 
 # ---------------------------------------------------------------------------
@@ -461,6 +469,35 @@ echo "  11. ZERO API CALLS, AND NOTHING WRITTEN OUTSIDE THE SANDBOX"
 grep -qE 'curl|wget|nc |openssl s_client|API_KEY|https?://' "$HOOK" \
   && bad "the static floor contains a network primitive or a credential -- it must make none" \
   || ok "no curl, no wget, no endpoint, no API key anywhere in the hook"
+
+# NOT A STYLE RULE. The jq programs are SINGLE-QUOTED SHELL STRINGS, so one
+# apostrophe anywhere inside one -- including inside a jq `#` comment, which is
+# where it actually happened (W5: "the worktree's path") -- closes the string
+# early, and the hook then emits NOTHING AT ALL: no rewrite, no ledger row, no
+# breaker line. A total silent no-op, which is the exact failure class W5
+# exists to remove, introduced by a comment. The behavioural tests catch it;
+# this says WHY in one line so the next author does not have to bisect.
+python3 - "$HOOK" <<'PY' && ok "no apostrophe inside either single-quoted jq program" || bad "an apostrophe inside a jq program would close the shell string early"
+import sys
+from pathlib import Path
+lines = Path(sys.argv[1]).read_text().splitlines()
+inside, offenders = None, []
+for i, line in enumerate(lines, 1):
+    if inside is None:
+        for name in ("JQ_BREAKER='", "JQ_DECIDE='", "JQ_FRONTIER='"):
+            if line.startswith(name):
+                inside = name
+                break
+        continue
+    if line == "'":
+        inside = None
+        continue
+    if "'" in line:
+        offenders.append(f"{inside[:-2]} line {i}: {line.strip()[:60]}")
+for o in offenders:
+    print("   ", o)
+sys.exit(1 if offenders else 0)
+PY
 
 # Every path the hook writes is derived from $CLAUDE_PROJECT_DIR; the only $HOME
 # reference is a read-only kill-switch test. Asserted rather than assumed.

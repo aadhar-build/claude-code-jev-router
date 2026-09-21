@@ -143,6 +143,28 @@ def alias_for(config: dict, tier: str) -> str:
     return entry["alias"]
 
 
+def tier_for_alias(config: dict, alias: str | None) -> str | None:
+    """The tier key whose `alias` is `alias`, or None.
+
+    The inverse of `alias_for`, and it exists for one reason: the hook's
+    fail-to-frontier branch writes `tier: null` on the ledger row. It has to --
+    that branch is reached exactly when `config/tiers.json` could not be read,
+    so there is no tier key it could honestly name -- but it DOES rewrite
+    `model`, to `FRONTIER_FALLBACK_ALIAS`. A reader that keys off `tier` alone
+    therefore scores every frontier failure as "left alone", which is the
+    control arm, which is the branch that bills frontier rates going invisible.
+
+    Returns None rather than raising: this is a reader on a reporting path, and
+    an alias no tier claims is a fact to report (`unverifiable`), not a crash.
+    """
+    if not alias:
+        return None
+    for key, entry in (config.get("tiers") or {}).items():
+        if isinstance(entry, dict) and entry.get("alias") == alias:
+            return key
+    return None
+
+
 def decide(tool_input: dict, config: dict) -> Decision:
     """Apply the static map to one `Agent` tool input. Pure; touches nothing."""
     # NOTE ON QUOTING: every `rule` string below is built with json.dumps,

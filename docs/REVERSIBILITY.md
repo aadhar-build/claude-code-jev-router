@@ -22,7 +22,7 @@ questions. So:
 | **machine-wide** | `~/.claude/jev-disabled` | the same, honoured even if the install itself is unreachable | `touch`. Read-only to us; nothing here ever writes it |
 | **per-project opt-out** | `<repo>/.jev-disabled` | jev **in that one repo** | `touch`, `jev uninstall` |
 
-Every hook tests them before doing anything else, in blocks that are
+Every hook tests all three before doing anything else, in blocks that are
 byte-identical across every hook script:
 
 ```bash
@@ -36,6 +36,26 @@ byte-identical across every hook script:
 `rm` the file resumes. In jev's own repo the global and the per-project switch
 are the **same file**, which is why the distinction did not exist before and why
 it has to now.
+
+> **That sentence above was FALSE between W2 and 2026-09-21, and this is the
+> record of it.** The global block shipped in `hooks/agent_route_actuator.sh`
+> only. `touch ~/.claude/jev-disabled` did **not** stop `hooks/capture.sh` or
+> `hooks/inline_shadow_bash.sh` — the machine-wide switch `jev install` prints
+> to the operator stopped one writer of three, which is JEV-40 box 1 verbatim,
+> regressed. The gate meant to catch it read
+> `ok the GLOBAL switch block is byte-identical across all 1 hook script(s)
+> that carry it`: **vacuous on a set of one**, the exact pattern JEV-56 exists
+> to forbid, and it was scoped to installable hooks — of which
+> `config/registration.json` names exactly one.
+>
+> Fixed by putting the canonical global and `JEV_HOME` blocks in **every** hook
+> (extracted from the actuator, not retyped), and by changing the gate so it
+> cannot pass vacuously: the denominator is now **every hook script on disk**,
+> a set of one **fails**, and `tests/reversibility.sh` §2f additionally *runs*
+> all three hooks under a fake `$HOME` with the switch set — with a positive
+> control first, because "nothing happened" is also what a hook that never ran
+> looks like. The text of a block and the behaviour of a block are two claims,
+> and this repo has been bitten by treating them as one.
 
 ### `JEV_HOME`, and the install shape that killed the switch
 
@@ -51,7 +71,13 @@ project being routed, by one rule written twice:
 > **`$JEV_HOME` if it is set and names a directory; otherwise the directory two
 > levels above this file.**
 
-`hooks/agent_route_actuator.sh` has it as a canonical block; `src/paths.py` has
+Every hook in `hooks/` now carries it as a canonical block — it has to, because
+the global switch is anchored on `$JEV_HOME` and a hook that cannot resolve
+`$JEV_HOME` would be testing `/.jev-disabled`. On `hooks/capture.sh`, the only
+thing on the critical path, that costs **one subshell** (`cd … && pwd -P`)
+whenever `$JEV_HOME` is not already exported; export it and the cost is gone.
+It is paid deliberately: a kill switch that is cheap and false is worth less
+than one that is true. `src/paths.py` has
 it as `resolve_jev_home()`, and `paths.ROOT` **is** `JEV_HOME`. Before W2 these
 two derived their roots by two different mechanisms which agreed only by
 coincidence. `tests/test_jev_home.sh` runs both halves — the bash one extracted

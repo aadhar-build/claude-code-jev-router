@@ -209,7 +209,7 @@ BEGIN = "# --- jev kill switch: canonical block, byte-identical in every hook"
 END = "# --- end jev kill switch"
 GBEGIN = "# --- jev GLOBAL kill switch: canonical block, byte-identical in every hook"
 GEND = "# --- end jev GLOBAL kill switch"
-HBEGIN = "# --- jev home: canonical block, byte-identical in every installable hook"
+HBEGIN = "# --- jev home: canonical block, byte-identical in every hook"
 HEND = "# --- end jev home"
 
 try:
@@ -334,19 +334,31 @@ for s in sorted(scripts):
     if blk is None:
         out["scripts"][rel] = {"ok": False, "why": "canonical switch block absent"}
         continue
-    # An installable hook -- one `jev install` can put in a repo it does not
-    # live in -- MUST carry the global block too. Without it the only switch is
-    # anchored on the routed project, and there is no way to stop jev
-    # everywhere at once.
-    if installable and gblk is None:
+    # EVERY hook MUST carry the global block, not merely the installable ones.
+    #
+    # It used to be required of installable hooks only, and `jev install`
+    # registers exactly one script, so the requirement was a set of one --
+    # which is how `~/.claude/jev-disabled` came to be printed to the operator
+    # as the machine-wide switch while being honoured by one hook of three. A
+    # kill switch that stops one writer and not the other is the JEV-40 defect
+    # verbatim, and it regressed because the gate scoped itself to a subset.
+    # The scope is now every hook script on disk: the switch either stops jev,
+    # or it is a lie told to somebody at 3am.
+    if gblk is None:
         out["scripts"][rel] = {"ok": False, "block": blk,
-                               "why": "INSTALLABLE and has no GLOBAL kill-switch block -- "
-                                      "there would be no way to stop it everywhere at once"}
+                               "why": "no GLOBAL kill-switch block -- ~/.claude/jev-disabled "
+                                      "would not stop this hook, and `jev install` prints that "
+                                      "path to the operator as the machine-wide switch"}
         continue
-    if installable and hblk is None:
+    # The global block tests "$JEV_HOME/.jev-disabled", so every hook that
+    # carries it needs the canonical JEV_HOME derivation too -- and an
+    # installable hook needs it regardless, or it resolves jev's own assets
+    # from the routed repo.
+    if hblk is None:
         out["scripts"][rel] = {"ok": False, "block": blk,
-                               "why": "INSTALLABLE and has no canonical JEV_HOME block -- "
-                                      "it would resolve jev's own assets from the routed repo"}
+                               "why": "no canonical JEV_HOME block -- the GLOBAL switch would "
+                                      "test /.jev-disabled and it would resolve jev's own "
+                                      "assets from the routed repo"}
         continue
     # A second, drifting copy of the switch test anywhere outside the blocks
     # that own it is the thing that rots. Either block is fine; a third is not.
@@ -445,12 +457,20 @@ have=[k for k,v in d.items() if v.get("gblock")]
 inst=[k for k,v in d.items() if v.get("installable")]
 print("%d|%d|%d" % (len(blocks), len(have), len(inst)))')
   n_gblocks="${g%%|*}"; rest="${g#*|}"; n_have="${rest%%|*}"; n_inst="${rest##*|}"
+  # JEV-56's rule, applied to this assertion too: a claim of byte-identity
+  # "across all the scripts that carry it" is VACUOUS on a set of one, and it
+  # read `ok` for months while two hooks of three ignored the machine-wide
+  # switch entirely. An empty registration already fails here; a set of one now
+  # fails the same way, and the denominator is every hook script rather than
+  # the subset `jev install` happens to register.
   if [ "$n_inst" = "0" ]; then
     bad "config/registration.json names no installable hook -- this gate would pass on an empty set"
-  elif [ "$n_have" -lt "$n_inst" ]; then
-    bad "$n_have of $n_inst installable hook(s) carry the GLOBAL switch block"
+  elif [ "$n_have" -lt "$n_scripts" ]; then
+    bad "$n_have of $n_scripts hook script(s) carry the GLOBAL switch block -- the machine-wide switch does not stop the rest"
+  elif [ "$n_have" -le 1 ]; then
+    bad "only $n_have hook script carries the GLOBAL switch block -- byte-identity across a set of one asserts nothing (JEV-56)"
   elif [ "$n_gblocks" = "1" ]; then
-    ok "the GLOBAL switch block is byte-identical across all $n_have hook script(s) that carry it"
+    ok "the GLOBAL switch block is byte-identical across all $n_have hook script(s), which is every hook there is"
   else
     bad "$n_gblocks different GLOBAL switch blocks -- they have drifted"
   fi
@@ -569,6 +589,62 @@ n=$(cat "$SANDBOX"/data/inline/*.jsonl 2>/dev/null | wc -l | tr -d ' ')
   && ok "inline shadow hook honours the same fail-safe (no call, no row, empty stdout)" \
   || bad "inline shadow: rc=$rc rows=$n stdout=[$out]"
 rm -rf "$SWITCH"
+
+# 2f. THE MACHINE-WIDE SWITCH, ON EVERY HOOK, BEHAVIOURALLY.
+#
+#     `jev install` prints `~/.claude/jev-disabled` to the operator as THE way
+#     to stop jev everywhere at once. An audit found it honoured by one hook of
+#     three: `touch ~/.claude/jev-disabled` did not stop capture.sh. The
+#     enumeration above is a TEXT check and would have gone on reading `ok` on
+#     a set of one; this is the RUN check, and it is deliberately separate --
+#     the text of a block and the behaviour of a block are different claims,
+#     and this repo has been bitten by treating them as one.
+#
+#     Note what is NOT used here: $SWITCH. The per-project switch is removed
+#     for the whole subsection, so nothing below can pass because of it.
+rm -rf "$SWITCH"
+FAKE_HOME="$SANDBOX/fake-home"
+mkdir -p "$FAKE_HOME/.claude" "$SANDBOX/data/inline"
+
+# The positive control FIRST. Without it, "nothing happened" below proves
+# nothing at all -- it is exactly what a hook that never ran looks like.
+sandbox_clean
+( cd "$SANDBOX" && CLAUDE_PROJECT_DIR="$SANDBOX" JEV_HOME="$SANDBOX" HOME="$FAKE_HOME" \
+    "$SANDBOX/hooks/capture.sh" pre_bash < "$BASH_PAYLOAD" ) 2>/dev/null
+ctl_cap=$(sandbox_count)
+ctl_act=$( cd "$SANDBOX" && CLAUDE_PROJECT_DIR="$SANDBOX" JEV_HOME="$SANDBOX" HOME="$FAKE_HOME" \
+    "$SANDBOX/hooks/agent_route_actuator.sh" < "$AGENT_PAYLOAD" 2>/dev/null )
+[ "$ctl_cap" = "1" ] && [ -n "$ctl_act" ] \
+  && ok "machine-wide control: with no ~/.claude/jev-disabled, capture captures and the actuator rewrites" \
+  || bad "machine-wide control: capture=$ctl_cap actuator_stdout=[$ctl_act] -- 2f would be vacuous"
+
+: > "$FAKE_HOME/.claude/jev-disabled"
+
+sandbox_clean
+( cd "$SANDBOX" && CLAUDE_PROJECT_DIR="$SANDBOX" JEV_HOME="$SANDBOX" HOME="$FAKE_HOME" \
+    "$SANDBOX/hooks/capture.sh" pre_bash < "$BASH_PAYLOAD" ) 2>/dev/null; rc=$?
+[ "$rc" = "0" ] && [ "$(sandbox_count)" = "0" ] \
+  && ok "~/.claude/jev-disabled stops capture.sh (the hook the audit found ignoring it)" \
+  || bad "~/.claude/jev-disabled did NOT stop capture.sh (rc=$rc, $(sandbox_count) captured)"
+
+rm -f "$SANDBOX"/data/inline/*.jsonl 2>/dev/null
+out=$( cd "$SANDBOX" && CLAUDE_PROJECT_DIR="$SANDBOX" JEV_HOME="$SANDBOX" HOME="$FAKE_HOME" \
+       JEV_INLINE_LOG_DIR="$SANDBOX/data/inline" \
+       "$SANDBOX/hooks/inline_shadow_bash.sh" < "$BASH_PAYLOAD" 2>/dev/null ); rc=$?
+n=$(cat "$SANDBOX"/data/inline/*.jsonl 2>/dev/null | wc -l | tr -d ' ')
+[ "$rc" = "0" ] && [ -z "$out" ] && [ "$n" = "0" ] \
+  && ok "~/.claude/jev-disabled stops inline_shadow_bash.sh" \
+  || bad "~/.claude/jev-disabled did not stop inline shadow: rc=$rc rows=$n stdout=[$out]"
+
+rm -rf "$SANDBOX/data/agent_route"
+out=$( cd "$SANDBOX" && CLAUDE_PROJECT_DIR="$SANDBOX" JEV_HOME="$SANDBOX" HOME="$FAKE_HOME" \
+       "$SANDBOX/hooks/agent_route_actuator.sh" < "$AGENT_PAYLOAD" 2>/dev/null ); rc=$?
+[ "$rc" = "0" ] && [ -z "$out" ] && [ ! -d "$SANDBOX/data/agent_route" ] \
+  && ok "~/.claude/jev-disabled stops agent_route_actuator.sh (no stdout, no ledger)" \
+  || bad "~/.claude/jev-disabled did not stop the actuator: rc=$rc stdout=[$out]"
+
+rm -rf "$FAKE_HOME" "$SANDBOX/data/agent_route"
+sandbox_clean
 
 # ---------------------------------------------------------------------------
 # 3. OFF EQUALS VANILLA

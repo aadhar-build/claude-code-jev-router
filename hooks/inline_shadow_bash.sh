@@ -49,6 +49,76 @@ fi
 [ -n "$ROOT" ] || exit 0
 [ -d "$ROOT" ] || exit 0
 
+# --- jev home: canonical block, byte-identical in every hook ----------------
+# W2/JEV-56. $JEV_HOME is WHERE JEV ITSELF LIVES, resolved WITHOUT reference to
+# $CLAUDE_PROJECT_DIR. The two are the same directory only when jev is running
+# in its own repo; once `jev install` registers this hook in somebody else's
+# repo they are different, and every asset below -- config/tiers.json, the
+# assignment ledger, the breaker log, the stderr log -- belongs to jev, not to
+# the project being routed.
+#
+# The pivot audit found the failure this prevents: resolve jev's root from
+# $CLAUDE_PROJECT_DIR and, in the wrong install shape, `config/tiers.json`
+# names a file that does not exist (so every delegation fails to frontier),
+# the ledger is written into somebody else's working tree, and the kill switch
+# names a path that will never exist -- a switch that is permanently off.
+#
+# ONE MECHANISM, BOTH READERS. `src/paths.py` resolves JEV_HOME with the same
+# two-line rule -- the environment variable if it names a directory, otherwise
+# the directory two levels above this file -- so the bash half and the Python
+# half cannot disagree. `tests/test_jev_home.sh` asserts they return the same
+# absolute path, and `paths.jev_home_source()` reports which arm fired.
+#
+# FAIL SAFE, like everything else here: a $JEV_HOME that cannot be established
+# is not guessed at, it is an exit.
+#
+# W5. A RELATIVE $JEV_HOME IS REFUSED, NOT NORMALISED, AND THE REASON IS THE
+# KILL SWITCH. Bash uses the value VERBATIM after an `is_dir` test, so
+# `JEV_HOME=.` makes every jev asset cwd-relative -- config/tiers.json, the
+# ledger, the breaker log, and `$JEV_HOME/.jev-disabled`, which is the GLOBAL
+# kill switch. A switch whose path depends on where the caller happened to be
+# standing is precisely what the per-project block below says must never
+# happen: "anchored on $ROOT, never cwd-relative". `src/paths.py` RAISES on
+# the same value rather than silently `.resolve()`-ing it against the cwd, so
+# the two readers agree that there is exactly one kind of $JEV_HOME that means
+# the same thing to both -- an absolute one. A hook cannot raise, so it
+# refuses. Not a fallback: falling back to the derived path would be this
+# reader guessing where the other one declines to, and `jev` and
+# `paths.resolve_jev_home()` already reject the value loudly at the point a
+# human sets it.
+JEV_HOME="${JEV_HOME:-}"
+case "$JEV_HOME" in ""|/*) ;; *) exit 0 ;; esac
+[ -d "$JEV_HOME" ] || JEV_HOME="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd -P)"
+[ -n "$JEV_HOME" ] || exit 0
+[ -d "$JEV_HOME" ] || exit 0
+# --- end jev home -----------------------------------------------------------
+
+# --- jev GLOBAL kill switch: canonical block, byte-identical in every hook ---
+# SWITCH ONE OF TWO, and the one that does not depend on which repo you are in.
+# It stops routing in EVERY project at once, which is what you want at 3am when
+# you do not yet know which repo is misbehaving. The per-project block below is
+# the other one: an opt-out for a single repo, which is a different question.
+#
+# Two paths, either of which is enough:
+#
+#   $JEV_HOME/.jev-disabled        what `./teardown.sh` and `jev uninstall`
+#                                  set. JEV_HOME-anchored, NOT project-anchored,
+#                                  so it is a real path in every install shape.
+#                                  Under the rejected global install this is
+#                                  precisely the switch that would have named a
+#                                  file that can never exist.
+#   $HOME/.claude/jev-disabled     machine-wide, set by hand, honoured even if
+#                                  the jev install itself is unreachable.
+#                                  Read-only; nothing in this repo writes here.
+#
+# Same fail-safe rule as the per-project switch below: ANY entry at either path
+# means OFF, and a state that cannot be established ALSO means OFF -- hence the
+# unset-HOME case. A switch is never given the benefit of the doubt.
+[ -n "$HOME" ] || exit 0
+{ [ -e "$JEV_HOME/.jev-disabled" ] || [ -L "$JEV_HOME/.jev-disabled" ]; } && exit 0
+{ [ -e "$HOME/.claude/jev-disabled" ] || [ -L "$HOME/.claude/jev-disabled" ]; } && exit 0
+# --- end jev GLOBAL kill switch ---------------------------------------------
+
 # --- jev kill switch: canonical block, byte-identical in every hook ----------
 # One switch, all surfaces. `tests/reversibility.sh` enumerates the registered
 # hooks and fails if any of them lacks this block, so a new surface cannot be

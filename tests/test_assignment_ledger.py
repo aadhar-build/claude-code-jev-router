@@ -79,10 +79,30 @@ class TestTheRowCarriesItsProject(unittest.TestCase):
 
     def test_the_deployed_schema_constant_tracks_the_hook_not_the_reader(self):
         """`LEDGER_SCHEMA` names what `hooks/agent_route_actuator.sh` writes.
-        It flips to `-v2` in the same change that adds `project` to the hook's
-        two jq row objects -- and `test_agent_actuator.py`'s key-parity test is
-        what fails if the two ever get out of order."""
-        self.assertEqual(al.LEDGER_SCHEMA, al.LEDGER_SCHEMA_V1)
+
+        W5: the hook now emits `-v2` with `project`, so the constant follows.
+        This assertion no longer names a version LITERALLY -- it READS THE
+        HOOK, because a literal here is a second copy of the same fact and has
+        to be hand-edited at every bump, which is precisely when a drift
+        detector is most likely to be edited into agreement rather than fixed.
+        Derived, it goes red on its own the day the two diverge, in either
+        direction.
+        """
+        import re
+        from pathlib import Path
+
+        hook = (Path(__file__).resolve().parent.parent
+                / "hooks" / "agent_route_actuator.sh").read_text()
+        emitted = set(re.findall(r'schema: "(agent-route-assignment-v\d)"', hook))
+        self.assertTrue(emitted, "no schema literal found in the hook at all")
+        self.assertEqual(
+            len(emitted), 1,
+            f"the hook emits more than one schema version: {sorted(emitted)}")
+        self.assertEqual(al.LEDGER_SCHEMA, emitted.pop())
+
+        # And the fence still holds: `project` is what separates the versions.
+        self.assertIn("project:", hook)
+        self.assertEqual(al.LEDGER_SCHEMA, al.LEDGER_SCHEMA_V2)
 
 
 class TestPartitioning(unittest.TestCase):
