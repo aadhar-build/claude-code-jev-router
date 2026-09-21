@@ -2,14 +2,49 @@
 
 > **Frozen 2026-09-20 — historical record, not a live document.** This is the
 > original plan, written before any measurement was taken. It has been
-> **superseded in specific ways by `SPEC.md`**, whose *Status* section names
-> each reversal and the evidence that forced it; read that first and treat
-> anything here that contradicts it as the superseded side. Nothing below has
-> been edited to match, and nothing will be — the plan is retained unaltered
-> because its numbered **Decisions #1–#9** are cited by name from source
-> comments (`src/state_builders.py`, `src/bench_inline.py`, `src/store.py`,
-> `hooks/inline_shadow_bash.sh`, `tests/test_inline_shadow.sh`), and deleting
-> it would orphan those references.
+> **superseded**; read `SPEC.md` first and treat anything here that contradicts
+> it as the superseded side. Nothing below has been edited to match, and nothing
+> will be — the plan is retained unaltered because its numbered
+> **Decisions #1–#9** are cited by name from source comments
+> (`src/state_builders.py`, `src/bench_inline.py`, `src/store.py`,
+> `hooks/inline_shadow_bash.sh`, `tests/test_inline_shadow.sh`), and deleting it
+> would orphan those references.
+>
+> **The one permitted kind of edit**, adopted 2026-09-21: a bracketed
+> **`[CORRECTED 2026-09-21: …]`** note may be inserted where this document
+> asserts as *fact* something the repo has since measured to be false. The
+> original sentence is never altered — the note sits beside it. Silence would be
+> the worse choice: these are the lines most likely to be quoted out of a frozen
+> document precisely because they read as settled.
+>
+> **⚠️ Pointer repaired 2026-09-21.** This header used to say it was superseded
+> by *"`SPEC.md`, whose **Status** section names each reversal"*. **The current
+> `SPEC.md` has no Status section.** That sentence was written against the
+> *measurement-harness* spec, which is now at
+> `docs/SPEC-measurement-harness-ARCHIVED.md` — so the one pointer telling a
+> reader how to use this document pointed at nothing. Recorded rather than
+> silently rewritten, because "the pointer rotted when the target was replaced"
+> is the useful fact.
+>
+> **Where the reversals are actually named, in the reworked `SPEC.md`:**
+>
+> | you want | read |
+> |---|---|
+> | why the whole framing changed | **§1**, "What changed, and why this document exists" |
+> | what is explicitly dead from the old plan | **§8**, "What dies from the old SPEC" |
+> | what the repo audit reversed, and the four operator decisions | **§9** |
+> | the corrected cost anchor and the two costing-rule bugs | **§10** and **§11** |
+>
+> **Two specific reversals a reader of this file will hit within the first two
+> pages**, flagged here because they are load-bearing above:
+>
+> 1. **The publication goal is retired** (§1). This plan is a measurement study
+>    whose deliverable is a published number. That deliverable no longer exists.
+> 2. **Gating is refuted as a mechanism** (§2c). This plan's premise is that Jev
+>    is cheap enough to sit in a synchronous hook. Measured here, a `pre_bash`
+>    gate adds **+337 tokens and +557ms p50 / +2,681ms p99 per call and removes
+>    nothing**. The premise below is not merely superseded, it was tested and
+>    came out negative.
 
 ## Context
 
@@ -17,6 +52,25 @@ TypeSafe AI's **Jev** is a "System One" model: state + typed questions in, calib
 out, never text. At **$0.042/1M input tokens (output free)** and a claimed 70–500ms, it is the first
 model cheap and fast enough to sit inside Claude Code **hooks** — which run synchronously on every
 turn and have therefore never been able to afford an LLM call.
+
+> **[CORRECTED 2026-09-21: "(output free)" is UNVERIFIED, and the conclusion of
+> this paragraph is REFUTED.]**
+>
+> *On the price.* `SPEC.md` §7 records the input price as confirmed from the
+> vendor directly — typesafe.ai's own pricing page states "$42 Per Billion input
+> tokens", i.e. $0.042/1M. **"Output free" is a different claim and no output
+> price is stated anywhere found.** It is asserted as fact three times in this
+> document (here, in the cost model below, and in the Motivation section) and
+> was never sourced. Treat it as unverified; the $0.042 figure stands.
+>
+> *On the conclusion, which matters more.* "Cheap and fast enough to sit inside
+> Claude Code hooks" was the premise of this entire plan, and it was **tested
+> and came out negative**: `FINDINGS.md:563` — *"gating cannot make Claude Code
+> faster or more token-efficient, by construction."* A `pre_bash` gate adds
+> **+337 tokens and +557ms p50 / +2,681ms p99 per call, and removes nothing.**
+> Across one real session of 179 Bash calls: +60,323 tokens and ~100s of human
+> waiting. The price was never the binding constraint; the synchronous position
+> was.
 
 The goal is to find out whether replacing Claude Code's *decision layer* with Jev actually helps, and
 to **publish the result**. That makes this a measurement study, not a feature build: the scaffold
@@ -339,7 +393,8 @@ on log-ratio); and `tokens per KB of state`, which reveals whether Jev's cheap p
 partly offset by charging for more tokens.
 
 ```
-cost_jev    = inputTokens * 0.042e-6                    # output free
+cost_jev    = inputTokens * 0.042e-6                    # output free -- [UNVERIFIED, see the
+                                                        #  correction under Context]
 cost_claude = in*rate_in + cache_write*rate_in*1.25 + cache_read*rate_in*0.10 + out*rate_out
 ```
 Opus 5 = $5.00/$25.00 per 1M. **Headline input ratio: $0.042 vs $5.00 — 119×, with free output.**
@@ -510,6 +565,26 @@ in the hot path. **Nobody has measured whether it does.** The user wants to find
 which means the answer has to survive a hostile reader — and most single-author LLM comparisons do
 not, because they pool incomparable surfaces, report a mean latency, call agreement "accuracy", and
 compute confidence intervals that ignore session clustering.
+
+> **[CORRECTED 2026-09-21: "Nobody has measured whether it does. The user wants
+> to find out and publish it" — BOTH HALVES ARE NOW FALSE.]**
+>
+> *Somebody measured it: us.* `FINDINGS.md` is the record. The hot-path question
+> this paragraph poses was answered negatively — a synchronous gate costs +337
+> tokens and +557ms p50 per call and removes nothing (§2c of `SPEC.md`). And
+> `JEV-50` separately retracted the novelty framing: **eleven independent Jev
+> evaluations already existed** when this was written.
+>
+> *And there is no publication.* The operator retired the publication goal on
+> 2026-09-21 — *"we have missed the trend"*. `JEV-53`, the writeup ticket, is
+> **KILLed**. The deliverable is now a tool: lower realised cost per delegated
+> task, at equal task success, with no added felt latency — and above that,
+> **speed and avoiding rework**. Nothing in this repository is going to be
+> published, and any sentence below that plans for a reader of a paper is
+> planning for a reader who does not exist.
+>
+> *"output free" in the line above is also unverified* — see the correction
+> under Context.
 
 ## Solution
 

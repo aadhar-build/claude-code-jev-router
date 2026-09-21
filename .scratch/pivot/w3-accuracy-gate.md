@@ -79,11 +79,39 @@ then report a clean run over an empty set. Scored on band-flip rate at τ
 
 **Every criterion is scored PER QUESTION and blocked on the worst one.** This
 started out pooled, and pooling is a hole rather than a style choice. Take this
-corpus's own shape: `destructive` fires on ~5% of units, `needs_review` on about
-half. A change that turns `destructive` into noise while leaving `needs_review`
+corpus's own shape — **and a firing rate is meaningless without the τ it was
+measured at, because it IS a function of τ**:
+
+| question | at its own τ | fires on |
+|---|---|---|
+| `destructive` | **0.36** | **5.6%** of units |
+| `needs_review` | **0.95** | **4.6%** of units |
+| `needs_review` | 0.5 — *not the τ this gate uses* | 52.9% |
+
+> **⚠️ Corrected 2026-09-21. This paragraph used to read *"`destructive` fires
+> on ~5% of units, `needs_review` on about half"*, which quietly took its two
+> figures at two different τ.** 5.6% is `destructive` at τ=0.36; "roughly half"
+> is `needs_review` at **τ=0.5**, which is not the τ this gate runs at — at its
+> own τ=0.95 `needs_review` fires on **4.6%**, and the two questions are
+> therefore **comparably rare**, not 10× apart. The source comment in
+> `src/accuracy_gate.py` was fixed when the error was found; this file was
+> missed. Recorded rather than silently swapped, because the mistake is the
+> instructive part: it is the same class as quoting a cost figure without its
+> window.
+>
+> **The argument below is unaffected and gets slightly stronger.** The hole
+> pooling leaves does not depend on one question being the majority — it depends
+> on the *untouched* question carrying the pooled score, which two comparably
+> rare questions do just as well. The worked example that follows is a
+> constructed case, asserted by a test, not a measurement of this corpus.
+
+A change that turns `destructive` into noise while leaving `needs_review`
 byte-identical scores, pooled, at κ ≈ 0.89 and a 4.5% flip rate — a PASS and a
 WARN. The gate would go green on the one failure it most exists to catch,
-because the untouched majority question carries the score. The test
+because the untouched question carries half the units and therefore the score
+(the corpus is **567 units each**, so the two questions are exactly balanced —
+"majority", in the version of this sentence that went with the mis-stated firing
+rates, was never the mechanism). The test
 `test_a_minority_question_destroyed_blocks_even_though_pooling_would_pass`
 constructs exactly that case and asserts exit 3. The pooled figures are kept as
 a report line and are never blocked on.

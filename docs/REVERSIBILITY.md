@@ -432,11 +432,29 @@ not ours. So uninstall works in tiers, and **says which one it achieved**:
 Tier B's three checks, all computed from the written file rather than from the
 function that wrote it: nothing outside `"hooks"` moved; every handler that
 disappeared is one of ours and no handler appeared; and re-applying `install`
-to the result reproduces the pre-uninstall document exactly, so nothing was
+to the result reproduces the pre-uninstall document — **up to the order of the
+groups within one hook event**, which is not a behaviour (Claude Code runs every
+matching group) and which `merge_entries` cannot reconstruct, since it always
+appends ours at the end. **The order that IS checked exactly is the user's own
+groups relative to each other**, separately. Together those say nothing was
 *lost* rather than merely moved. Any failure restores the backup and stops
 loudly. `tests/test_install.sh` §5 feeds the verifier four kinds of damage and
 requires it to catch every one — a verifier that has never been shown catching
 anything is not evidence.
+
+> **⚠️ Corrected 2026-09-21.** This paragraph said re-install reproduces the
+> pre-uninstall document **"exactly"**, full stop. That was **overclaiming**:
+> check 3b is deliberately order-insensitive exactly where order does not
+> matter, because `install` always appends our group last and so cannot put a
+> user group back after it. `src/install.py`'s docstring and its own printed
+> output were corrected when the check was written; **this document was missed**,
+> and for a while the doc promised a stronger guarantee than the code delivers.
+>
+> The distinction is not cosmetic. "Exactly" invites a reader to treat tier B as
+> byte-identity, which is the one thing tier B explicitly is not — that is tier
+> A's guarantee, and the whole reason the two tiers are named and printed apart.
+> The corrected wording is the one the code prints, so a reader comparing the
+> two now finds them agreeing.
 
 Tier B exists because `install` re-serialises the file the moment it merges
 into it. That is the honest weakness, it is printed every time, and the

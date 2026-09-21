@@ -40,7 +40,7 @@ describes remain readable where tickets reference them.
 | **W1** | **The static floor.** `PreToolUse` on `Agent`, `subagent_type → tier` map, **zero Jev calls, zero added latency**. The first shippable thing, and the baseline Jev must beat | ✅ **done** (`bcd982f`) — built, **not armed** |
 | **W2** | **Safe install + teardown**, opt-in per project. Must work *before* the router is armed | ✅ **done** (`0f5901f`) — `jev install`/`uninstall`, `JEV_HOME`, two switches, JEV-56 closed |
 | **W3** | **The accuracy gate** — per-task pass/fail, blinded by construction (JEV-29 + JEV-36) | ✅ **done** (`df79e67`) — but it **exits 1 ("could not run")** until JEV-58 lands labels |
-| **W4** | **Jev enters**, aimed at the `general-purpose` residue (65–79%, disputed — see the corpus-size note below). **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3, and JEV-57 |
+| **W4** | **Jev enters**, aimed at the `general-purpose` residue (65–79%, disputed — see the corpus-size note below). **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3, JEV-57, and **16** (Run B) |
 | **W5** | **Unstick the gate and produce the first "after".** **06** (the before/after reporter — it has never existed), **57** (ledger `project` field, before a second repo installs), **58** (label `data/labels/`), **59** (re-snapshot under the corrected rule), then **52** — arm it | **THE CRITICAL PATH.** Nothing this project claims has ever been measured, because the actuator has never fired. 58 is the cheapest item and gates everything: without labels the accuracy gate cannot clear Class 1 at all |
 | **W6** | **Context reduction — PROMOTED 2026-09-21.** Trim oversized tool results at ingestion, and rebuild compaction so it never loses file paths or errors. Must clear the +337-token / +557ms bar, so it fires only on large payloads | **This is the SPEED lever.** The main thread is where the human actually waits; routing delegated tasks cannot move felt latency at all (530× blocking gap). And compaction that loses context causes re-reading, which is rework |
 | **W7** | **Operate** — canary on a schedule, latency SLO, weekly report on rework rate and felt latency; **60** (observer hooks still drop captures silently), **61** (`doctor.py` blind to the INERT marker) | not started. 60 and 61 are W5's deliberately-left residuals, each with its reasoning recorded on the ticket |
@@ -79,19 +79,31 @@ Two measured facts govern everything downstream:
 
 ## Triage tally
 
-**24 KEEP · 13 REPURPOSE · 4 PARK · 17 KILL**, across all 58 headings.
+**24 KEEP · 10 REPURPOSE · 4 PARK · 20 KILL**, across the 58 headings that
+carry a verdict. *(Re-verdicted 2026-09-21: **JEV-09**, **JEV-23** and
+**JEV-46** moved REPURPOSE → KILL. In each case the repurposed value had
+already shipped — as W1's actuator, as W3's grader, as `config/tiers.json` —
+and everything still written on the ticket was cancelled A/B design. The
+reasoning is on each ticket. The board now has **63** headings; JEV-57–61 are
+post-pivot and carry no PIVOT TRIAGE line.)*
 
 > Note: the audit that produced this triage reported its own tally as
 > "16 KEEP · 15 REPURPOSE · 6 PARK · 21 KILL". **That summary disagrees with
 > the audit's own per-ticket table**, which is the version applied here and
 > which counts 24 KEEP. The table was taken as authoritative over the summary.
-> The board's long-standing "57 tickets" is also off by one — there are 58
-> headings (01–56 plus the 24a/24b and 31b splits).
+> The board's long-standing "57 tickets" is also off by one — there were 58
+> headings carrying a verdict (01–56 plus the 24a/24b and 31b splits). **There
+> are 63 headings today**: JEV-57–61 were opened after the pivot and carry no
+> PIVOT TRIAGE line, which is correct — they were never triaged, they were
+> written under the new goal.
 
 Three verdicts **invert** under the new goal and are worth reading directly:
 
 - **JEV-46** rejected a static `subagent_type→tier` map. That map is now **W1**,
-  the product's zero-cost floor.
+  the product's zero-cost floor. *(The ticket itself was re-verdicted to KILL on
+  2026-09-21 — because the inversion has since **shipped** as
+  `config/tiers.json`, not because it was wrong. The inversion is the thing
+  worth remembering; the ticket has nothing left to do.)*
 - **JEV-45** (the ~245ms gateway hop) was park-worthy; under a latency goal it
   is the largest recoverable chunk of Jev's own 437ms.
 - **JEV-24b** is not merely obsolete but **actively harmful**: a standing
@@ -114,7 +126,9 @@ explicitly out.
 **Collection is STOPPED as of 2026-09-20T21:42Z.** `.jev-disabled` engaged,
 worker (pid 94441) terminated, spool empty in all four directories, hook
 verified to exit 0 without capturing. Standing totals at the freeze: **571
-captures, 2,005 run rows**. Nothing restarts until the activation gate below.
+captures, 2,005 run rows** — **but see JEV-52: that pair was already an
+undercount when it was written. The files held 578 / 2,095 at 21:42Z.** Nothing
+restarts until the activation gate below.
 
 ### The shape
 
@@ -475,7 +489,30 @@ three verification tests that must all pass before the hook is enabled.
 
 ## JEV-09: True inline shadow
 
-**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** The SCRIPT is the product's ancestor; the ticket (inline shadow on pre_bash) dies
+**PIVOT TRIAGE 2026-09-21 — KILL.** *(Re-verdicted 2026-09-21; was REPURPOSE.)* Its repurposed value already shipped in W1; what is left is a dead `pre_bash` registration
+
+> **Why the verdict changed, recorded rather than swapped.** The REPURPOSE
+> verdict said *"the SCRIPT is the product's ancestor; the ticket dies"* — and
+> it was right about both halves, which is precisely why REPURPOSE was the wrong
+> label. **REPURPOSE means there is work left to redirect.** There is not:
+>
+> - **The repurposed value has already landed.** `hooks/inline_shadow_bash.sh`
+>   is the ancestor of W1's `hooks/agent_route_actuator.sh` — the
+>   byte-identical-state discipline, the exit-0-on-every-path rule, the hard
+>   timeout, the `-e`-or-`-L` switch test all descend from it. W1 shipped
+>   (`bcd982f`). An ancestor is not a backlog item.
+> - **What the ticket actually asks for is dead.** Its two open boxes are
+>   "register the inline hook live alongside `capture.sh`" and "decide
+>   `--max-time` for it". Both are about **registering a synchronous Jev gate on
+>   `pre_bash`** — the mechanism `SPEC.md` §2c refutes: +337 tokens and +557ms
+>   p50 per call, removing nothing. We are not going to register it, so its
+>   `--max-time` is not a decision anyone has to make.
+>
+> **The one thing worth carrying forward**, so killing this does not lose it:
+> the open box records that the default `--max-time 2.0s` sits **below Jev's
+> 2,681ms p99**, so a naive timeout silently turns the top 1–3% of the tail into
+> attrition. That is a live hazard for **W4's** synchronous router call and is
+> logged there, not here.
 
 **Status:** blocked
 **Labels:** hooks, hot-path
@@ -691,9 +728,48 @@ ticket's file). Now that the gates are sandboxed they are safe to add.
 
 **PIVOT TRIAGE 2026-09-21 — KEEP.** Flip-rate-vs-distance-from-tau becomes a PRODUCT RULE: do not route inside the flip band
 
-**Status:** done (Run A). **Runs B and C deferred to Phase B / B1.**
+**Status:** done (Run A). **Run B is OPEN and now BLOCKS W4. Run C is CANCELLED.**
 **Labels:** science, blocking
 **Blocked by:** None. Avoid running it at the same moment as another process writing `data/runs/` — see the execution plan.
+
+### Run C is cancelled, and the status line that referenced it was dangling
+
+Run C was **`cc_opus5`, N=5, the 20 items nearest τ — the Opus reference-wobble
+sweep** (`.scratch/wave2-prep.md`, and the spend table in the superseded
+execution plan above). The status line here named it without ever defining it,
+and the only two places that *did* define it are a scratch file and a section
+marked SUPERSEDED — so from the live board it read as a run that exists
+somewhere and does not.
+
+**It is cancelled rather than defined**, because the thing it measured is dead:
+Run C exists to establish how much a *frontier reference arm* wobbles, and
+`cc_opus5` is part of the `cc_*` comparison set, which the pivot KILLed. There
+is no reference arm to characterise any more. Nothing else in the repo depends
+on it.
+
+### Run B is PROMOTED to blocking W4
+
+**Run B is `jev`, N=20, over the 60 synthetic items — 1,200 calls, ~12 min,
+~$0.018.** It was deferred to "Phase B" on a spend decision when the only thing
+it fed was a study. Under the *rework* goal it is a **product prerequisite**:
+
+- **It is the only source for Jev's own flip band.** Run A measured
+  **`cc_haiku45`** — the wrong arm for this purpose, chosen because it was the
+  only sweep that unblocked a ruling live at the time. There is still **no
+  determinism baseline for `jev` at all**, and the product rule W4 depends on is
+  *"do not route inside the flip band"*. You cannot obey a rule whose band has
+  never been measured on the model that will be doing the deciding.
+- **A flip is rework, directly.** Near τ, the same task gets a **different tier
+  on retry**. Under operator decision 3 (RESTART on escalation) that is not a
+  cosmetic inconsistency — it is the same work done twice, in money and in time,
+  which is criterion R1. A router that flips inside the band manufactures the
+  exact failure the project exists to reduce.
+- **It is cheap and it blocks nothing else.** ~$0.018 and about twelve minutes,
+  offline replay, no arming required — so it can run before the gate.
+
+**W4's ship gate is "beat the static rule on realised cost at equal task
+success". Run B is what makes that gate honest**: without the flip band, a Jev
+win could be a win, or could be noise re-rolled until it looked like one.
 
 **What to build:** The measurement that decides whether Jev can ever enforce.
 `src/determinism.py` is written and correctly **exits non-zero** rather than
@@ -707,7 +783,7 @@ synthetic states**, chosen because it is the only sweep that unblocks a ruling
 live today (A7.5's verdict on the 334 live v1 rows). The Jev sweep those
 checkboxes describe is **Run B, deferred to B1**.
 
-- [ ] ~~Run `replay.py --determinism 20 --arms jev` over a stratified sample~~ → **deferred to Phase B as Run B.** There is still **no determinism baseline for `jev`**, and nothing in Phase A needs one
+- [ ] ~~Run `replay.py --determinism 20 --arms jev` over a stratified sample~~ → ~~**deferred to Phase B as Run B**~~ → **THIS IS RUN B, AND IT IS BACK ON THE CRITICAL PATH (2026-09-21): it blocks W4.** There is still **no determinism baseline for `jev`**. "Nothing in Phase A needs one" was true of Phase A and is false of the product — see "Run B is PROMOTED to blocking W4" above
 - [x] **Run A executed**: `--determinism 10 --arms cc_haiku45 --context synthetic --ids <9>`, **90 calls, 0 attrition**, $0 metered. Selected and reported on `arm_config_id` carried by the row, never on `evaluated_at`
 - [x] Report flip rate bucketed by |p − τ| — `reports/determinism-runA-2026-09-20.txt`. **The hypothesis is FALSIFIED on this arm's `needs_review`**: flips occur at |p − τ| ≥ 0.10 (τ=0.50) and ≥ 0.20 (τ=0.95), far from the threshold. On `destructive` there are **0 flips in 90 calls** at either τ
 - [x] Resolve the 41%-occupancy concern: **it is a synthetic artefact.** At τ=0.95 on `needs_review`, 24/59 (41%) **synthetic** against **11/487 (2.3%) live**; at τ=0.36 on `destructive`, 3/59 synthetic against **0/487 live**. Across 487 live `jev` decisions `destructive` never once crossed τ=0.5 (max 0.16). **Both numbers are quoted together everywhere; neither is quoted alone**
@@ -733,7 +809,8 @@ per-question dead-zone verdict "is JEV-17's input". The rule can be written now.
 
 **The limit, and it must be carried into the rule's wording.** Run A measured
 **`cc_haiku45` only**. There is still **no determinism baseline for `jev`** —
-that is Run B, deferred to B1. So the dead-zone verdict currently reads: viable
+that is Run B — **no longer deferred; it now blocks W4** (2026-09-21). So the
+dead-zone verdict currently reads: viable
 for `destructive` (0 flips in 90 calls at either τ), not viable for
 `needs_review` on `cc_haiku45` (flips at |p − τ| ≥ 0.10, so the wobble is not a
 boundary effect and no threshold removes it). A rule written now is a rule
@@ -914,7 +991,37 @@ same cost; nothing is discarded, only deferred.
 
 ## JEV-23: Routing A/B — per delegated task
 
-**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** The A/B becomes a SHIP GATE on one optimization. Drop ITT/clustering/pre-registration; keep the control arm
+**PIVOT TRIAGE 2026-09-21 — KILL.** *(Re-verdicted 2026-09-21; was REPURPOSE.)* The ship gate exists without it; the surviving content is already built in W1/W3, and the rest is cancelled A/B design
+
+> **Why the verdict changed.** REPURPOSE said *"the A/B becomes a SHIP GATE on
+> one optimization"*. That happened — but it happened **elsewhere**, and leaving
+> this ticket live implied a 19-box work item that nobody is going to do.
+> Counted honestly, of its 19 acceptance boxes:
+>
+> - **Already built.** The `PreToolUse`-on-`Agent` mechanism, echoing `prompt` /
+>   `description` / `subagent_type` back unchanged, asserting the assignment took
+>   effect against `resolvedModel` (prefix match, never equality), taking
+>   outcomes from the subagent transcript rather than `PostToolUse`, and the
+>   `JEV_ARM_SUBPROCESS` recursion guard — **all of that is W1**, shipped in
+>   `bcd982f`, and the blinded grader is **W3**.
+> - **Cancelled with the A/B.** The coin flip per spawn; `routing_arm` /
+>   `routing_context` on every capture; the `random_matched` third arm (JEV-46);
+>   ITT and clustering; two co-primary outcomes each with its own interval; the
+>   power-analysis stopping rule; "decide the control arm before anything runs".
+>   There is no randomisation, so there is no arm to assign, no control to
+>   choose and no interval to compute.
+> - **Moved, not lost.** *"Report agreement between Jev's assignment and a
+>   static `subagent_type → tier` rule — if Jev agrees with two lines of `if`,
+>   the classifier is adding nothing"* was this ticket's sharpest box. It is now
+>   **W4's entire ship gate**, promoted from a caveat to the pass/fail
+>   condition. Recording task duration and blocking duration **separately** is
+>   likewise a standing rule (`SPEC.md` §2), and the divergence it predicted was
+>   measured: 794.6 s against 1.5 s, 530×.
+>
+> **Nothing is left that is both live and unbuilt.** Kept for its design
+> reasoning, especially the three prior-art amendments — per-task-family strong-
+> model call rates, the transferred-threshold failure in arXiv:2501.01818, and
+> why two arms cannot separate "tiering helps" from "Jev helps".
 
 **Status:** blocked
 **Labels:** science, hooks
@@ -1328,6 +1435,36 @@ because making it live changes what gets written to the row schema.
 ## JEV-32: `analyze.py` reads the current config against rows run under an older one
 
 **PIVOT TRIAGE 2026-09-21 — REPURPOSE.** Becomes 'never compare two policy versions as if they were one'
+
+> ## ⚠️ ITS ENFORCEMENT IS CURRENTLY UNOWNED — logged 2026-09-21 (W5)
+>
+> **`src/analyze.py` was deleted this wave, and it took
+> `tests/test_analyze_config_join.py` (7 tests) with it. Those tests were the
+> only enforcement anywhere of this ticket's invariant** — *never compare two
+> policy versions as if they were one.*
+>
+> **The ticket is REPURPOSE, not KILL. Only its implementation died.** The
+> invariant outlives the module that happened to violate it first, and right now
+> nothing in the tree asserts it. `Status: done` below refers to the original
+> defect in `analyze.py`, which is now moot because `analyze.py` is gone — it
+> does **not** mean the principle is protected.
+>
+> **The obvious re-pin is JEV-57's assignment ledger**, which already refuses to
+> pool across repos (`ProjectsWouldBePooled`). That is a sibling of exactly this
+> rule — *do not pool records that were produced under different conditions* —
+> and the natural place for the general form to live.
+>
+> **Why this is more urgent under the corrected goal, not less.** The ledger
+> spans **every repo `jev` is installed in**. Pooling two policy versions, or
+> two repos, is a confound that **looks like a result**: a tier-map change and a
+> second project arriving are both invisible in a pooled before/after, and both
+> move the number. W5 exists to produce the first "after"; this is the rule that
+> decides whether that "after" means anything.
+>
+> A comment marking the gap was left at the removal site in `tests/run_all.sh`.
+> That is the right place to leave a breadcrumb and the wrong place to track
+> work — **a comment in a test runner is not somewhere anyone looks** — which is
+> why it is also recorded here.
 
 **Status:** done
 **Labels:** defect, science
@@ -2610,9 +2747,57 @@ unredacted command text changes too.
 
 ## JEV-46: `random_matched` — the third routing arm, and why it is NOT a static heuristic
 
-**PIVOT TRIAGE 2026-09-21 — REPURPOSE.** INVERTED. The static subagent_type->tier map this ticket REJECTED becomes W1, the floor Jev must beat
+**PIVOT TRIAGE 2026-09-21 — KILL.** *(Re-verdicted 2026-09-21; was REPURPOSE.)* The inversion has already SHIPPED as W1; all 5 remaining boxes are `random_matched`, which died with the A/B
 
-Status: ready-for-agent — **unblocked 2026-09-21**, JEV-34 landed (`652d3e8`)
+> **Why the verdict changed, and why the ticket is still worth reading.** The
+> REPURPOSE verdict recorded the inversion — *"the static `subagent_type→tier`
+> map this ticket REJECTED becomes W1, the floor Jev must beat"* — and that is
+> a genuinely important reversal. But an inversion is not a work item, and this
+> one is **done**: the map is `config/tiers.json`, the hook is
+> `hooks/agent_route_actuator.sh`, W1 shipped in `bcd982f`. Leaving the ticket
+> `ready-for-agent` invited an agent to build something that already exists.
+>
+> **All five remaining acceptance boxes are `random_matched`** — implement the
+> arm, derive and freeze its mix from `jev_routed`'s realised distribution,
+> record the seed, amend the pre-registration, and write the rejection into the
+> writeup. **Every one of those five is dead**: `random_matched` only ever made
+> sense as the third arm of a randomised A/B (it is defined *by* a mix pinned to
+> another arm's behaviour), the A/B is retired, `PREREGISTRATION.md` is retired,
+> and there is no writeup (JEV-53 is KILLed).
+>
+> **Two things this ticket argued that the product still relies on**, which is
+> why it is kept rather than deleted:
+>
+> 1. **The 65% degeneracy is a real limit and it is now a stated coverage
+>    ceiling, not a refutation.** The rejection was sound *as an experimental
+>    arm* competing for a fixed run budget, where degenerating to a constant on
+>    the majority of traffic burns a third of the budget reproducing `default`.
+>    As a **production floor** the same majority is a coverage limit that costs
+>    nothing, because the floor makes no calls. `config/tiers.json` carries that
+>    argument in full, including that measured coverage today is **worse** than
+>    the figure the rejection was argued against — which strengthens the
+>    rejection as an arm and does not weaken the case for a free floor.
+> 2. **liteLLM's 46% does not port to our surface**, because it switches phase
+>    by observing a stream of tool calls and `agent_route` decides **once**, at
+>    delegation time, on a task description. Anyone quoting 46% at W1 is carrying
+>    a number across a boundary where it does not apply.
+>
+> *(Its "120 delegated tasks / `general-purpose` 78 (65%)" figure is one of four
+> circulating counts that differ by a factor of 17. They are not in conflict —
+> they count different things over different windows. All four, with their
+> rules, are reconciled in `config/tiers.json`; never quote one without its
+> rule.)*
+
+Status: blocked
+
+> **Was `ready-for-agent` until 2026-09-21**, when this ticket was re-verdicted
+> to KILL (above). The status is written plainly rather than struck through on
+> purpose: `STATUS_RE` in `tests/test_board.py` captures the whole line, so
+> `~~ready-for-agent~~` still machine-reads as **ready-for-agent** — which would
+> have left a killed ticket advertising itself as workable, the exact outcome
+> the re-verdict exists to prevent. Same class of bug as a strikethrough in the
+> PIVOT TRIAGE line. For the record: it was unblocked 2026-09-21 when JEV-34
+> landed (`652d3e8`), and its inversion shipped as W1 (`bcd982f`).
 Labels: science, arms, prior-art
 Blocked by: ~~JEV-34 (the surface)~~ — cleared. Wave A4, and it gates JEV-27.
 
@@ -3082,10 +3267,38 @@ live.
 
 **Current state, frozen 2026-09-20T21:42Z.** `.jev-disabled` engaged; worker
 terminated; `spool/{ready,claimed,tmp,dead}` all empty; hook verified to exit 0
-without capturing. **571 captures, 2,005 run rows** already collected under the
-pre-gate configuration — these are NOT discarded, but they carry pre-gate
-`arm_config_id`s and the era rules in `PREREGISTRATION.md` A7 govern whether
-they pool with anything collected after.
+without capturing. **571 captures, 2,005 run rows** collected under the pre-gate
+configuration as of that instant — these are NOT discarded, but they carry
+pre-gate `arm_config_id`s, and whether they pool with anything collected later
+is decided by the `arm_config_id` on each row.
+
+> **⚠️ The 571 / 2,005 above was ALREADY AN UNDERCOUNT when it was written.**
+> *Investigated 2026-09-21 (W5 doc sweep); see `SPEC.md` §9 item 4 for the full
+> arithmetic.*
+>
+> The tree reports **578 captures / 2,095 run rows**. `SPEC.md` §9 had recorded
+> the 7-capture half as *"a count discrepancy nobody has explained"*, with an
+> instruction not to quote either number. **Source identified: both gaps are
+> JEV-16 Run A** — the seven synthetic states Run A had to materialise before it
+> could sweep (`picked_at` all within **2026-09-20T17:26:15**, `decision_id`s
+> `syn-syn-0000/0001/0002/0120/0122/0240/0241`, referenced by **70 of Run A's 90
+> replay rows**), plus those 90 replay rows themselves.
+>
+> **The tempting explanation is that Run A ran after this freeze. It did not.**
+> Run A ran **17:26–17:37Z**; this freeze is stamped **21:42Z**, four hours
+> later, and the newest row of any kind in either file is **17:36:57Z**. Nothing
+> in the corpus post-dates the freeze.
+>
+> So this paragraph's figures are not a count of the files at 21:42Z. They are
+> either **carried forward from before Run A landed**, or taken by a method that
+> counted synthetic as "the 60-item stress set" and skipped `run_context:
+> replay` — the two omissions are exactly Run A's output. **Which, is open.**
+>
+> **Do not quote 571 / 2,005 as "standing totals at the freeze."** The standing
+> totals at the freeze were **578 / 2,095**, and they still are. An inventory
+> that was *reported* rather than *counted* reads exactly like one that was
+> counted — which is why step 7 of the sequence below asks for a **dated
+> inventory**, and why it should be produced by counting the files.
 
 **This ticket is done by ONE agent with no parallelism.** It is a sequence, and
 a step that fails stops the sequence rather than being worked around.
@@ -3093,8 +3306,20 @@ a step that fails stops the sequence rather than being worked around.
 **The sequence**
 
 1. **Full suite green**, run through `tests/run_all.sh` so `audit_live_writes.sh`
-   runs first. Green from a clean checkout, not from a working tree with
-   uncommitted fixes.
+   runs first. **"From a clean checkout" is not a manual discipline — it is
+   `tests/test_clean_checkout.sh`, and that script is what step 1 means.** Run
+   it; do not eyeball `git status` and assert the tree is clean. JEV-56 exists
+   because the suite could not be green from a clean checkout at all, and the
+   fix was a test, not a habit.
+
+   > **Corrected 2026-09-21 (W5 doc sweep).** This step read *"Green from a
+   > clean checkout, not from a working tree with uncommitted fixes"* — a rule
+   > in prose, which is exactly the failure mode this ticket's own "Why this
+   > ticket exists" section warns about. An earlier commit claimed to have
+   > pointed it at `tests/test_clean_checkout.sh` **and edited a different,
+   > superseded paragraph instead**, so the live sequence never changed. That is
+   > a fifth instance of the house pattern: a fix that reported success while
+   > leaving the thing it named untouched.
 2. **`tests/reversibility.sh` green** — OFF provably means vanilla (JEV-40).
 3. **JEV-51's proof executed, not assumed**: kill switch engaged plus a
    non-empty spool ⇒ **zero arm invocations**, counted by a test rather than
@@ -3105,12 +3330,23 @@ a step that fails stops the sequence rather than being worked around.
 5. **A canary baseline sweep recorded while still disabled**, so drift has a
    reference from the first live hour rather than from whenever someone
    remembers (JEV-37). Its `arm_config_id` and `canary_set_id` are recorded.
-6. **`PREREGISTRATION.md` amended and committed, with its git hash quoted**,
+6. ~~**`PREREGISTRATION.md` amended and committed, with its git hash quoted**,
    covering everything settled during Phase A: three routing arms and the
    `random_matched` procedure (JEV-46); the declared auth path and cache-write
    multiplier (JEV-49); the Jev endpoint limitation and the waitlist (JEV-45);
    the corrected Amendment 6 loss bound; fail-open and escalation semantics
-   (JEV-35); the era rules for the 2,005 pre-gate rows.
+   (JEV-35); the era rules for the 2,005 pre-gate rows.~~
+   **DROPPED 2026-09-21** — this ticket's own PIVOT TRIAGE line already said to
+   drop it, and the step outlived the instruction. `PREREGISTRATION.md` is
+   **retired**: a record of what was believed and when, not a live obligation,
+   so there is nothing to amend and no hash to quote. The step was also
+   unsatisfiable on its own terms — it required committing the `random_matched`
+   procedure, and `random_matched` died with the A/B (JEV-46). Three of its six
+   clauses named work nobody intends to do. *Two things in it were worth
+   keeping and have moved:* the **fail-to-FRONTIER** semantics are operator
+   decision 2 at the top of this file and `SPEC.md` non-negotiable 1(b); the
+   **era rules for pre-gate rows** are a property of `arm_config_id` on the rows
+   themselves, which is where they were always actually enforced.
 7. **A dated inventory of what is about to become live**: which hooks are
    registered, which surfaces are in which mode, which arms are enabled, and
    the `arm_config_id` of each. Committed. This is the document that makes
@@ -3126,12 +3362,18 @@ partial live state gets created, and it would be the fifth instance.
 **Acceptance criteria**
 
 - [ ] Steps 1-5 executed and their output pasted into the ticket, not summarised
-- [ ] Pre-registration amended, committed, hash recorded here
 - [ ] Live inventory committed
 - [ ] Kill switch removed, worker started, first surface registered — in that
       order, with `status` output recorded between each
 - [ ] A named rollback: the exact command sequence that returns to this frozen
       state, tested once before the switch comes off
+
+> **The pre-registration box was dropped 2026-09-21** along with step 6, for the
+> same reason: `PREREGISTRATION.md` is retired, so *"Pre-registration amended,
+> committed, hash recorded here"* was an acceptance criterion that could never
+> be ticked. An untickable box on a gate ticket is worse than no box — it is the
+> shape of a gate that can never close, which is the exact defect the blocker
+> list above was rewritten to remove.
 
 ## JEV-53: the writeup — and the seven criteria across the board that have nowhere to land
 

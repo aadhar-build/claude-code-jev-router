@@ -239,15 +239,21 @@ model the operator rejected. **We take its code, not its installer.**
 ```
 jev  (CLI, the only user-facing surface)
  │
- ├─ install / uninstall      per-project hook registration; never global
- ├─ provider/                Jev client: gateway | local backend          ⏳
+ ├─ install / uninstall      per-project hook registration; never global   [W2, done]
+ ├─ provider/                Jev client: gateway | local backend           [W4, not started]
  ├─ optimizations/
- │   ├─ compact/             PreCompact: score and DROP stale tool results
- │   ├─ route/               pre-dispatch (model, effort) selection       ⏳
- │   └─ trim/                tool-output reduction before it hits context ⏳
- ├─ guard/                   the two-class regression gate  (§6)
- └─ report/                  before/after tokens, latency, and S4 overhead
+ │   ├─ compact/             PreCompact: score and DROP stale tool results [W6, not started]
+ │   ├─ route/               pre-dispatch (model, effort) selection        [W1 built, NOT ARMED;
+ │   │                                                                     Jev half is W4]
+ │   └─ trim/                tool-output reduction before it hits context  [W6, not started]
+ ├─ guard/                   the two-class regression gate  (§6)           [W3 built; exits 1
+ │                                                                         until W5 lands labels]
+ └─ report/                  before/after tokens, latency, and S4 overhead [W5, has never existed]
 ```
+
+*(The three `⏳` markers that used to sit in this tree were removed on
+2026-09-21. They meant "unresolved" in a document that had since resolved two of
+the three, and a placeholder nobody can date is worse than a stated state.)*
 
 ### The provider layer — resolved 2026-09-21
 
@@ -296,14 +302,39 @@ write one contract test suite and run it against all four.
 
 ---
 
-## 5. The four phases
+## 5. The waves
+
+> **⚠️ Scheme correction, 2026-09-21 (W5 doc sweep).** This section used to be
+> called "the four phases" and was written in a **P0–P4** scheme. That scheme is
+> **dead**: this project has **W-waves, W0–W7, and nothing else.** The section
+> was left half-converted by the pivot — a W-table, then three orphaned `P2`/
+> `P3`/`P4` table rows from the deleted phase table, then prose arguing about
+> "P1/P2 ordering". A reader could not tell which scheme was live. Everything
+> below is now on the W-scheme. **The reasoning is unchanged and was worth
+> keeping** — the argument for demoting compaction and for choosing
+> ingestion-time trim is the substance of this section; only the labels moved.
+> The mapping used, recorded so the older commits still read:
+>
+> | dead label | what it was | where it went |
+> |---|---|---|
+> | **P0** | replay harness + constant control | **cross-cutting**, every wave (below the table) |
+> | **P1** | context reduction / compaction | **W6** |
+> | **P1b** | compaction plumbing | **W6** |
+> | **P2** | the guard | **W3** (the accuracy gate) |
+> | **P3** | routing | **W1** (static floor) then **W4** (Jev) |
+> | **P4** | tool-output trim | **W6** — P1 and P4 converged on one mechanism |
+>
+> The wave list itself also drifted: this table stopped at W6 while `ISSUES.md`
+> had already inserted **W5 "unstick the gate"** and pushed context reduction to
+> **W6** and operate to **W7**. `ISSUES.md`'s numbering is the live one and is
+> what is reproduced here.
 
 Operator's sequencing decision, 2026-09-21: compaction first, guard second,
 routing third, trim fourth — each gated on the one before.
 
 **Revised again after the repo audit.** The operator's chosen order was
 compaction → guard → routing → trim. Two findings move routing to the front and
-insert a Jev-free phase before everything:
+insert a Jev-free wave before everything:
 
 - Routing has **3,674× leverage**; a per-tool-call Jev hook has *negative*
   leverage by our own measurement (§2c).
@@ -316,31 +347,43 @@ insert a Jev-free phase before everything:
   $2.82→$1.51) and **28%** savings. **So we ship the rule first and make Jev
   earn its place against it.**
 
-| phase | what | why this order | risk |
+| wave | what | why this order | risk |
 |---|---|---|---|
 | **W0** | **Measure inline vs delegated on our own corpus** | Operator decision 4. **Blocks W4.** Read-only over the existing baseline; costs nothing | none |
 | **W1** | **The static floor — no Jev call at all.** A `PreToolUse` hook on `Agent` applying a `subagent_type → tier` map, rewriting `tool_input.model` | **The first shippable thing.** Zero classifier calls, **zero added latency**, and the prior art says it captures most of the available saving. It also builds every piece of scaffolding W4 needs and produces the "after" corpus that nothing in this repo has ever produced | low |
 | **W2** | **Safe install + teardown**, opt-in per project | Must work *before* the router is armed, not after | — |
 | **W3** | **The accuracy gate** — per-task pass/fail, blinded | Nothing in this repo has ever measured whether a routed subagent did the work correctly | — |
 | **W4** | **Jev enters, as increment two** — targeted at the **`general-purpose` residue (65–79%, see §10)** where the static rule has no signal | **Ship gate: Jev must beat the two-line rule on realised cost at equal task success.** If it cannot, we keep the rule and stop | high |
-| **W5** | **Context reduction** — ingestion-time trim of oversized tool results, and/or rebuilt compaction | Demoted from P1. Must clear §2c's bar: remove far more than the +337 tokens / +557ms it costs, so it fires only on large payloads | medium |
-| **W6** | **Operate** — canary on a schedule, latency SLO, weekly cost report against the frozen baseline | — | — |
+| **W5** | **Unstick the gate and produce the first "after"** — the before/after reporter, the ledger's `project` field, the labels the accuracy gate needs, the re-snapshot under the corrected rule, then arm it | **THE CRITICAL PATH.** W1's actuator exists and has never fired, so nothing this SPEC claims has ever been measured | — |
+| **W6** | **Context reduction** — ingestion-time trim of oversized tool results, and/or rebuilt compaction | Demoted from first place (it was P1) to here. Must clear §2c's bar: remove far more than the +337 tokens / +557ms it costs, so it fires only on large payloads. **This is the SPEED lever** — the main thread is where the human actually waits | medium |
+| **W7** | **Operate** — canary on a schedule, latency SLO, weekly report on rework rate and felt latency, against the frozen baseline | — | — |
 
-**P0 applies to every phase, not just one:** the replay harness and its
-**constant control** (non-negotiable 7). Offline, no key required.
-| **P2** | **The guard** — the two-class gate of §6 | Proves P1 was safe. **Must be shown to catch a deliberately injected regression before it is trusted** | — |
-| **P3** | **Routing** — per-phase (model, effort) selection before dispatch | Latency and cost win, but it changes *which model does your work*, so it needs P2 working | high |
-| **P4** | **Tool-output trim** — reduce large tool results to typed rows before they enter context | Same mechanism class as P1, applied earlier in the pipeline | medium |
+**The replay harness applies to every wave, not to one of them:** the harness and
+its **constant control** (non-negotiable 7). Offline, no key required. It was
+labelled "P0" when it was thought of as a phase; it is not a phase, it is the
+instrument every wave is measured on.
 
-**The P1/P2 ordering is deliberate and slightly counter-intuitive.** P1 builds
-the mechanism and measures the token win **behind a flag, off by default**. P2
-builds the guard. P1 is only *enabled* once P2 passes against it. Shipping an
-optimization before its brake exists is the exact failure this sequencing
-prevents.
+**The optimization/guard ordering is deliberate and slightly counter-intuitive,
+and it survives the relabelling.** An optimization wave (W1's static floor, W6's
+trim) builds the mechanism and measures the win **behind a flag, off by
+default**. W3 builds the guard. The optimization is only *enabled* once the
+guard passes against it — which is exactly why W1 shipped **built, not armed**
+(`bcd982f`) and why W5 exists at all: W3's gate currently exits 1 ("could not
+run") for want of labels, so nothing may be armed yet. Shipping an optimization
+before its brake exists is the exact failure this sequencing prevents.
 
-### P1 was rewritten on evidence, 2026-09-21
+**The guard's own bar, carried over from the deleted P2 row:** the gate **must
+be shown to catch a deliberately injected regression before it is trusted.** A
+verifier that has never been seen catching anything is not evidence.
 
-The original P1 was "adopt `tamaratran/fast-jev-compaction`" — 5,405 stars, MIT,
+### Context reduction was rewritten on evidence, 2026-09-21
+
+*(This subsection was headed "P1 was rewritten on evidence". Context reduction
+was P1 — first in the operator's order — and is now **W6**. It was not merely
+renumbered: it was demoted on the evidence below, and then its **mechanism** was
+replaced too.)*
+
+The original plan was "adopt `tamaratran/fast-jev-compaction`" — 5,405 stars, MIT,
 clean TypeScript, 29/29 tests passing. **Its core mechanism is empirically shown
 not to work**, by four independent reporters using the repo's own code against
 the live API. Detail is in the agent's harvest report (summarised here rather than
@@ -373,15 +416,23 @@ relevant `Read`; kept all 10 `Edit` calls while truncating their worthless
 "file updated" results; dropped `ls`, `git log`, `git add` — at **40% reduction
 versus 81% for the drop-everything rule.** Nobody has measured whether 40% with
 intact retention beats the built-in summary at ~85% with lossy rewriting. **That
-is the first question P0's harness must answer, and it is answerable in a day.**
+is the first question the replay harness must answer, and it is answerable in a
+day.**
 
-**Why P1 became ingestion-time trim instead.** Compaction only fires at ~60%
+**Why context reduction became ingestion-time trim instead.** Compaction only fires at ~60%
 context. But every turn re-sends the whole context, so an oversized tool result
 is paid for on *every* subsequent turn until compaction runs. Trimming at
 `PostToolUse` shapes the context **before it enters the cached prefix**, so it is
 cache-neutral by construction, whereas pruning mid-session invalidates the
 prompt cache from the edit point onward and is not automatically a win. It is
 also the one place none of the surveyed repos has built for a coding agent.
+
+**This is why the old scheme had two trim entries and the new one has one.**
+"P4 — tool-output trim before it enters context" was a separate, later phase
+from "P1 — compaction". Once P1 was rewritten into ingestion-time trim the two
+became the same mechanism at the same hook, so they collapse into **W6**. The
+old P4 row's own rationale — *"same mechanism class, applied earlier in the
+pipeline"* — is, read today, the argument for the merge.
 
 *(Provider and routing choices landed in §4 and §7.)*
 
@@ -498,13 +549,13 @@ All five guard repos verified present; **all MIT**.
 | `MEANINGFUL_DELTA = 0.75`; applicability-check-before-score | `NiazMorshed2007/jev-review` | MIT | Class 2 tier 3 |
 | exit-code taxonomy, `--since` diff scoping, record-without-acting, committed dismissals | `lakeday-org/perch` | MIT | gate ergonomics |
 | two-stage screening at 0.7 before spending calls | `devagrawal09/jev-review` | MIT | cost control |
-| tool-call pairing, batching, decision application, object-identity reuse, tokenizer-free token estimate, `session.compact`/`turn.complete` hook skeleton with fallback | `tamaratran/fast-jev-compaction` | MIT | P1b plumbing |
-| replay harness with fake askers (~80 lines, offline, no key) | `yelban/fast-jev-compaction@replay-eval` (fork) | MIT | **P0** |
-| rule protection: never ask about `Edit`/`Write`, failed calls, `Agent`/`Task` results, newest `Read` before an edit | `yelban/fast-jev-compaction@rule-protection` (fork) | MIT | P1b |
+| tool-call pairing, batching, decision application, object-identity reuse, tokenizer-free token estimate, `session.compact`/`turn.complete` hook skeleton with fallback | `tamaratran/fast-jev-compaction` | MIT | W6 plumbing |
+| replay harness with fake askers (~80 lines, offline, no key) | `yelban/fast-jev-compaction@replay-eval` (fork) | MIT | **cross-cutting: the replay harness, every wave** |
+| rule protection: never ask about `Edit`/`Write`, failed calls, `Agent`/`Task` results, newest `Read` before an edit | `yelban/fast-jev-compaction@rule-protection` (fork) | MIT | W6 |
 | `validate_choice()` — finite, in-range, sums to 1, argmax consistent; **raises rather than acting** | `browser-use/jev-ultrafast` | MIT | **non-negotiable 8, everywhere** |
-| `action_space()` — huge blob → numbered typed index table → one `choice` over indices → one round trip | `browser-use/jev-ultrafast` | MIT | **P1** |
+| `action_space()` — huge blob → numbered typed index table → one `choice` over indices → one round trip | `browser-use/jev-ultrafast` | MIT | **W6** |
 | "Jev chooses, a small cheap model writes" — never ask the non-generative model to generate, never ask the expensive model to choose | `browser-use/jev-ultrafast` | MIT | architecture |
-| the 64 KiB return-path contract: only what you return enters context; write big intermediates to disk and grep them | `lidge-jun/aside-codemode` | MIT | P1 / P4 |
+| the 64 KiB return-path contract: only what you return enters context; write big intermediates to disk and grep them | `lidge-jun/aside-codemode` | MIT | W6 |
 | `{rows, complete, truncated, partial, scope}` envelope with per-source coverage flags | `lidge-jun/aside-codemode` | MIT | **non-negotiable 9** |
 | MLX local runtime; the published list of known divergences from live Jev | `razorback16/openjev` | Apache-2.0 | provider |
 | schema validator emitting spec-shaped 422s; in-flight/queue caps with 529; question chunking | `githubnext/localjev` | MIT | contract tests, ops |
@@ -512,8 +563,8 @@ All five guard repos verified present; **all MIT**.
 | the written contract reference; `messages[]` state input | `featherless-ai/simple-jev` | Apache-2.0 | client |
 | MLX backend with a unified-memory allocator cap; direct-logit scorer | `TheoLeeCJ/SemIf` | MIT | Apple silicon path |
 | circuit breaker on 401/402 (cross-process, TTL); SQLite payload cache; in-flight dedupe; **secret redaction before send**; telemetry that never logs state text | `notque/vexjoy-agent` | MIT | **provider client, wholesale** |
-| **asymmetric down-route guard** (up-routing free; cheapening requires margin ≥ 4); `abstain` class; effort floors by regex; anti-churn distance | `tzachbon/claude-model-router-hook` | MIT | **P3 policy** |
-| policy ladder: `needs_human` evaluated **first**, safety and hard limits before productivity; post-steering grace period; conjunctive finish gate; strict response validation that raises on a missing key | `thruwire/foreman` | MIT | P3 policy |
+| **asymmetric down-route guard** (up-routing free; cheapening requires margin ≥ 4); `abstain` class; effort floors by regex; anti-churn distance | `tzachbon/claude-model-router-hook` | MIT | **W1 / W4 routing policy** |
+| policy ladder: `needs_human` evaluated **first**, safety and hard limits before productivity; post-steering grace period; conjunctive finish gate; strict response validation that raises on a missing key | `thruwire/foreman` | MIT | W1 / W4 routing policy |
 
 **Rejected, with reasons:**
 
@@ -563,8 +614,10 @@ access is not the blocker previously recorded.
   a record of what was believed and when, not as a live obligation.
 - Agreement-against-Opus as a headline metric.
 - The five-surface shadow matrix as a deliverable.
-- The routing A/B as a *science experiment* — routing survives as P3, an
-  optimization with a gate, not a randomised trial.
+- The routing A/B as a *science experiment* — routing survives as **W1** (the
+  static floor) and **W4** (Jev), an optimization with a ship gate, not a
+  randomised trial. With the A/B goes `random_matched`, the third routing arm
+  that only ever made sense inside it.
 - The writeup.
 - The clustered-bootstrap blocker: with one session there is one cluster and no
   computable interval. That killed a *publishable* claim. It does not block a
@@ -598,10 +651,52 @@ access is not the blocker previously recorded.
    (`data/baseline/`) *is* usable — as a **lower bound**, running ~27.6% under
    Claude Code's own total, and only if the "after" goes through the same
    pipeline with JEV-49's fixes applied.
-4. **A count discrepancy nobody has explained.** On disk: 2,095 run rows and
-   **578** captures. The board's freeze figures are 2,005 / 571. The runs gap is
-   explained (2,005 + JEV-16 Run A's 90 replay rows). **The 7-capture gap is
-   not.** Neither number should be quoted until it is.
+4. **A count discrepancy — ✅ SOURCE IDENTIFIED 2026-09-21 (W5 doc sweep), and
+   it is not what it looked like.** On disk: 2,095 run rows and **578** captures.
+   The board's freeze figures are 2,005 / 571. *This item used to end "the
+   7-capture gap is not [explained]. Neither number should be quoted until it
+   is."*
+
+   **Both gaps are JEV-16 Run A**, and the arithmetic is exact:
+
+   | | live | synthetic | canary | replay | total |
+   |---|---|---|---|---|---|
+   | captures on disk | 490 | **67** | 21 | — | **578** |
+   | freeze figure 571 implies | 490 | **60** | 21 | — | 571 |
+   | run rows on disk | 1,783 | 180 | 42 | **90** | **2,095** |
+   | freeze figure 2,005 implies | 1,783 | 180 | 42 | **0** | 2,005 |
+
+   Run A needed nine paired synthetic states; seven of the nine had to be
+   materialised into `data/captures/` before the sweep could run
+   (`.scratch/a3-prep/jev16.md`: *"Seven of nine states had to be materialised
+   from the synthetic file before the sweep could run, and two pre-existing ones
+   were checked to hash identically to a rebuild today"*). Those seven are
+   identifiable — `picked_at` all within **2026-09-20T17:26:15**,
+   `run_context: synthetic`, `decision_id`s
+   `syn-syn-0000/0001/0002/0120/0122/0240/0241` — and **70 of Run A's 90 replay
+   rows reference them.** The remaining 60 synthetic captures are the original
+   stress set, written 06:51–07:10Z.
+
+   **⚠️ But the obvious story is wrong, and the correction is the finding.** The
+   natural reading — "Run A ran after the freeze" — **does not survive the
+   timestamps.** Run A ran at **17:26–17:37Z**; the collection freeze is declared
+   at **21:42Z**, four hours later. The newest row of any kind in either file is
+   **17:36:57Z**. Nothing in this corpus post-dates the freeze.
+
+   So **571 / 2,005 was already an undercount at the moment it was written.**
+   Those figures are not a freeze-time count of the files; they are a figure
+   carried forward from before Run A landed — or taken by a method that counted
+   the synthetic component as "the 60-item stress set" and skipped
+   `run_context: replay` entirely. The two omissions are exactly Run A's output,
+   which is what makes a carried-forward number the likelier of the two. **Which
+   of the two it was is not resolved here**, and it is recorded as open rather
+   than guessed.
+
+   **Consequences.** 578 / 2,095 is the count, and it was the count at 21:42Z
+   too. **571 / 2,005 should stop being quoted as "standing totals at the
+   freeze"** — it is a pre-Run-A total wearing a post-Run-A timestamp. This is a
+   mild instance of the house pattern: an inventory that was *reported* rather
+   than *counted* reads exactly like one that was counted.
 
 ### Why "opt-in per project" was the right call
 
@@ -630,24 +725,87 @@ clean checkout.**
 
 ### Ticket triage, summarised
 
-**24 KEEP · 13 REPURPOSE · 4 PARK · 17 KILL** across the 58 headings (the
-board's "57" is itself off by one). Roughly 1,500 lines of Python and the top
-third of `ISSUES.md` go: the agreement statistics, `PREREGISTRATION.md` as a
-live document, `tests/test_board.py`, the `cc_*` arms *as arms*, the `stop` /
-`post_edit` / `user_prompt` surfaces, `random_matched`, and the clustering and
-power-analysis line of work. None of it was bad work; it was the right build for
-a question no longer being asked.
+**24 KEEP · 10 REPURPOSE · 4 PARK · 20 KILL** across the 58 headings that carry a
+verdict. (The board is now **63** headings; JEV-57–61 are post-pivot and carry
+no triage line. Its long-standing "57" was always off by one.)
+
+> **Updated 2026-09-21 (W5 doc sweep): JEV-09, JEV-23 and JEV-46 re-verdicted
+> REPURPOSE → KILL**, moving the tally from 13/17 to 10/20. Same reason in all
+> three cases, and it is worth naming because it will recur: **the repurposed
+> value had already shipped.** JEV-09's script is the ancestor of W1's actuator;
+> JEV-23's surviving boxes are built in W1 and W3, with its sharpest one
+> promoted to W4's ship gate; JEV-46's inversion *is* `config/tiers.json`.
+> REPURPOSE means there is work left to redirect — when there is not, it leaves
+> a shipped thing sitting on the board looking unbuilt.
+
+> **⚠️ The "what dies" sentence here was an ESTIMATE written before anything had
+> been deleted, and it was wrong in five places. Rewritten 2026-09-21 against
+> the actual removal.** It read: *"Roughly 1,500 lines of Python and the top
+> third of `ISSUES.md` go: the agreement statistics, `PREREGISTRATION.md` as a
+> live document, `tests/test_board.py`, the `cc_*` arms as arms, the `stop` /
+> `post_edit` / `user_prompt` surfaces, `random_matched`, and the clustering and
+> power-analysis line of work."* Kept visible because **a forecast of a deletion
+> is not a record of one**, and this one was being read as a record.
+
+**What actually went: 1,315 gross / 1,206 net lines of Python** —
+`src/analyze.py`, `src/latency_report.py`, `tests/test_analyze_config_join.py`:
+the agreement statistics and the reporting built on them. `PREREGISTRATION.md`
+stops being a live document. Two more die **as plans rather than as code,
+because they were never built**: `random_matched` (zero references anywhere in
+`src/`, `tests/`, `config/`) and the power analysis (no module ever existed).
+
+**Four things the estimate said would go, and which STAY. All four are
+load-bearing:**
+
+- **The `cc_*` arms and `src/arms/claude_cli.py` — KEEP.** They die *as a
+  headline comparison*; the harness is retained, and is still referenced by nine
+  modules, `config/arms.json` and two tests. Two **live** tickets need it:
+  **JEV-16 Run B** — now a W4 blocker — runs through it, and **JEV-43** measured
+  with it. *Killed-ticket code retained by live tickets* is a real category, and
+  deleting on the triage label alone would have broken the W4 gate.
+- **`tests/test_board.py` — KEEP.** Live, required, and currently catching real
+  defects. It reads the wave tables and the `Blocked by:` lines out of
+  `ISSUES.md` and asserts they agree; it is the test written so that the gate
+  being blocked eight times over by KILLed tickets cannot recur (an audit found
+  that instance — this test is why it cannot come back). It is merely *named*
+  for a superseded plan; what it checks is scheme-agnostic and more useful after
+  a pivot than before one.
+- **`stats.clustered_bootstrap` — KEEP.** Live via `validate_threshold.py:412`,
+  for JEV-17.
+- **`stats.naive_bootstrap` — KEEP**, but not for the reason first given. It is
+  **test-only**: `validate_threshold.py` calls `clustered_bootstrap` and never
+  this one. It is kept because its test is the **only demonstration of why
+  clustering is mandatory**, which is load-bearing for JEV-17 — a deliberate
+  retention for a stated reason, not a live caller. Recording the right reason
+  matters: "it has a caller" is a fact the next cleanup pass will re-check and
+  find false.
+
+**Two clauses of the original remain UNVERIFIED and are not restated as done.**
+Only the Python clause was audited. (i) The `stop` / `post_edit` / `user_prompt`
+surfaces: their `config/surfaces.json` entries and their `questions/`
+directories are all still present at `mode: off`, so what died is the *plan to
+collect on them*, not any artifact. (ii) "The top third of `ISSUES.md`" — nobody
+has measured it.
+
+None of it was bad work; it was the right build for a question no longer being
+asked.
 
 Three verdicts worth flagging because they **invert**:
 
 - **JEV-45** (the ~245ms gateway hop) — was park-worthy; under a *latency* goal
   it is the single largest recoverable chunk of Jev's own 437ms.
 - **JEV-46** — `random_matched` dies with the A/B, but the thing that ticket
-  *rejected* — a static `subagent_type→tier` map — **becomes W1, the product's
-  zero-cost floor that Jev must beat.**
+  *rejected* — a static `subagent_type→tier` map — **became W1, the product's
+  zero-cost floor that Jev must beat.** (The ticket is KILLed as of 2026-09-21
+  *because* that inversion has shipped, not because the inversion was wrong.)
 - **JEV-16** (determinism) — was a safety blocker; now a product rule. A flip
   near τ means **the same task gets a different model on retry**, injecting
-  noise into the accuracy gate. Rule: **do not route inside the flip band.**
+  noise into the accuracy gate and, under RESTART-on-escalation, causing the
+  same work to be paid for twice. Rule: **do not route inside the flip band.**
+  Consequently **Run B — the `jev` determinism sweep, ~$0.018 — is promoted from
+  "deferred to Phase B" to a blocker on W4**: Run A measured `cc_haiku45`, the
+  wrong arm, so the band this rule depends on has never been measured on the
+  model that will be doing the deciding.
 
 ### Decisions — all four settled by the operator, 2026-09-21
 
@@ -792,6 +950,24 @@ costing rules that had to agree, didn't.
 published as a 46% *increase*.** Counts do not move — 7 tasks / 37 prompts, and
 `delegation_rate_by_task_count` is unchanged, so this is purely a pricing-rule
 effect.
+
+### ⚠️ $2.88 and $5.21 are different windows and must NEVER be quoted against each other
+
+The anchor moved twice — $1.58 → $2.88 — and there is a **third** per-delegated-
+task figure in the repo that is not a third version of the anchor:
+
+| figure | window | what it is |
+|---|---|---|
+| **$2.88** | **under the JEV-24a cut** (`delegation-pre-rule-v1.json`'s window, 7 tasks) | **THE ANCHOR.** The "before" every future saving is measured against |
+| **$5.21** | **whole corpus, no cut** (33 tasks, mean; median $4.50 — §10) | a description of today's corpus, **not** an anchor |
+
+They differ by **corpus and cut, not by costing rule** — both are computed under
+the corrected rule. Putting them in one sentence produces an 81% "increase" that
+is entirely an artefact of the window, and it is the same class of error as
+quoting W0's +38.9% against the frozen record (above). **Any before/after claim
+states which window it is in.** Checked across this SPEC on 2026-09-21: $5.21
+does not appear here, and $2.88 appears only in §2 R5 and in the table above —
+both correctly labelled as the JEV-24a-cut anchor.
 
 ### Two corrections to what was recorded in §10
 

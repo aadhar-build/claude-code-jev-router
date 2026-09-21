@@ -1,6 +1,12 @@
 # credentials — never commit
 .env
 .env.*
+# ...but the credential-free TEMPLATE must ship, or README's
+# `cp .env.example .env` is broken on every fresh clone. Without this
+# negation, `git add .env.example` SKIPS IT IN SILENCE -- a failure that
+# looks exactly like success, which is the shape this repository has now
+# been bitten by six times. Check with: git check-ignore -v .env.example
+!.env.example
 
 # hook registration: project-local, must not travel to clones or cloud sessions
 .claude/settings.local.json

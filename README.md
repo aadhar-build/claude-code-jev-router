@@ -88,43 +88,137 @@ uv run src/doctor.py                     # layout, credentials, isolation, self-
 `doctor.py` exits non-zero if anything is wrong. Run it first. It treats a
 missing `ANTHROPIC_API_KEY` as the expected state.
 
-## Two hard constraints
+> `.env.example` was **missing** until 2026-09-21 — this instruction had been
+> pointing at a file that did not exist. It is written now, credentials-free.
+> Note that `.gitignore`'s `.env.*` rule matches it, so it needs an
+> `!.env.example` negation to survive a commit; the file says so in its own
+> footer.
 
-**Isolation.** Only Claude Code sessions in this folder are affected. Hooks are
-registered in `.claude/settings.local.json`, which is project-scoped *and*
-gitignored — so it does not travel to cloud sessions and does not ship live
-hooks to anyone who clones this repo. Nothing is ever written to
-`~/.claude/settings.json`.
+## Installing it in another repo
 
-**Self-containment.** Every artifact lives under this folder: code, hooks, spool,
-credentials, data, logs, reports. Nothing goes to `~/.config`, `~/.claude`,
-`/tmp`, or launchd. The single path outside is read-only —
-`~/.claude/projects/*.jsonl`, where Claude Code keeps its own transcripts.
-Deleting this folder reverts the machine completely.
+`jev` is **opt-in per project**. Nothing is ever written to
+`~/.claude/settings.json`; hooks are registered in the target repo's own
+`.claude/settings.local.json`.
+
+```sh
+./jev status                     # what is installed here, and the state of all three switches
+./jev install   <repo> --dry-run # print exactly what would change; change nothing
+./jev install   <repo> --yes     # register jev's hooks in <repo>
+./jev uninstall <repo> --yes     # remove them and restore <repo>'s settings file
+```
+
+`install` takes a verbatim backup before it touches anything. `uninstall` works
+in **tiers and says which one it achieved**: tier A restores the install-time
+bytes and verifies the sha256; tier B (the file changed after install) edits our
+entries out and verifies the result three ways against the file re-read from
+disk. Tier B is weaker — your original formatting is not restored — and it
+prints that every time. `docs/REVERSIBILITY.md` has the detail.
+
+**`JEV_HOME` is where jev itself lives**, resolved by the `jev` wrapper from its
+own location, never from `$CLAUDE_PROJECT_DIR`. Every jev asset hangs off it:
+`config/`, the spool, the logs, and the global kill switch. A relative
+`JEV_HOME` is **rejected**, not normalised — because in the wrong install shape
+the kill switch names a file that cannot exist, and a switch that is
+permanently off is worse than no switch.
 
 ## Stopping it
 
+There are **three** switches, not one. Each is a file; `touch` sets it, `rm`
+clears it. Every hook tests all three on its first lines.
+
+| switch | path | stops |
+|---|---|---|
+| **global** | `$JEV_HOME/.jev-disabled` | jev, **everywhere at once** |
+| **machine-wide** | `~/.claude/jev-disabled` | the same, and honoured even if the install itself is unreachable. Read-only to us — nothing here ever writes it |
+| **per-project opt-out** | `<repo>/.jev-disabled` | jev **in that one repo only** |
+
 ```sh
-touch .jev-disabled     # kill switch: every hook exits on line one
+touch .jev-disabled     # in jev's own repo this is both the global and the local switch
 rm .jev-disabled        # resume
 
 ./teardown.sh --dry-run # the full way back: see what it would change
 ./teardown.sh --yes     # set the switch AND unregister the hooks
 ```
 
-A session that is already running honours the switch at its very next hook
+> **This section used to document one switch.** The machine-wide switch was the
+> one `jev install` *prints* — and W5 found it stopped nothing: the block was
+> only in one of three hook scripts, so `touch ~/.claude/jev-disabled` did not
+> stop `hooks/capture.sh` or `hooks/inline_shadow_bash.sh`. The canonical block
+> is now in **every** hook and a test asserts it byte-identical across all of
+> them, with a positive assertion that the sandbox *does* capture when the
+> switch is absent.
+
+A session that is already running honours a switch at its very next hook
 invocation — verified live, not assumed, because the switch is a file test made
 by the hook script rather than hook configuration. A hook already in flight
-finishes. It stops *these* hooks because *these scripts* test it; the
+finishes. The test is `-e` **or** `-L`, not `-f`, so a dangling symlink or a
+directory still counts as "set" — a switch that fails to stop the tool because
+of what *kind* of file it is would be indistinguishable from no switch.
+
+**A switch stops the hook DECIDING. It does not make jev quiescent** — the hook
+still runs and still exits 0; it just does not capture or route. `teardown.sh`
+reaches quiescence for **jev's own repo only**; it does not walk foreign
+installs. Each of those is removed with `jev uninstall <that repo>`.
+
+It stops *these* hooks because *these scripts* test the switches; the
 harness-native equivalent is `"disableAllHooks": true`.
 
 `uv run src/doctor.py` prints the whole reversibility state in one block.
 `docs/REVERSIBILITY.md` has the detail, including how "OFF equals vanilla" is
 proved rather than asserted — which is what JEV-35 is gated on.
 
+## Two hard constraints
+
+**Isolation.** Only Claude Code sessions in a folder you have explicitly run
+`jev install` on are affected. Hooks are registered in that repo's
+`.claude/settings.local.json`, which is project-scoped *and* gitignored — so it
+does not travel to cloud sessions and does not ship live hooks to anyone who
+clones the repo. **Nothing is ever written to `~/.claude/settings.json`.** A
+global install would break the kill switch outright: every hook derives its
+project root from `$CLAUDE_PROJECT_DIR`, so installed globally `.jev-disabled`
+names a file that does not exist in whatever repo you happen to be in. That is
+the finding behind opt-in-per-project, and behind anchoring the *global* switch
+on `$JEV_HOME` instead.
+
+**Self-containment.** Every artifact jev creates lives under `$JEV_HOME`: code,
+hooks, spool, credentials, data, logs, reports. Nothing goes to `~/.config`,
+`~/.claude`, `/tmp`, or launchd. Two paths outside it, both narrow: the
+**read-only** `~/.claude/projects/*.jsonl`, where Claude Code keeps its own
+transcripts; and, in a repo you installed into, that repo's own
+`.claude/settings.local.json` plus its `.jev-disabled` — which is precisely what
+`jev uninstall <repo>` removes and verifies. Deleting `$JEV_HOME` and running
+`jev uninstall` on each installed repo reverts the machine completely.
+
 ## Claim discipline
 
-Phase 1 measures **agreement between arms**, not accuracy. Opus 5 is a
-pseudo-label, not truth. The word "accuracy" is banned from Phase 1 output;
-ground-truth labels and real calibration metrics arrive in Phase 2, from a
-human-labelled gold set.
+> **Rewritten 2026-09-21. The previous version of this section was pre-pivot and
+> is quoted here because the reversal is the point.** It read: *"Phase 1 measures
+> agreement between arms, not accuracy. Opus 5 is a pseudo-label, not truth. The
+> word 'accuracy' is banned from Phase 1 output; ground-truth labels and real
+> calibration metrics arrive in Phase 2, from a human-labelled gold set."*
+> That ban was correct for a study whose deliverable was an agreement statistic
+> against a pseudo-label. It is wrong for this product, which ships
+> `src/accuracy_gate.py` — and a repo that bans a word from its output while
+> shipping a module named after it is telling a reader two different things.
+
+The ban is lifted, and replaced by a narrower rule that does the work the ban
+was doing.
+
+**What "accuracy" now means here, and it is not the old meaning.** The accuracy
+gate asks **did the routed subagent do the work correctly** — per-task
+pass/fail, against labels in `data/labels/`, blinded by construction. That is a
+*task outcome*, not agreement with another model's answer. Opus 5 is no longer a
+reference label for anything; the `cc_*` comparison set is retired.
+
+**The rules that survive, because they are what the ban was protecting:**
+
+- **Never call agreement "accuracy".** Agreement between two arms on a question
+  is agreement. It was never truth and is not truth now.
+- **A gate that cannot run says so, and exits non-zero.** It does not report a
+  pass. Today the gate exits **1 — "could not run"** because `data/labels/` is
+  empty; that is the honest state and it blocks arming.
+- **The gate states its own power.** It *fails to detect* a regression at a
+  stated rate, and prints that rate in its own output. See "What we do not
+  claim" above.
+- **A firing rate is meaningless without the τ it was measured at**, because it
+  *is* a function of τ. Quote both, always, in the same breath.
