@@ -107,6 +107,9 @@ echo
 echo "=== JEV-35 / W1: the static floor -- the rule, the ledger, the breaker, the check ==="
 guarded "test_agent_actuator.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_agent_actuator.py' 2>&1 | tail -4" || exit 1
 echo
+echo "=== JEV-57: the ledger can tell one repo from another, and refuses to pool ==="
+guarded "test_assignment_ledger.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_assignment_ledger.py' 2>&1 | tail -4" || exit 1
+echo
 echo "=== JEV-35 / W1: the actuator at the hook's process boundary (no network, no spend) ==="
 guarded "test_agent_actuator.sh" bash -c "set -o pipefail; '$ROOT/tests/test_agent_actuator.sh' | tail -3" || exit 1
 echo

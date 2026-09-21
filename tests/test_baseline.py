@@ -457,5 +457,228 @@ class TestCorrectedCompanion(unittest.TestCase):
         self.assertIn("project_root", self.rec["corpus"])
 
 
+class TestARowSaysWhatProducedIt(unittest.TestCase):
+    """JEV-59. `sessions.jsonl` carried costs computed under the defective
+    first-copy rule and NOTHING IN A ROW SAID SO, so a row priced under the
+    withdrawn rule and a row priced under the corrected one sat in the same
+    committed file looking identical."""
+
+    def test_every_current_row_names_its_costing_rule_and_pricing_snapshot(self):
+        current = [r for r in rows() if r.get("schema") == bl.SCHEMA_VERSION]
+        if not current:
+            self.skipTest("no baseline-v2 rows in the stream yet")
+        for row in current:
+            self.assertEqual(row["costing_rule"], sm.COSTING_RULE)
+            self.assertTrue(row["pricing_version"])
+
+    def test_legacy_rows_are_kept_and_are_not_back_stamped(self):
+        """History is preserved by being DISTINGUISHABLE, not by deletion. A
+        `-v1` row never recorded its rule, and stamping one on retrospectively
+        would be a guess dressed as provenance."""
+        for row in rows():
+            if row.get("schema") == bl.SCHEMA_VERSION_V1:
+                self.assertNotIn("costing_rule", row)
+
+    def test_a_missing_costing_rule_reads_as_the_defective_rule(self):
+        self.assertEqual(bl.row_costing_rule({}), sm.COSTING_RULE_LEGACY)
+        self.assertEqual(bl.row_costing_rule({"costing_rule": "x"}), "x")
+
+    def test_the_named_rule_describes_the_four_rules_it_stands_for(self):
+        """A rule id nobody can decode is a version string, not provenance."""
+        text = sm.COSTING_RULE_DESCRIPTION.lower()
+        for phrase in ("message.id", "completed", "iterations", "ttl"):
+            self.assertIn(phrase, text)
+
+
+class TestTheWrongNumbersCannotOutLastTheRuleThatMadeThem(unittest.TestCase):
+    """THE ONE THAT MATTERS in JEV-59. Keyed on the transcript fingerprint
+    alone, correcting the costing rule changed nothing on disk: the transcripts
+    were untouched, so the stream said "nothing to do" and went on carrying
+    withdrawn numbers. Idempotent AND wrong is worse than stale, because it
+    looks current."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self._sessions, self._manifest = bl.SESSIONS, bl.MANIFEST
+        bl.SESSIONS = self.tmp / "sessions.jsonl"
+        bl.MANIFEST = self.tmp / "manifest.json"
+
+    def tearDown(self):
+        bl.SESSIONS, bl.MANIFEST = self._sessions, self._manifest
+
+    def test_the_identity_key_is_transcript_and_rule_and_pricing(self):
+        row = {"source": {"digest": "d"}, "costing_rule": "r",
+               "pricing_version": "p"}
+        self.assertEqual(bl.snapshot_identity(row), ("d", "r", "p"))
+
+    def test_changing_only_the_costing_rule_re_snapshots_the_session(self):
+        """No `--force`, no flag to remember: the rule is IN the key, so the
+        stream re-reads itself exactly once and then settles."""
+        if not bl.transcripts():
+            self.skipTest("no transcripts for this project on disk")
+        bl.snapshot()
+        before = len(bl.SESSIONS.read_text().splitlines())
+        self.assertGreater(before, 0)
+        # Same transcripts, same pricing, different rule.
+        original = sm.COSTING_RULE
+        sm.COSTING_RULE = original + "-TEST"
+        try:
+            again = bl.snapshot()
+            after = len(bl.SESSIONS.read_text().splitlines())
+            self.assertEqual(again["sessions_unchanged_this_run"], [])
+            self.assertEqual(after - before,
+                             len(again["sessions_appended_this_run"]))
+            # ...and then it settles. Not "appends nothing": the corpus is
+            # LIVE (run_all.sh runs while sessions are being written, by
+            # design), so the session running this test legitimately grows
+            # between the two calls. What must hold is that no session appends
+            # for the RULE any more -- every append in the third run is a
+            # session whose transcript actually changed.
+            digests = {sid: ident[0] for sid, ident in bl.existing_digests().items()}
+            third = bl.snapshot()
+            for sid in third["sessions_appended_this_run"]:
+                self.assertNotEqual(
+                    digests.get(sid), bl.existing_digests()[sid][0],
+                    f"{sid} re-appended with an unchanged transcript: the rule "
+                    "is still moving the key when it should have settled")
+            self.assertEqual(set(third["sessions_appended_this_run"])
+                             & set(third["sessions_unchanged_this_run"]), set())
+            self.assertTrue(third["sessions_unchanged_this_run"])
+        finally:
+            sm.COSTING_RULE = original
+
+    def test_a_stream_of_pre_jev59_rows_re_snapshots_exactly_once(self):
+        """The migration itself: rows with no `costing_rule` are stale by
+        definition, so every one of them comes back, once."""
+        if not bl.transcripts():
+            self.skipTest("no transcripts for this project on disk")
+        bl.snapshot()
+        lines = bl.SESSIONS.read_text().splitlines()
+        legacy = []
+        for i, raw in enumerate(lines):
+            row = json.loads(raw)
+            row.pop("costing_rule", None)
+            row.pop("pricing_version", None)
+            row["schema"] = bl.SCHEMA_VERSION_V1
+            legacy.append(row["session_id"])
+            lines[i] = json.dumps(row)
+        bl.SESSIONS.write_text("\n".join(lines) + "\n")
+        result = bl.snapshot()
+        for sid in legacy:
+            self.assertEqual(result["sessions_appended_this_run"].count(sid), 1)
+        # Once, not repeatedly. A session may still append on the next run if
+        # its transcript grew (the corpus is live), but it may never append for
+        # the missing-rule reason twice.
+        again = bl.snapshot()
+        for sid in legacy:
+            self.assertLessEqual(
+                again["sessions_appended_this_run"].count(sid), 1)
+        self.assertTrue(again["sessions_unchanged_this_run"])
+
+
+class TestTheManifestSaysWhatItIsATotalOf(unittest.TestCase):
+    """JEV-59, the part the ticket did not mention. `sessions_captured: 15`
+    sat beside a 29-row stream with nothing saying how the two related. The
+    stream is a HISTORY -- one row per reading of a growing session -- so a
+    reader who sums every row double-counts: 29 rows summed to ~$724 against a
+    true $125.58."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not bl.MANIFEST.exists():
+            raise unittest.SkipTest("baseline not snapshotted yet")
+        cls.man = json.loads(bl.MANIFEST.read_text())
+
+    def test_the_aggregation_rule_is_stated_in_the_file(self):
+        self.assertIn("LAST row per session_id", self.man["aggregation_rule"])
+        self.assertIn("totals_scope", self.man)
+
+    def test_the_stream_length_and_the_session_count_are_both_given(self):
+        """Both numbers, so "29 rows, 15 sessions" is readable off the file
+        instead of being a discrepancy somebody has to discover."""
+        self.assertIn("stream_rows_total", self.man)
+        self.assertGreaterEqual(self.man["stream_rows_total"],
+                                self.man["sessions_in_stream"])
+
+    def test_the_manifest_names_its_costing_rule(self):
+        self.assertEqual(self.man["costing_rule"], sm.COSTING_RULE)
+
+    def test_it_records_the_corpus_it_read_not_only_where_the_code_lives(self):
+        """`project_root` is the worktree when this runs from one; the numbers
+        came from `corpus_root`. Recording only the first names a directory
+        that has nothing to do with the totals beside it."""
+        self.assertIn("corpus_root", self.man)
+        self.assertIn("jev_home", self.man)
+
+    def test_totals_match_the_stated_aggregation_rule(self):
+        """The check that makes the words above load-bearing."""
+        latest = bl.latest_per_session()
+        if not latest:
+            self.skipTest("empty stream")
+        total = round(sum(r["computed_cost_usd"] for r in latest.values()), 6)
+        self.assertAlmostEqual(total, self.man["total_computed_cost_usd"], places=4)
+
+    def test_the_totals_are_over_the_stream_not_over_what_is_still_on_disk(self):
+        """A "before" baseline that decays with the source it was built to
+        outlive is the one thing JEV-38 exists to prevent. Totalled over
+        on-disk transcripts, this file would silently SHRINK as Claude Code's
+        30-day sweep ran while the stream still held the spend -- and that is
+        no longer hypothetical: `already_unrecoverable` is non-zero here."""
+        self.assertIn("NOT only those still on disk", self.man["totals_scope"])
+        self.assertEqual(self.man["sessions_in_stream"],
+                         len(bl.latest_per_session()))
+
+    def test_the_coverage_hole_and_its_harmless_remainder_are_separate(self):
+        """`unpriced_requests: 5` beside `unpriced_models: []` is two fields
+        contradicting each other. A `<synthetic>` row carries no rate and no
+        tokens and is not a pricing gap; a real model missing from
+        config/pricing.json is."""
+        self.assertIn("unpriced_zero_token_requests", self.man)
+        if self.man["unpriced_requests"]:
+            self.assertTrue(self.man["unpriced_models"])
+        else:
+            self.assertEqual(self.man["unpriced_models"], [])
+
+
+class TestTheAnchorFigureIsNeverQuotedWithoutItsWindow(unittest.TestCase):
+    """SPEC.md 11 / commit 98979a7: the whole-corpus +38.9% and the
+    under-the-cut +45.2% describe different windows, and quoting the first
+    against the frozen record is the error the section was written to stop --
+    a real 20% saving would have been published as a 46% increase."""
+
+    def _docstrings(self) -> list[tuple[str, str]]:
+        return [
+            ("src/baseline.py", (ROOT / "src" / "baseline.py").read_text()),
+            ("src/session_metrics.py",
+             (ROOT / "src" / "session_metrics.py").read_text()),
+        ]
+
+    def test_38_9_never_appears_without_its_qualifier_nearby(self):
+        for name, source in self._docstrings():
+            for pos in _positions(source, "38.9"):
+                window = source[max(0, pos - 700):pos + 700].lower()
+                self.assertIn("no cut", window,
+                              f"{name}: 38.9% quoted without 'whole-corpus, no "
+                              "cut'; see SPEC.md 11")
+
+    def test_the_under_the_cut_figure_is_given_beside_it(self):
+        for name, source in self._docstrings():
+            if "38.9" in source:
+                self.assertIn("45.2", source,
+                              f"{name}: quotes the whole-corpus movement and "
+                              "not the one that describes the frozen record")
+
+
+def _positions(haystack: str, needle: str) -> list[int]:
+    out, start = [], 0
+    while True:
+        i = haystack.find(needle, start)
+        if i < 0:
+            return out
+        out.append(i)
+        start = i + 1
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

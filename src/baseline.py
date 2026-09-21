@@ -40,6 +40,31 @@ every run or freeze the first (partial) reading forever. Keying on
 `(size, mtime)` of the main transcript plus every subagent file means an
 unchanged corpus is a no-op and a grown session gets one new row, so the growth
 itself is on the record.
+
+**JEV-59: the key is (fingerprint, costing rule, pricing version), not the
+fingerprint alone -- and that is the whole ticket.** A row is not a function of
+the transcript; it is a function of the transcript AND the rule that priced it.
+Keyed on the fingerprint only, correcting the costing rule changed nothing on
+disk: the transcripts were untouched, so the stream said "nothing to do" and
+went on carrying costs from a rule that had been withdrawn. That is idempotent
+and wrong, which is worse than stale, because it looks current. With the rule
+and the pricing snapshot in the key, a rule change re-snapshots itself exactly
+once and then settles -- the "one-off forced re-snapshot" the ticket asks for,
+without a `--force` flag anyone has to remember to pass.
+
+**Rows say what produced them, and old rows are not rewritten.** Every
+`baseline-v2` row carries `costing_rule` and `pricing_version`. The `-v1` rows
+already in the stream do not, and are left exactly as they were: an absent
+`costing_rule` reads as `session_metrics.COSTING_RULE_LEGACY` via
+`row_costing_rule()`. Nothing is deleted and nothing is back-stamped, so the
+old numbers remain auditable and are distinguishable from the new ones by a
+field rather than by a date somebody has to look up.
+
+**The stream is a HISTORY; the totals are over the last row per session.** One
+row per reading, so a session that grew has several. Summing every row
+double-counts -- 29 rows over 15 sessions summed to ~$724 against a true
+$125.58. `latest_per_session()` is the aggregation rule, in code, and
+`manifest.json` states it in words beside its own totals.
 """
 
 from __future__ import annotations
@@ -72,7 +97,30 @@ DELEGATION = paths.BASELINE / "delegation-pre-rule-v1.json"
 # reason they differ. See `delegation_baseline_corrected`.
 CORRECTED = paths.BASELINE / "delegation-pre-rule-v1-corrected.json"
 
-SCHEMA_VERSION = "baseline-v1"
+# JEV-59. `baseline-v2` adds two fields to every row -- `costing_rule` and
+# `pricing_version` -- so a row says what produced its numbers. `-v1` rows do
+# not carry them and are NOT backfilled: a reader treats an absent
+# `costing_rule` as `sm.COSTING_RULE_LEGACY`, which is a claim about what is
+# missing rather than an invented value.
+SCHEMA_VERSION = "baseline-v2"
+SCHEMA_VERSION_V1 = "baseline-v1"
+
+
+def row_costing_rule(row: dict[str, Any]) -> str:
+    """Which costing rule a stream row was produced under.
+
+    Absent -> the pre-`98979a7` first-copy rule, because that is the only rule
+    that was ever in production without stamping itself. Stated once, here, so
+    no reader has to re-derive it and none can quietly assume the current one.
+    """
+    return row.get("costing_rule") or sm.COSTING_RULE_LEGACY
+
+
+def row_pricing_version(row: dict[str, Any]) -> str:
+    """Which pricing snapshot a stream row was priced under. Absent -> the only
+    snapshot that predates the field, `pricing-2026-09-20` -- the one that had
+    not yet priced `claude-opus-4-7` and therefore produced $0.00 sessions."""
+    return row.get("pricing_version") or "pricing-2026-09-20"
 
 # ---------------------------------------------------------------------------
 # JEV-24a: the cut.
@@ -252,10 +300,24 @@ def requests(path: Path) -> Iterator[dict[str, Any]]:
     cache-write TTL split are written down. It used to own its own walk, and
     that is exactly how the two diverged: it deduped on `requestId` alone, kept
     the FIRST copy -- the `input_tokens: 2` placeholder -- and never read
-    `usage.iterations[]`. Over this repo's corpus that understated delegated
-    spend by 38.9% ($105.09 against $171.94), because all 48 growing keys sit
-    inside subagent transcripts. `tests/test_baseline.py` now fails the moment
-    the two rules disagree again.
+    `usage.iterations[]`, because all 48 growing keys sit inside subagent
+    transcripts. `tests/test_baseline.py` now fails the moment the two rules
+    disagree again.
+
+    **The size of the divergence depends on the window, and the two numbers
+    must not be swapped for each other** -- commit `98979a7`, SPEC.md §11:
+
+      * WHOLE CORPUS, NO CUT: $105.09 against $171.94, the frozen rule
+        understating delegated spend by **38.9%**. This figure may only ever
+        be quoted with the words "whole-corpus, no cut" attached.
+      * UNDER THE JEV-24a CUT -- the window `delegation-pre-rule-v1.json` was
+        actually frozen under, and therefore the one that describes the "before"
+        anchor: **+45.2%** ($11.04 -> $20.16 delegated, $1.58 -> $2.88 per
+        delegated task, +82.6%).
+
+    Quoting 38.9% against the frozen record is the error §11 was written to
+    stop: a real 20% saving measured against the old $1.58 anchor would have
+    been published as a 46% INCREASE.
 
     `session_metrics.analyse` aggregates a whole session, which is the wrong
     granularity for JEV-24a: the "delegate where possible" rule was adopted
@@ -267,12 +329,24 @@ def requests(path: Path) -> Iterator[dict[str, Any]]:
     contributes to neither numerator nor denominator and is still countable.
     """
     for record in sm.billable_requests(path):
+        usage = record.get("usage") or {}
         yield {
             "ts": record["ts"],
             "model": record["model"],
             "cost_usd": record["cost_usd"] if record["priced"] else 0.0,
             "priced": record["priced"],
             "delegated": record["delegated"],
+            # Not a counting rule: a plain sum of fields `billable_requests`
+            # has already normalised and merged. It exists so an unpriced
+            # request can be told apart from a COVERAGE HOLE. `<synthetic>`
+            # rows carry no rate and no tokens; a real model missing from
+            # `config/pricing.json` carries tokens. Counting the two together
+            # is how the manifest came to say `unpriced_requests: 5` beside
+            # `unpriced_models: []` -- two fields contradicting each other on
+            # the same page.
+            "billable_tokens": sum(
+                usage.get(k, 0) for k in
+                sm.SCALAR_TOKEN_FIELDS + sm.SCALAR_CACHE_FIELDS),
         }
 
 
@@ -484,12 +558,27 @@ def session_row(path: Path, interactive_ids: set[str], snapshot_at: str) -> dict
         # Cost, with the reconciliation delta published rather than tuned away.
         # reported_cost_usd is null until the session ends: Claude Code writes
         # its cost-state line at session end, so a live session has none.
+        # JEV-59. WHAT PRODUCED THESE NUMBERS. Without these two fields a row
+        # costed under the defective first-copy rule and a row costed under
+        # the corrected one are indistinguishable in the same append-only file.
+        # The short id only. The prose that decodes it lives once, in
+        # `manifest.json` and in `session_metrics.COSTING_RULE_DESCRIPTION` --
+        # a sentence repeated in all 44 rows is both bloat and a long free-text
+        # string in a file whose whole discipline is DERIVED NUMBERS ONLY.
+        "costing_rule": sm.COSTING_RULE,
         "pricing_version": cl.pricing()["version"],
         "computed_cost_usd": m.computed_cost_usd,
         "reported_cost_usd": m.reported_cost_usd,
         "cost_delta_pct": m.cost_delta_pct,
         "unpriced_models": m.unpriced_models,
-        "unpriced_requests": sum(1 for r in reqs if not r["priced"]),
+        # The COVERAGE HOLE: requests that were billable and could not be
+        # priced. Matched to `unpriced_models` on purpose -- the two used to
+        # disagree because this line counted every unpriced request including
+        # the zero-token `<synthetic>` ones, which are not a coverage hole.
+        "unpriced_requests": sum(
+            1 for r in reqs if not r["priced"] and r["billable_tokens"]),
+        "unpriced_zero_token_requests": sum(
+            1 for r in reqs if not r["priced"] and not r["billable_tokens"]),
         "main_session_cost_usd": round(main_cost, 6),
         "delegated_cost_usd": round(sub_cost, 6),
         # Turns and tools
@@ -519,9 +608,10 @@ def session_row(path: Path, interactive_ids: set[str], snapshot_at: str) -> dict
     return row
 
 
-def existing_digests() -> dict[str, str]:
-    """Last recorded fingerprint per session_id."""
-    out: dict[str, str] = {}
+def stream_rows() -> list[dict[str, Any]]:
+    """Every row in the committed stream, in file order. A torn line is skipped
+    rather than fatal -- the rows either side of it are still the record."""
+    out: list[dict[str, Any]] = []
     if not SESSIONS.exists():
         return out
     for raw in SESSIONS.read_text(encoding="utf-8").splitlines():
@@ -529,19 +619,66 @@ def existing_digests() -> dict[str, str]:
         if not raw:
             continue
         try:
-            row = json.loads(raw)
+            out.append(json.loads(raw))
         except json.JSONDecodeError:
             continue
-        sid = row.get("session_id")
-        digest = (row.get("source") or {}).get("digest")
-        if sid and digest:
-            out[sid] = digest
     return out
 
 
+def latest_per_session(rows: list[dict[str, Any]] | None = None) -> dict[str, dict]:
+    """THE AGGREGATION RULE for this stream, in one place.
+
+    The stream is a HISTORY: a session that grew between two snapshots has one
+    row per reading, on purpose, so the growth is on the record. Summing every
+    row therefore double-counts -- at the time JEV-59 was written, 29 rows held
+    15 sessions and a naive sum read ~$724 against a true $125.58. Readers take
+    the LAST row per `session_id`, and this function is what they call so that
+    nobody re-derives it slightly differently.
+    """
+    out: dict[str, dict] = {}
+    for row in (stream_rows() if rows is None else rows):
+        sid = row.get("session_id")
+        if sid:
+            out[sid] = row
+    return out
+
+
+def snapshot_identity(row: dict[str, Any]) -> tuple[str, str, str]:
+    """What makes one reading of a session the SAME reading as another.
+
+    JEV-59. This used to be the transcript fingerprint alone, and that is what
+    made the wrong numbers permanent: a row is not a function of the transcript
+    only, it is a function of (transcript, costing rule, pricing snapshot). Fix
+    the costing rule and the fingerprint is unchanged, so the stream said
+    "nothing to do" and kept costs computed under a rule that had been
+    withdrawn -- fingerprint-idempotent, and idempotently wrong.
+
+    Widening the key does the one-off forced re-snapshot JEV-59 asks for, and
+    does it DETERMINISTICALLY rather than by a flag somebody has to remember:
+    every session appends exactly once under the new rule, then the stream is
+    idempotent again, and the next rule or pricing change re-snapshots itself
+    instead of needing another ticket. A `--force` would have been a second
+    switch with the same blast radius and no memory.
+    """
+    return (
+        (row.get("source") or {}).get("digest") or "",
+        row_costing_rule(row),
+        row_pricing_version(row),
+    )
+
+
+def existing_digests() -> dict[str, tuple[str, str, str]]:
+    """Last recorded (fingerprint, costing rule, pricing version) per session."""
+    return {sid: snapshot_identity(row)
+            for sid, row in latest_per_session().items()
+            if (row.get("source") or {}).get("digest")}
+
+
 def snapshot() -> dict[str, Any]:
-    """Append a row for every session whose transcript has changed since last
-    time. Unchanged sessions append nothing -- that is the idempotence."""
+    """Append a row for every session whose (transcript, costing rule, pricing
+    snapshot) differs from its last recorded reading. A session unchanged on
+    all three appends nothing -- that is the idempotence, and JEV-59 is the
+    reason the last two are in it."""
     paths.BASELINE.mkdir(parents=True, exist_ok=True)
     snapshot_at = store.utcnow()
     interactive = {r["session_id"] for r in prompt_index() if r["session_id"]}
@@ -551,37 +688,98 @@ def snapshot() -> dict[str, Any]:
     for path in transcripts():
         row = session_row(path, interactive, snapshot_at)
         rows.append(row)
-        if known.get(row["session_id"]) == row["source"]["digest"]:
+        if known.get(row["session_id"]) == snapshot_identity(row):
             skipped.append(row["session_id"])
             continue
         store.append_jsonl(SESSIONS, row)
         appended.append(row["session_id"])
+
+    # The durable record, read back AFTER the appends: the latest reading of
+    # every session ever snapshotted, including any whose transcript has since
+    # been reaped. This, not `rows`, is what the totals below are over.
+    totalled = list(latest_per_session().values())
 
     manifest = {
         "schema": SCHEMA_VERSION,
         "ticket": "JEV-38",
         "pricing_version": cl.pricing()["version"],
         "snapshot_at": snapshot_at,
+        "costing_rule": sm.COSTING_RULE,
+        "costing_rule_description": sm.COSTING_RULE_DESCRIPTION,
+        # `jev_home` is where the code lives (a worktree, often); `corpus_root`
+        # is the project whose transcripts were read. They differ whenever this
+        # runs from `.claude/worktrees/`, and recording only the first is how a
+        # manifest ends up naming a directory that has nothing to do with its
+        # numbers. `project_root` is kept under its old name for readers.
         "project_root": str(paths.ROOT),
+        "jev_home": str(paths.ROOT),
+        "corpus_root": str(baseline_project_root()),
         "transcript_dir": str(project_dir()),
+        # --- JEV-59: what these totals are OVER -------------------------------
+        # The manifest used to give `sessions_captured` and a set of totals with
+        # nothing saying how the two related to `sessions.jsonl`. They are NOT a
+        # subset: the stream is a history, with one row per reading of a growing
+        # session, and the totals are over the LAST row per session_id. A reader
+        # summing every row double-counts (29 rows / 15 sessions summed to ~$724
+        # against a true $125.58 when this was written). Said here, in the file,
+        # rather than in a commit message nobody reads next to the number.
+        #
+        # The totals are over the STREAM, not over what is on disk. Those are
+        # the same set today and stop being the same set the moment a
+        # snapshotted session is reaped -- which is no longer hypothetical:
+        # `already_unrecoverable` went 0 -> 1 on this very run. Totalled over
+        # on-disk transcripts, this file would silently SHRINK as Claude Code's
+        # 30-day sweep ran, while the stream still held the spend. A "before"
+        # baseline that decays with the source it was built to outlive is the
+        # one thing JEV-38 exists to prevent.
+        "totals_scope": (
+            "every session ever snapshotted into sessions.jsonl, counted ONCE "
+            "at its latest reading -- NOT only those still on disk, so these "
+            "totals cannot shrink when a transcript is reaped"
+        ),
+        "aggregation_rule": (
+            "take the LAST row per session_id in sessions.jsonl; never sum all "
+            "rows -- the stream is append-only history and a grown session has "
+            "one row per reading"
+        ),
+        "stream_rows_total": len(stream_rows()),
+        # On disk right now, which is the number that CAN fall.
         "sessions_captured": len(rows),
+        # In the durable record, which is the number the totals are over.
+        "sessions_in_stream": len(totalled),
         "sessions_appended_this_run": appended,
         "sessions_unchanged_this_run": skipped,
-        "total_computed_cost_usd": round(sum(r["computed_cost_usd"] for r in rows), 6),
-        "total_delegated_cost_usd": round(sum(r["delegated_cost_usd"] for r in rows), 6),
-        "total_delegated_tasks": sum(r["delegated_tasks"] for r in rows),
-        "total_human_prompts": sum(r["human_prompts"] for r in rows),
-        "unpriced_requests": sum(r["unpriced_requests"] for r in rows),
-        "unpriced_models": sorted({m for r in rows for m in r["unpriced_models"]}),
+        "total_computed_cost_usd": round(
+            sum(r["computed_cost_usd"] for r in totalled), 6),
+        "total_delegated_cost_usd": round(
+            sum(r["delegated_cost_usd"] for r in totalled), 6),
+        "total_delegated_tasks": sum(r["delegated_tasks"] for r in totalled),
+        "total_human_prompts": sum(r["human_prompts"] for r in totalled),
+        # JEV-59: these two are summed only over rows that CARRY them. A `-v1`
+        # row has neither field, and reading a missing field as 0 would report
+        # "no coverage hole" for rows whose coverage was never measured.
+        "unpriced_requests": sum(
+            r["unpriced_requests"] for r in totalled if "unpriced_requests" in r),
+        "unpriced_zero_token_requests": sum(
+            r["unpriced_zero_token_requests"] for r in totalled
+            if "unpriced_zero_token_requests" in r),
+        "unpriced_models": sorted(
+            {m for r in totalled for m in (r.get("unpriced_models") or [])}),
         "unpriced_note": (
             "Spend on a model absent from config/pricing.json is NOT included in "
-            "total_computed_cost_usd. It is counted here so the gap is visible."
+            "total_computed_cost_usd. It is counted here so the gap is visible. "
+            "unpriced_requests is the COVERAGE HOLE -- requests that carried "
+            "tokens and could not be priced -- and is what unpriced_models "
+            "names. unpriced_zero_token_requests is the harmless remainder "
+            "(`<synthetic>` rows, no rate and no tokens) and is NOT a gap."
         ),
         "window": {
-            "first_activity_utc": min((r["started_at"] for r in rows if r["started_at"]),
-                                      default=None),
-            "last_activity_utc": max((r["ended_at"] for r in rows if r["ended_at"]),
-                                     default=None),
+            # Over the stream, like the totals: the window a reaped session
+            # covered is still part of what this baseline measured.
+            "first_activity_utc": min(
+                (r["started_at"] for r in totalled if r["started_at"]), default=None),
+            "last_activity_utc": max(
+                (r["ended_at"] for r in totalled if r["ended_at"]), default=None),
         },
         "retention": retention_finding(),
         "already_unrecoverable": unrecoverable(),

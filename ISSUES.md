@@ -412,7 +412,7 @@ against known answers before any real data exists.
 Claude Code's own transcripts. This is the only thing a later enforce phase can
 ever be differenced against, so it starts collecting on day 0.
 
-- [x] Transcript lines deduplicated by `requestId`; `usage.iterations[]` ignored
+- [x] ~~Transcript lines deduplicated by `requestId`; `usage.iterations[]` ignored~~ → **SUPERSEDED BY JEV-49. Both halves of this box describe the rule that was found to be WRONG.** Dedupe is now on `(requestId, message.id)` (`src/session_metrics.dedupe_key`), because early copies are placeholders carrying `input_tokens: 2` and keeping the first one throws the real usage away. And `iterations[]` is **summed** for token fields, not ignored (`normalise_usage`), with the `cache_creation` TTL sub-object following the token rule. Ticking this box was how the defective rule survived a `done` status: the code moved and the checkbox did not. Verified against both call sites 2026-09-21
 - [x] Tokens reported by class -- input, cache-write, cache-read, output, thinking -- never as one sum
 - [x] Cost computed with cache multipliers per exact model string including any context suffix
 - [x] Cost reconciled against the session's own `cost-state.totalCostUSD`, with the delta reported

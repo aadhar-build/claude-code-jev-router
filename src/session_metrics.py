@@ -52,6 +52,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config_loader as cl  # noqa: E402
 import paths  # noqa: E402
 
+# ---------------------------------------------------------------------------
+# JEV-59: the row has to say which rule produced it.
+#
+# `data/baseline/sessions.jsonl` is an append-only committed stream, and its
+# rows were written under a costing rule that has since been replaced. Nothing
+# in a row said so, so a reader could not tell a pre-`98979a7` cost from a
+# post-`98979a7` one, and the two sat in the same file looking identical.
+#
+# This name is stamped into every row and every manifest. Bump it whenever any
+# of the four rules below changes -- `baseline.snapshot()` keys its idempotence
+# on it, so bumping it is also what makes the stream re-snapshot itself under
+# the new rule instead of sitting on stale numbers forever.
+COSTING_RULE = "billable-requests-2026-09-21"
+
+#: What that name means, carried beside it so a row is self-describing and a
+#: reader does not have to find the right commit to know what they are holding.
+COSTING_RULE_DESCRIPTION = (
+    "dedupe on the (requestId, message.id) PAIR; keep the COMPLETED copy, not "
+    "the input_tokens:2 streaming placeholder; SUM usage.iterations[] into the "
+    "token fields; price cache writes with the 5-minute and 1-hour TTL "
+    "multipliers split, never one flat rate. Supersedes the first-copy rule "
+    "that understated delegated spend by 45.2% under the JEV-24a cut "
+    "(98979a7, SPEC.md 11)."
+)
+
+#: What rows written before JEV-59 were produced under. NEVER written into an
+#: old row -- a row that did not record its rule did not record its rule, and
+#: stamping one on retrospectively is a guess dressed as provenance. Readers
+#: apply this when the field is ABSENT, which is a different claim and an
+#: honest one.
+COSTING_RULE_LEGACY = "first-copy-requestId-only-pre-98979a7"
+
 TTL_FIELDS = ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
 
 SCALAR_TOKEN_FIELDS = ("input_tokens", "output_tokens")
@@ -348,12 +380,21 @@ def billable_requests(path: Path) -> Iterator[dict[str, Any]]:
     This exists because it was written twice. `src/baseline.py` grew its own
     request-level walk that deduped on `requestId` alone, kept the FIRST copy
     and never read `usage.iterations[]` -- i.e. it reproduced all three of the
-    bugs this module's docstrings exist to prevent. Measured over this repo's
-    own corpus the two rules disagreed by $66.85 of delegated spend
-    ($105.09 vs $171.94, the frozen rule understating by 38.9%), because all
-    48 growing keys live in subagent transcripts. Two costing rules that must
+    bugs this module's docstrings exist to prevent. Two costing rules that must
     agree cannot be two pieces of code; anything wanting per-request cost
     calls this.
+
+    **How far apart they were depends on the window, and the two figures are
+    not interchangeable** (commit `98979a7`, SPEC.md §11):
+
+      * WHOLE CORPUS, NO CUT: $105.09 vs $171.94 -- $66.85 of delegated spend,
+        the frozen rule understating by **38.9%**. Always quote the qualifier
+        with the number; it is not the frozen record's window.
+      * UNDER THE JEV-24a CUT, which IS the window `delegation-pre-rule-v1.json`
+        was frozen under: **+45.2%**, $1.58 -> $2.88 per delegated task.
+
+    Either way the cause is the same: all 48 growing keys live in subagent
+    transcripts.
 
     Each record carries:
 
