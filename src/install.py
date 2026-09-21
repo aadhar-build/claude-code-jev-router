@@ -54,9 +54,13 @@ pretend otherwise. It gets as close as it can, in this order:
      available. We then write the stripped document and verify it three ways
      against the file re-read from disk: every difference from the pre-uninstall
      file is one of our entries; nothing outside `hooks` moved; and re-applying
-     `install` to the result reproduces the pre-uninstall document exactly, so
-     nothing was lost rather than merely moved. If any of those fails we say so
-     LOUDLY and name the verbatim backup.
+     `install` to the result reproduces the pre-uninstall document -- up to the
+     order of the groups within one hook event, which is not a behaviour (Claude
+     Code runs every matching group) and which `merge_entries` cannot
+     reconstruct, since it always appends ours at the end. The order that IS
+     checked exactly is the user's own groups relative to each other. Together
+     those say nothing was lost rather than merely moved. If any of those fails
+     we say so LOUDLY and name the verbatim backup.
 
 Tier B cannot promise byte-identity of the user's own formatting, because
 `install` re-serialises the file (`json.dumps(indent=2)`) the moment it merges
@@ -176,26 +180,104 @@ def desired_entries(jev_home: Path, reg: dict | None = None) -> list[dict]:
     return out
 
 
-def is_ours(command: str, reg: dict | None = None) -> bool:
-    """Is this registered handler one of jev's?
+def read_record(record_path: Path) -> dict | None:
+    """This repo's `.claude/jev-install.json`, or None. Never raises."""
+    try:
+        doc = json.loads(record_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return doc if isinstance(doc, dict) else None
 
-    Recognised by the script path it names, not by a marker key inside the
-    `hooks` array. Claude Code parses that array; an unknown key there is not
-    ours to add, and a marker the harness might strip is a marker that leaves
-    an entry we can no longer identify at uninstall time.
+
+def owned_commands(jev_home: Path | None = None, reg: dict | None = None,
+                   record: dict | None = None) -> set[str]:
+    """The EXACT command strings that are jev's, in this repo.
+
+    W5, and this was a real defect. Ownership used to be `e["script"] in
+    command` -- a SUBSTRING test. Somebody else's
+    `/my/own/hooks/agent_route_actuator.sh --mine` on matcher `Write` matched
+    it, and `jev install` deleted their handler out of their own settings file
+    without saying a word. Silent data loss in a stranger's repo is the one
+    failure category a tool people install may not have.
+
+    So ownership is now exact and has exactly two sources, both of them
+    absolute paths jev itself produced:
+
+      1. what THIS install would write -- `desired_entries()`, anchored to
+         `$JEV_HOME`;
+      2. what an install into THIS repo actually wrote -- the `entries[]` of
+         `.claude/jev-install.json`. This is the only thing that can still
+         recognise an entry after `$JEV_HOME` has moved, and it is repo-local,
+         so it cannot claim ownership of anything in anybody else's tree.
+
+    A handler that merely *mentions* one of our script names is not ours, is
+    left alone, and `install` says so out loud (see `lookalikes`).
+    """
+    jev_home = jev_home or paths.ROOT
+    reg = reg or load_registration()
+    out: set[str] = set()
+    for e in desired_entries(jev_home, reg):
+        out.add(e["command"])
+        # The unquoted form too: `shlex.quote` is a no-op for an ordinary path,
+        # but a path with a space in it is quoted here and a user who retyped
+        # the line by hand may not have quoted it. Still an EXACT path match.
+        out.add(str(e["script"]))
+    for e in (record or {}).get("entries") or []:
+        c = e.get("command")
+        if isinstance(c, str) and c.strip():
+            out.add(c.strip())
+    return out
+
+
+def is_ours(command: str, owned: set[str] | None = None) -> bool:
+    """Is this registered handler one of jev's? EXACT match, never substring.
+
+    Identified by the absolute script path jev wrote, not by a marker key
+    inside the `hooks` array: Claude Code parses that array, an unknown key
+    there is not ours to add, and a marker the harness might strip is a marker
+    that leaves an entry we can no longer identify at uninstall time.
+
+    `owned` comes from `owned_commands()`. Passing it in matters: it is the
+    only way the set can include this repo's install record.
+    """
+    owned = owned_commands() if owned is None else owned
+    return (command or "").strip() in owned
+
+
+def lookalikes(settings: dict, owned: set[str], reg: dict | None = None) -> list[dict]:
+    """Handlers that NAME one of our scripts but are not ours.
+
+    The exact population the old substring test would have deleted. We leave
+    them alone and print them, because "we noticed and did nothing" is the only
+    honest thing to say about somebody else's hook that shares our filename.
     """
     reg = reg or load_registration()
-    return any(e["script"] in (command or "") for e in reg["entries"])
+    names = {Path(e["script"]).name for e in reg["entries"]}
+    out = []
+    for event, groups in (settings.get("hooks") or {}).items():
+        for g in groups or []:
+            if not isinstance(g, dict):
+                continue
+            for h in (g.get("hooks") or []):
+                if not isinstance(h, dict):
+                    continue
+                c = (h.get("command") or "")
+                if c.strip() in owned:
+                    continue
+                if any(n in c for n in names):
+                    out.append({"event": event, "matcher": g.get("matcher"),
+                                "command": c})
+    return out
 
 
-def split_hooks(settings: dict, reg: dict | None = None) -> tuple[dict, list[dict]]:
+def split_hooks(settings: dict, owned: set[str] | None = None) -> tuple[dict, list[dict]]:
     """(settings with every jev handler removed, the handlers removed).
 
     Groups and events that become empty are pruned, and so is `hooks` itself --
     an install into a file that had no `hooks` key must be able to leave it with
     no `hooks` key, or tier A is unreachable for the commonest case of all.
     """
-    reg = reg or load_registration()
+    owned = owned_commands() if owned is None else owned
     out = json.loads(json.dumps(settings))  # deep copy, no aliasing surprises
     removed: list[dict] = []
     hooks = out.get("hooks")
@@ -217,7 +299,7 @@ def split_hooks(settings: dict, reg: dict | None = None) -> tuple[dict, list[dic
                 continue
             kept = []
             for h in handlers:
-                if isinstance(h, dict) and is_ours(h.get("command") or "", reg):
+                if isinstance(h, dict) and is_ours(h.get("command") or "", owned):
                     removed.append({"event": event, "matcher": group.get("matcher"),
                                     "handler": h})
                 else:
@@ -371,7 +453,12 @@ def install(dirpath: Path, apply: bool, out=print) -> int:
     target, settings_path, record_path = _target(dirpath)
     original, doc = _read_settings(settings_path)
 
-    stripped, existing = split_hooks(doc, reg)
+    # The record is read BEFORE the strip, because it is half of what ownership
+    # means: an entry written by an install whose $JEV_HOME has since moved is
+    # recognisable from the record and from nothing else.
+    prior_record = read_record(record_path)
+    owned = owned_commands(jev_home, reg, prior_record)
+    stripped, existing = split_hooks(doc, owned)
     want = merge_entries(stripped, entries)
 
     out("")
@@ -379,7 +466,21 @@ def install(dirpath: Path, apply: bool, out=print) -> int:
     out(f"  jev home    {jev_home}")
     out(f"  settings    {settings_path}"
         f"{'' if original is not None else '  (does not exist yet)'}")
+    _warn_if_worktree(jev_home, out)
     out("")
+
+    # Loud, always, and before anything is written: a handler that names one of
+    # our scripts but is not this install's is somebody else's, and the old
+    # substring ownership test would have deleted it in silence.
+    near = lookalikes(doc, owned, reg)
+    for n in near:
+        out(f"  NOT OURS    {n['event']} / matcher {n['matcher']}")
+        out(f"              {n['command']}")
+        out("              names one of jev's scripts but is not an entry this")
+        out("              install wrote. LEFT EXACTLY AS IT IS — not replaced,")
+        out("              not removed. If it is yours, nothing to do.")
+    if near:
+        out("")
 
     if existing and canonical(want) == canonical(doc):
         out(f"  already installed — {len(existing)} jev entry(ies), exactly as we "
@@ -389,8 +490,15 @@ def install(dirpath: Path, apply: bool, out=print) -> int:
         return EX_OK
 
     if existing:
-        out(f"  note        {len(existing)} stale jev entry(ies) are registered and "
-            "will be replaced")
+        # One line per entry, not a count. A removal nobody can name is a
+        # removal nobody can check.
+        out(f"  REPLACING   {len(existing)} jev entry(ies) already registered here. "
+            "Each is removed and rewritten:")
+        for r in existing:
+            out(f"              {r['event']} / matcher {r['matcher']}")
+            out(f"              {r['handler'].get('command')}")
+        out("              (verbatim backup below; nothing outside these lines "
+            "is touched)")
 
     if apply and not os.access(target / ".claude" if (target / ".claude").exists()
                                else target, os.W_OK):
@@ -465,6 +573,28 @@ def install(dirpath: Path, apply: bool, out=print) -> int:
     return EX_OK
 
 
+def _warn_if_worktree(jev_home: Path, out=print) -> None:
+    """A git WORKTREE has `.git` as a FILE, not a directory.
+
+    The registration names `$JEV_HOME/hooks/...` verbatim and absolutely -- it
+    has to, because a foreign repo cannot anchor on a `$CLAUDE_PROJECT_DIR` the
+    script does not live in. So installing from a worktree pins a path that
+    dangles the day the worktree is removed. A dangling hook command is inert,
+    which is fail-safe, but it is also silent: the hook simply stops existing
+    and nothing says so. Warn at the only moment anybody is looking.
+    """
+    if not (jev_home / ".git").is_file():
+        return
+    out("  WARNING     this jev home looks like a git WORKTREE — its `.git` is a")
+    out("              file, not a directory. The command registered below names")
+    out(f"              {jev_home}")
+    out("              absolutely. Remove the worktree and that path dangles:")
+    out("              the hook silently stops existing (inert, but silent), and")
+    out("              `jev uninstall` can no longer find its own script either.")
+    out("              Prefer installing from a stable checkout; if you keep this")
+    out("              one, uninstall BEFORE you remove the worktree.")
+
+
 def _report_switches(target: Path, jev_home: Path, out=print) -> None:
     out("")
     out("  The two switches — both fail-safe, ANY entry at the path means OFF:")
@@ -497,14 +627,19 @@ def uninstall(dirpath: Path, apply: bool, out=print) -> int:
     out("")
 
     original, doc = _read_settings(settings_path)
-    stripped, removed = split_hooks(doc, reg)
 
-    record = None
-    if record_path.exists():
-        try:
-            record = json.loads(record_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            record = None
+    # The record first: it is half of what ownership means (see
+    # `owned_commands`), so it has to be in hand before anything is stripped.
+    record = read_record(record_path)
+    owned = owned_commands(jev_home, reg, record)
+    stripped, removed = split_hooks(doc, owned)
+
+    near = lookalikes(doc, owned, reg)
+    for n in near:
+        out(f"  NOT OURS    {n['event']} / matcher {n['matcher']}")
+        out(f"              {n['command']}")
+        out("              names one of jev's scripts but is not an entry we")
+        out("              wrote. LEFT IN PLACE.")
 
     if not removed:
         out("  hooks       no jev entries registered here — nothing to unregister")
@@ -614,7 +749,8 @@ def uninstall(dirpath: Path, apply: bool, out=print) -> int:
         write_atomically(settings_path, pre)
         return EX_REFUSED
 
-    problems = verify_removal(json.loads(pre.decode("utf-8")), after, reg)
+    problems = verify_removal(json.loads(pre.decode("utf-8")), after, reg,
+                              jev_home=jev_home, record=record)
     if problems:
         out("  VERIFY      THE REST OF THE FILE IS NOT WHAT IT WAS.")
         for p in problems:
@@ -628,9 +764,13 @@ def uninstall(dirpath: Path, apply: bool, out=print) -> int:
     for r in removed:
         out(f"  removed     {r['event']} / matcher {r['matcher']}")
     out("  verified    every difference from the file as we found it is one of our")
-    out("              entries; nothing outside \"hooks\" moved; and re-applying")
-    out("              `install` to the result reproduces the file exactly, so")
-    out("              nothing was lost rather than merely moved.")
+    out("              entries; nothing outside \"hooks\" moved; your own hook groups")
+    out("              are still in the order you had them; and re-applying")
+    out("              `install` to the result reproduces the file — up to the order")
+    out("              of the groups inside one event, which is not a behaviour")
+    out("              (every matching group runs) and which we cannot reconstruct,")
+    out("              because install always appends ours last. So nothing was lost")
+    out("              rather than merely moved.")
     out("  reversal    STRUCTURALLY VERIFIED, WHICH IS WEAKER THAN BYTE-IDENTICAL.")
     out("              This file changed after `jev install` ran, so the")
     out("              install-time bytes are no longer the right answer and we")
@@ -671,14 +811,125 @@ def _tier_forecast(record, stripped, settings_path) -> str:
             "install, so our entries would be edited out and the result checked")
 
 
-def verify_removal(before: dict, after: dict, reg: dict | None = None) -> list[str]:
-    """Three independent checks that we removed ours and only ours.
+def _is_subsequence(small: list[str], big: list[str]) -> bool:
+    """Is `small` `big` with zero or more elements deleted, order preserved?"""
+    it = iter(big)
+    return all(any(x == y for y in it) for x in small)
 
-    Independent is the operative word. A verification computed by the same
-    function that made the change proves only that the function is
-    self-consistent; these three are computed from the file re-read from disk.
+
+def _groups_sorted(doc: dict) -> dict:
+    """`doc` with the GROUP LIST of each hook event put in canonical order.
+
+    W5, and this is the fix for a defect that aborted the single most likely
+    uninstall there is. Within one event Claude Code runs EVERY matching group
+    -- the order of the groups in that array is not a behaviour, it is a record
+    of who appended last. `merge_entries` always appends jev's group at the END,
+    so the moment the user added a `PreToolUse` hook of their own AFTER
+    installing, the original order stopped being reconstructable and the
+    POSITIONAL comparison this check used to make fired on a removal that was
+    entirely correct. Uninstall then restored the backup and stopped -- leaving
+    jev REGISTERED, which is the one outcome uninstall exists to prevent.
+
+    So check 3b is order-insensitive exactly where order does not matter. The
+    order that DOES matter -- the user's own groups relative to each other, and
+    the handlers inside any one group -- is held by check 3a, which compares
+    `after` against `before` directly and so never reconstructs anything.
+    """
+    out = json.loads(json.dumps(doc))
+    hooks = out.get("hooks")
+    if isinstance(hooks, dict):
+        for event, groups in list(hooks.items()):
+            if isinstance(groups, list):
+                hooks[event] = sorted(groups, key=canonical)
+    return out
+
+
+def _describe_group(g: Any) -> str:
+    if not isinstance(g, dict):
+        return canonical(g)[:80]
+    handlers = g.get("hooks") or []
+    first = ""
+    if handlers and isinstance(handlers[0], dict):
+        first = str(handlers[0].get("command") or "")
+    return (f"matcher {g.get('matcher')!r}, {len(handlers)} handler(s), "
+            f"first command {first[:60]!r}")
+
+
+def _group_level_diff(before: dict, again: dict) -> list[str]:
+    """Where `before` and `again` differ, described in GROUPS, not in indices.
+
+    `diff_paths` over two group-sorted documents would report indices into a
+    sorted list, which mean nothing to whoever is reading the refusal.
+    """
+    out: list[str] = []
+    b_rest = {k: v for k, v in before.items() if k != "hooks"}
+    a_rest = {k: v for k, v in again.items() if k != "hooks"}
+    for loc in diff_paths(b_rest, a_rest):
+        out.append(f"outside \"hooks\", at {loc or '$'}")
+    b_hooks = before.get("hooks") or {}
+    a_hooks = again.get("hooks") or {}
+    for event in sorted(set(b_hooks) | set(a_hooks)):
+        b_groups = [canonical(g) for g in (b_hooks.get(event) or [])]
+        a_groups = [canonical(g) for g in (a_hooks.get(event) or [])]
+        for g in b_groups:
+            if b_groups.count(g) > a_groups.count(g):
+                out.append(f"hooks.{event}: a group we found is LOST — "
+                           f"{_describe_group(json.loads(g))}")
+        for g in a_groups:
+            if a_groups.count(g) > b_groups.count(g):
+                out.append(f"hooks.{event}: re-install produces a group that was "
+                           f"not there — {_describe_group(json.loads(g))}")
+    return list(dict.fromkeys(out))
+
+
+def installer_triples(reg: dict | None = None, jev_home: Path | None = None,
+                      record: dict | None = None) -> set[str]:
+    """Every (event, matcher, command) that `install` has written or would write.
+
+    W5. THIS IS WHERE THE SELF-REFERENCE IS BROKEN. Check 2 used to ask
+    `is_ours()` -- the very predicate `split_hooks` had just used to decide what
+    to remove -- whether the things `split_hooks` removed were ours. Such a
+    check can only ever agree with the stripper, and it agreed most loudly at
+    exactly the point the stripper was wrong: a foreign handler whose command
+    merely CONTAINED one of our script names was removed by the predicate and
+    then blessed by the same predicate.
+
+    So this set is CONSTRUCTED rather than RECOGNISED. It is what the installer
+    emits -- `config/registration.json` under this `$JEV_HOME`, plus the entries
+    this repo's own install record says were actually written. A handler that
+    disappeared and is not in this set is reported, whatever any ownership
+    predicate happens to think of it.
     """
     reg = reg or load_registration()
+    out: set[str] = set()
+    for e in desired_entries(jev_home or paths.ROOT, reg):
+        out.add(canonical([e["event"], e["matcher"], e["command"]]))
+        out.add(canonical([e["event"], e["matcher"], str(e["script"])]))
+    # Every record entry, unfiltered -- the record IS what the installer wrote,
+    # by definition, and `owned_commands` trusts it on exactly those terms. A
+    # filter here and not there would mean an entry written under an older
+    # registration (a matcher that has since changed, say) got stripped as ours
+    # and then reported as NOT ours, and uninstall would refuse for no reason.
+    for e in (record or {}).get("entries") or []:
+        ev, m, c = e.get("event"), e.get("matcher"), e.get("command")
+        if isinstance(c, str) and c.strip():
+            out.add(canonical([ev, m, c.strip()]))
+    return out
+
+
+def verify_removal(before: dict, after: dict, reg: dict | None = None,
+                   jev_home: Path | None = None,
+                   record: dict | None = None) -> list[str]:
+    """Three independent checks that we removed ours and only ours.
+
+    Independent is the operative word, and it is meant twice: these are
+    computed from the file RE-READ FROM DISK rather than from the document we
+    wrote, and check 2 asks what the INSTALLER writes rather than what the
+    REMOVER recognises, so a mistake in the ownership predicate cannot be
+    ratified by the ownership predicate.
+    """
+    reg = reg or load_registration()
+    jev_home = jev_home or paths.ROOT
     problems: list[str] = []
 
     # 1. Nothing outside "hooks" moved.
@@ -687,19 +938,22 @@ def verify_removal(before: dict, after: dict, reg: dict | None = None) -> list[s
     for loc in diff_paths(b_rest, a_rest):
         problems.append(f"changed outside \"hooks\": {loc or '$'}")
 
-    # 2. Every handler that disappeared is one of ours, and every handler that
-    #    is not ours survived -- compared as a multiset, so a handler that moved
+    # 2. Every handler that disappeared is one the INSTALLER WROTE, and no
+    #    handler appeared -- compared as a multiset, so a handler that moved
     #    between groups is caught as well as one that vanished.
     def handlers(doc):
         out = []
         for event, groups in (doc.get("hooks") or {}).items():
             for g in groups or []:
+                if not isinstance(g, dict):
+                    continue
                 for h in (g.get("hooks") or []):
                     out.append(canonical({"event": event,
                                           "matcher": g.get("matcher"),
                                           "handler": h}))
         return out
 
+    written = installer_triples(reg, jev_home, record)
     b_h, a_h = handlers(before), handlers(after)
     for h in a_h:
         if h not in b_h:
@@ -708,20 +962,43 @@ def verify_removal(before: dict, after: dict, reg: dict | None = None) -> list[s
         gone = b_h.count(h) - a_h.count(h)
         if gone <= 0:
             continue
-        if not is_ours(json.loads(h)["handler"].get("command") or "", reg):
+        rec = json.loads(h)
+        handler = rec["handler"] if isinstance(rec["handler"], dict) else {}
+        triple = canonical([rec["event"], rec["matcher"],
+                            (handler.get("command") or "").strip()])
+        if triple not in written:
             problems.append(f"a handler that is NOT ours was removed: {h[:120]}")
 
-    # 3. Re-applying install to the result reproduces the file we found. If the
-    #    removal lost anything at all -- a sibling key on our group, a matcher
-    #    someone had edited -- this is where it shows.
+    # 3a. The groups that SURVIVED are the groups we found, in the order we
+    #     found them -- a subsequence, exactly. Nothing is reconstructed here,
+    #     so it holds wherever our own group happened to sit, and it catches a
+    #     group that appeared, was reordered, was rewritten, or moved between
+    #     events.
+    b_hooks = before.get("hooks") or {}
+    a_hooks = after.get("hooks") or {}
+    for event in sorted(set(a_hooks) | set(b_hooks)):
+        a_groups = [canonical(g) for g in (a_hooks.get(event) or [])]
+        b_groups = [canonical(g) for g in (b_hooks.get(event) or [])]
+        if not _is_subsequence(a_groups, b_groups):
+            problems.append(
+                f"hooks.{event}: the surviving groups are not the groups we "
+                f"found, in the order we found them — something was added, "
+                f"reordered or rewritten rather than merely removed")
+
+    # 3b. Re-applying install to the result reproduces the file we found, so
+    #     nothing was LOST rather than merely removed -- a sibling key on our
+    #     group, a matcher someone had edited, somebody else's whole group.
+    #     Compared with each event's groups in canonical order: see
+    #     `_groups_sorted` for why a positional comparison here was a defect,
+    #     and why 3a is what carries the order claim.
     try:
-        again = merge_entries(after, desired_entries(paths.ROOT, reg))
+        again = merge_entries(after, desired_entries(jev_home, reg))
     except ValueError as exc:
         problems.append(f"the result cannot be re-installed into: {exc}")
         return problems
-    if canonical(again) != canonical(before):
-        for loc in diff_paths(before, again)[:6]:
-            problems.append(f"re-install does not reproduce the original at {loc}")
+    if canonical(_groups_sorted(again)) != canonical(_groups_sorted(before)):
+        for loc in _group_level_diff(before, again)[:6]:
+            problems.append(f"re-install does not reproduce the original: {loc}")
     return problems
 
 
@@ -774,7 +1051,8 @@ def status(dirpath: Path, out=print) -> int:
         except Refused as exc:
             out(f"  hooks       UNREADABLE: {exc}")
             return EX_REFUSED
-        _, ours = split_hooks(doc, reg)
+        _, ours = split_hooks(doc, owned_commands(jev_home, reg,
+                                                  read_record(record_path)))
         total = len(load_registration()["entries"])
         if ours:
             out(f"  hooks       INSTALLED — {len(ours)} of jev's {total} entry(ies) registered")

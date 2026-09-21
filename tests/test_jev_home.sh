@@ -276,6 +276,87 @@ rm -f "$HOME_DIR/.jev-disabled"
   || bad "status still reports an installed hook after uninstall"
 rm -f "$PROJ/.jev-disabled"
 
+# ---------------------------------------------------------------------------
+echo
+echo "  6. THE CLI's OWN JEV_HOME EDGES (W5)"
+# ---------------------------------------------------------------------------
+# Three ways of arriving at a JEV_HOME that is wrong, all of which previously
+# failed unhelpfully or not at all. The sandbox install is given the two files
+# the CLI needs so that none of this touches the live repo.
+cp "$REPOROOT/src/install.py" "$HOME_DIR/src/"
+cp "$REPOROOT/jev" "$HOME_DIR/jev"
+chmod +x "$HOME_DIR/jev"
+
+# 6a. A RELATIVE $JEV_HOME. bash uses the value verbatim after an `is_dir`
+#     test; Python calls `.resolve()`. So `JEV_HOME=.` means two different
+#     directories to the two halves, and in bash it makes every jev asset
+#     cwd-relative -- including $JEV_HOME/.jev-disabled, the global kill
+#     switch, which is exactly what the switch block's comment says must never
+#     happen. There is one value that means the same to both readers: an
+#     absolute one. Anything else is rejected, loudly.
+out=$(cd "$PROJ" && JEV_HOME=. "$HOME_DIR/jev" status "$PROJ" 2>&1); rc=$?
+[ "$rc" = "1" ] && ok "a RELATIVE \$JEV_HOME is rejected by the CLI (exit 1), not silently used" \
+                || bad "a relative \$JEV_HOME was accepted (rc=$rc): $out"
+case "$out" in
+  *JEV_HOME*absolute*|*JEV_HOME*ABSOLUTE*) ok "...and the message names JEV_HOME rather than a raw python error" ;;
+  *) bad "the rejection does not name JEV_HOME: $out" ;;
+esac
+case "$out" in
+  *"pwd -P"*) ok "...and prints the one line that fixes it" ;;
+  *) bad "the rejection does not say how to fix it: $out" ;;
+esac
+# The Python half rejects it too, so the rule holds for anything that imports
+# paths, not only for things that come through the wrapper.
+perr=$(cd "$PROJ" && JEV_HOME=. python3 -c \
+  "import sys; sys.path.insert(0,'$HOME_DIR/src'); import paths" 2>&1); prc=$?
+[ "$prc" != "0" ] && ok "paths.py rejects it as well -- the rule is not only in the wrapper" \
+                  || bad "paths.py silently resolved a relative \$JEV_HOME against the cwd"
+case "$perr" in
+  *"ABSOLUTE"*) ok "...with the same reason, in the same words" ;;
+  *) bad "paths.py's refusal does not explain itself: $perr" ;;
+esac
+
+# 6b. `jev` reached through a SYMLINK -- the obvious way to put a CLI on $PATH.
+#     ${BASH_SOURCE[0]} is the LINK and `pwd -P` resolves the DIRECTORY, not
+#     the file link, so JEV_HOME used to come out as the bin directory and the
+#     whole thing died on a raw python "No such file" that named neither
+#     JEV_HOME nor the fix. The link chain is walked now.
+mkdir -p "$SANDBOX/bin"
+ln -sf "$HOME_DIR/jev" "$SANDBOX/bin/jev"
+out=$(cd "$PROJ" && env -u JEV_HOME "$SANDBOX/bin/jev" status "$PROJ" 2>&1); rc=$?
+[ "$rc" = "0" ] && ok "jev reached through a symlink on \$PATH works (the link chain is followed)" \
+                || bad "a symlinked jev still fails (rc=$rc): $out"
+case "$out" in
+  *"jev home    $HOME_DIR"*) ok "...and resolves JEV_HOME to the install, not to the bin directory" ;;
+  *) bad "a symlinked jev resolved the wrong JEV_HOME: $out" ;;
+esac
+# A COPY of the script, separated from its install, cannot be rescued -- but it
+# must fail by naming JEV_HOME and the fix, not by leaking a python traceback.
+cp "$HOME_DIR/jev" "$SANDBOX/bin/jev-copy"; chmod +x "$SANDBOX/bin/jev-copy"
+out=$(cd "$PROJ" && env -u JEV_HOME "$SANDBOX/bin/jev-copy" status "$PROJ" 2>&1); rc=$?
+[ "$rc" = "1" ] && ok "a jev COPIED away from its install fails loudly (exit 1)" \
+                || bad "a detached copy of jev did not refuse (rc=$rc): $out"
+case "$out" in
+  *JEV_HOME*) ok "...naming JEV_HOME and how to set it, not a raw 'No such file'" ;;
+  *) bad "the detached-copy failure names neither JEV_HOME nor the fix: $out" ;;
+esac
+
+# 6c. Installing FROM A GIT WORKTREE pins an absolute path that dangles the day
+#     the worktree is removed. Inert (Claude Code cannot exec it), but silent.
+#     A worktree's `.git` is a FILE, not a directory -- that is the whole test.
+printf 'gitdir: %s/nowhere/.git/worktrees/w\n' "$SANDBOX" > "$HOME_DIR/.git"
+out=$(env -u JEV_HOME "$HOME_DIR/jev" install "$PROJ" --dry-run 2>&1)
+case "$out" in
+  *WORKTREE*) ok "install warns that this jev home is a git WORKTREE and the pinned path will dangle" ;;
+  *) bad "installing from a worktree said nothing about the path it pins: $out" ;;
+esac
+rm -f "$HOME_DIR/.git"
+out=$(env -u JEV_HOME "$HOME_DIR/jev" install "$PROJ" --dry-run 2>&1)
+case "$out" in
+  *WORKTREE*) bad "the worktree warning fires on an ordinary checkout -- it is vacuous" ;;
+  *) ok "...and does not fire on an ordinary checkout (the warning is not vacuous)" ;;
+esac
+
 echo
 echo "  ${pass} passed, ${fail} failed"
 [ "$fail" -eq 0 ] || exit 1

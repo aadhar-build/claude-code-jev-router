@@ -276,6 +276,54 @@ PY
 
 # ---------------------------------------------------------------------------
 echo
+echo "  4b. THE ORDINARY CASE -- the user's own hook is on PreToolUse (W5)"
+# ---------------------------------------------------------------------------
+# The arrangement §4 above did NOT test, and the one defect it hid.
+#
+# §4 adds the user's hook under PostToolUse, which is the one arrangement where
+# PreToolUse's group order is unperturbed -- so the weaker tier was tested only
+# where it worked. Add a PreToolUse hook instead (the single most likely thing a
+# user does after installing) and jev's group, which `merge_entries` always
+# APPENDS, is no longer last. Check 3 used to compare the re-install
+# POSITIONALLY, so it fired on a removal that was entirely correct, uninstall
+# restored the backup and stopped -- and left jev REGISTERED. Quiescence is the
+# one thing uninstall exists to deliver, so this is the case that matters most.
+R7="$SANDBOX/r7"; mkdir -p "$R7"
+"$JEV" install "$R7" --yes >/dev/null 2>&1
+python3 - "$R7/.claude/settings.local.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+# Appended AFTER jev's group, which is what makes the original order
+# unreconstructable: re-installing puts ours back at the end, not the front.
+d["hooks"].setdefault("PreToolUse", []).append(
+    {"matcher": "Write", "hooks": [{"type": "command", "command": "their-own-hook.sh"}]})
+json.dump(d, open(p, "w"), indent=2)
+PY
+out=$("$JEV" uninstall "$R7" --yes 2>&1); rc=$?
+[ "$rc" = "0" ] \
+  && ok "THE W5 CASE: uninstall succeeds when the user's own hook is on PreToolUse" \
+  || bad "uninstall aborted on the ordinary PreToolUse arrangement (rc=$rc): $out"
+case "$out" in
+  *"THE REST OF THE FILE IS NOT WHAT IT WAS"*)
+    bad "the verifier fired spuriously on a correct removal" ;;
+  *) ok "...and the verifier did not fire on a correct removal" ;;
+esac
+case "$out" in
+  *"STRUCTURALLY VERIFIED"*) ok "it is still tier B, still named, still not claiming byte-identity" ;;
+  *) bad "the PreToolUse case did not name its tier" ;;
+esac
+grep -q "agent_route_actuator.sh" "$R7/.claude/settings.local.json" \
+  && bad "THE DEFECT: uninstall exited but left jev REGISTERED -- silent, not quiescent" \
+  || ok "QUIESCENT: no jev entry is left registered, so no jev process is spawned at all"
+grep -q "their-own-hook.sh" "$R7/.claude/settings.local.json" \
+  && ok "and the user's own PreToolUse hook is untouched" \
+  || bad "the user's own PreToolUse hook was lost"
+"$JEV" status "$R7" 2>&1 | grep -q "not installed here" \
+  && ok "jev status agrees: nothing is registered here any more" \
+  || bad "status still reports an installed hook after the PreToolUse-case uninstall"
+
+# ---------------------------------------------------------------------------
+echo
 echo "  5. THE VERIFIER IS NOT VACUOUS"
 # ---------------------------------------------------------------------------
 # A check computed by the same code that made the change proves only that the
@@ -321,8 +369,57 @@ if not I.verify_removal(before, extra):
 # (d) our entry left in place while claiming removal
 if not I.verify_removal(before, before):
     print("MISSED: nothing was removed at all and the verifier said nothing"); sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# W5. The order question, at unit level. Check 3 was made order-INSENSITIVE
+# across the groups of one event, because `merge_entries` appends ours at the
+# end and the original position is not reconstructable. The order that DOES
+# matter -- the user's own groups relative to each other -- is still exact, and
+# these two cases are what keeps the relaxation honest.
+ordered = {"hooks": {"PreToolUse": [
+    {"matcher": "Agent", "hooks": [{"type": "command", "command": cmd, "timeout": 10}]},
+    {"matcher": "Bash",  "hooks": [{"type": "command", "command": "a.sh"}]},
+    {"matcher": "Read",  "hooks": [{"type": "command", "command": "b.sh"}]}]}}
+clean_o, rem_o = I.split_hooks(ordered)
+assert len(rem_o) == 1, rem_o
+probs = I.verify_removal(ordered, clean_o)
+if probs:
+    print("FALSE POSITIVE: ours sitting FIRST in PreToolUse is reported as damage:",
+          probs); sys.exit(1)
+
+# (e) the user's own groups reordered rather than merely stripped -- order that
+#     genuinely matters is still checked, and exactly.
+swapped = {"hooks": {"PreToolUse": [
+    {"matcher": "Read", "hooks": [{"type": "command", "command": "b.sh"}]},
+    {"matcher": "Bash", "hooks": [{"type": "command", "command": "a.sh"}]}]}}
+if not I.verify_removal(ordered, swapped):
+    print("MISSED: the user's own groups were reordered and the verifier said nothing")
+    sys.exit(1)
+
+# (f) a LOOKALIKE removed. The command merely CONTAINS one of our script names;
+#     it is not ours, it must survive the strip, and a removal of it must be
+#     reported by a check that does NOT consult the stripper's own predicate.
+look = "/my/own/hooks/agent_route_actuator.sh --mine"
+if I.is_ours(look):
+    print("OWNERSHIP IS STILL A SUBSTRING MATCH: a foreign command claimed as ours")
+    sys.exit(1)
+if not I.is_ours(cmd):
+    print("OWNERSHIP IS BROKEN: our own entry is not recognised"); sys.exit(1)
+mixed = {"hooks": {"PreToolUse": [
+    {"matcher": "Write", "hooks": [{"type": "command", "command": look}]},
+    {"matcher": "Agent", "hooks": [{"type": "command", "command": cmd, "timeout": 10}]}]}}
+clean_m, rem_m = I.split_hooks(mixed)
+if len(rem_m) != 1 or look not in json.dumps(clean_m):
+    print("THE SUBSTRING DEFECT: split_hooks took somebody else's lookalike:", rem_m)
+    sys.exit(1)
+if I.verify_removal(mixed, clean_m):
+    print("FALSE POSITIVE on the lookalike case"); sys.exit(1)
+if not I.verify_removal(mixed, {}):
+    print("MISSED: the lookalike was removed too and check 2 blessed it -- the")
+    print("verifier is still using the stripper's own ownership predicate")
+    sys.exit(1)
 PY
-[ $? = 0 ] && ok "the removal verifier catches a greedy removal, a silent edit, an inserted handler and a no-op" \
+[ $? = 0 ] && ok "the removal verifier catches a greedy removal, a silent edit, an inserted handler, a no-op, a reorder and a lookalike removal" \
            || bad "the removal verifier is vacuous -- it does not catch damage it is meant to catch"
 
 # ---------------------------------------------------------------------------
@@ -359,6 +456,50 @@ printf '{"hooks": []}\n' > "$R6/.claude/settings.local.json"
 out=$("$JEV" install "$R6" --yes 2>&1); rc=$?
 [ "$rc" = "1" ] && ok "install refuses a \"hooks\" key that is an array, not an object" \
                || bad "install accepted a malformed hooks key (exit $rc)"
+
+# ---------------------------------------------------------------------------
+echo
+echo "  6b. SOMEBODY ELSE'S HOOK THAT SHARES OUR FILENAME (W5)"
+# ---------------------------------------------------------------------------
+# Ownership used to be `e["script"] in command` -- a SUBSTRING test. A stranger
+# with their own /my/own/hooks/agent_route_actuator.sh on matcher `Write` had it
+# DELETED by `jev install`, and install's output never mentioned it: it survived
+# only in the backup. Low likelihood, and silent data loss in somebody else's
+# repository, which is the category that matters most for a tool people install.
+R8="$SANDBOX/r8"; mkdir -p "$R8/.claude"
+LOOKALIKE="/my/own/hooks/agent_route_actuator.sh --mine"
+cat > "$R8/.claude/settings.local.json" <<EOF
+{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Write",
+        "hooks": [ { "type": "command", "command": "$LOOKALIKE" } ] }
+    ]
+  }
+}
+EOF
+out=$("$JEV" install "$R8" --yes 2>&1); rc=$?
+[ "$rc" = "0" ] && ok "install into a repo holding a lookalike exits 0" \
+                || bad "install exit $rc"
+grep -q -- "--mine" "$R8/.claude/settings.local.json" \
+  && ok "THE CLAIM: a foreign handler that merely NAMES one of our scripts survives install" \
+  || bad "SILENT DATA LOSS: install deleted somebody else's hook that shares our filename"
+case "$out" in
+  *"NOT OURS"*) ok "...and install says so OUT LOUD rather than leaving it to the backup" ;;
+  *) bad "install noticed nothing: a near-miss on ownership was not reported" ;;
+esac
+case "$out" in
+  *"REPLACING"*) bad "install claimed to replace a handler that is not ours" ;;
+  *) ok "and does not claim it as a stale entry of ours" ;;
+esac
+out=$("$JEV" uninstall "$R8" --yes 2>&1); rc=$?
+[ "$rc" = "0" ] && ok "uninstall of that repo exits 0" || bad "uninstall exit $rc: $out"
+grep -q -- "--mine" "$R8/.claude/settings.local.json" \
+  && ok "and the lookalike survives uninstall too -- it was never ours to remove" \
+  || bad "uninstall deleted somebody else's lookalike hook"
+grep -q "$REPOROOT/hooks/agent_route_actuator.sh" "$R8/.claude/settings.local.json" \
+  && bad "our own entry survived the uninstall" \
+  || ok "while our own entry, matched by its EXACT absolute path, is gone"
 
 # ---------------------------------------------------------------------------
 echo

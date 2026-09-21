@@ -41,6 +41,29 @@ def resolve_jev_home(environ: dict[str, str] | None = None) -> tuple[Path, str]:
     declared = env.get("JEV_HOME") or ""
     if declared:
         p = Path(declared)
+        # W5. A RELATIVE $JEV_HOME IS REJECTED, NOT NORMALISED.
+        #
+        # This half calls `.resolve()`, which silently makes a relative value
+        # absolute against the current working directory. The bash half uses
+        # the value VERBATIM after an `is_dir` test and does not. So
+        # `JEV_HOME=.` gives two different answers in the two readers, and in
+        # bash it makes every jev asset cwd-relative -- including
+        # `$JEV_HOME/.jev-disabled`, the global kill switch. A kill switch
+        # whose path depends on where the caller happened to be standing is
+        # precisely the failure the switch block's own comment says must never
+        # happen, and precisely the shape of JEV-51.
+        #
+        # There is exactly one value of $JEV_HOME that means the same thing to
+        # both readers: an absolute one. Anything else is an error, loudly,
+        # rather than a quiet disagreement.
+        if not p.is_absolute():
+            raise RuntimeError(
+                f"JEV_HOME must be an ABSOLUTE path, and it is {declared!r}. "
+                "A relative JEV_HOME resolves against the current working "
+                "directory in Python and is used verbatim by the bash hooks, "
+                "so the two readers disagree -- and the global kill switch at "
+                "$JEV_HOME/.jev-disabled stops naming a fixed file. Fix it "
+                f"with:  export JEV_HOME=\"$(cd '{declared}' && pwd -P)\"")
         if p.is_dir():
             return p.resolve(), "env"
     return Path(__file__).resolve().parent.parent, "self"
