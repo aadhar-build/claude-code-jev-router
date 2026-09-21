@@ -45,7 +45,10 @@ ISSUES = Path(os.environ.get("JEV_ISSUES_MD") or (ROOT / "ISSUES.md"))
 TICKET_RE = re.compile(r"^## (JEV-\d+[ab]?):", re.M)
 STATUS_RE = re.compile(r"^\*{0,2}Status:\*{0,2}\s*(.+)$", re.M)
 BLOCKED_RE = re.compile(r"^\*{0,2}Blocked by:\*{0,2}\s*(.+?)(?=\n\n)", re.M | re.S)
-WAVE_ROW_RE = re.compile(r"^\|\s*\*{0,2}(A\d|B\d)\*{0,2}\s*\|(.+?)\|", re.M)
+# W-waves are the POST-PIVOT workstreams (SPEC.md, 2026-09-21); A/B waves are
+# the superseded measurement programme, retained only because tickets still
+# reference them by name. Both are parsed so a ticket parked in either is seen.
+WAVE_ROW_RE = re.compile(r"^\|\s*\*{0,2}(A\d|B\d|W\d)\*{0,2}\s*\|(.+?)\|", re.M)
 # a JEV reference inside a blocker line, ignoring ones struck through as cleared
 JEV_REF_RE = re.compile(r"JEV-(\d+[ab]?)")
 
@@ -54,8 +57,14 @@ VALID_STATUSES = ("ready-for-agent", "in-progress", "blocked", "done", "in-revie
 # Wave ordering. Everything in Phase A runs before the gate; everything in
 # Phase B runs after it.
 WAVE_ORDER = {w: i for i, w in enumerate(
-    ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4"]
+    ["W0", "W1", "W2", "W3", "W4", "W5", "W6",
+     "W7",
+     "A1", "A2", "A3", "A4", "A5", "A6", "A7", "B1", "B2", "B3", "B4"]
 )}
+# The two schemes are not comparable -- a W-wave and an A-wave are different
+# programmes, not earlier and later steps of one. Ordering is only ever checked
+# WITHIN a scheme; a cross-scheme edge is skipped rather than silently ranked.
+SCHEME = lambda w: w[0]  # noqa: E731
 
 
 def _sections(text: str) -> dict[str, str]:
@@ -199,6 +208,8 @@ class TestTheBoardIsInternallyConsistent(unittest.TestCase):
                 dep_wave = self.waves.get(dep)
                 if dep_wave is None:
                     continue
+                if SCHEME(dep_wave) != SCHEME(wave):
+                    continue  # different programmes; not orderable
                 if WAVE_ORDER[dep_wave] > WAVE_ORDER[wave]:
                     violations.append(
                         f"{name} is in {wave} but depends on {dep} in {dep_wave}"

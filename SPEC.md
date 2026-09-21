@@ -135,9 +135,20 @@ These are hard constraints. A design that violates one is wrong, not a tradeoff.
    paraphrases, summarises or regenerates. Surviving bytes are identical to the
    originals. File paths, error strings, diffs and stack traces are preserved
    exactly. This single property is what makes compaction the low-risk win.
-3. **Opt-in, per project, reversible in one command.** `jev install` writes
-   `./.claude/settings.local.json` in a repo you choose. `jev uninstall` removes
-   it. **Nothing is ever written to `~/.claude/settings.json`.**
+3. **Opt-in, per project, reversible in one command.** `jev install` **merges
+   into** `./.claude/settings.local.json` in a repo you choose — it does not
+   write the file, and that distinction is load-bearing: the file holds the
+   user's other settings, so removal is a surgical edit rather than a move.
+   `jev uninstall` takes it out. **Nothing is ever written to
+   `~/.claude/settings.json`**, and a test asserts no write verb in the
+   installer is even *aimed* at `$HOME`.
+
+   **Teardown is therefore tiered and names its tier**: *Tier A,
+   byte-reversible* when the file is untouched since install (the bytes are
+   restored and the sha256 verified); *Tier B, structurally verified and
+   explicitly weaker* when the user has edited it since — we edit, then verify
+   three ways against the file re-read from disk, and Tier B never claims
+   byte-reversibility.
 4. **One kill switch, honoured on line one** of every hook, tested not assumed.
 5. **Hard latency budget on the synchronous path.** Anything that blocks a tool
    call has a timeout and a fail-open default. Budget is stated per surface and

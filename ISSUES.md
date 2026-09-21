@@ -40,9 +40,10 @@ describes remain readable where tickets reference them.
 | **W1** | **The static floor.** `PreToolUse` on `Agent`, `subagent_type → tier` map, **zero Jev calls, zero added latency**. The first shippable thing, and the baseline Jev must beat | in progress |
 | **W2** | **Safe install + teardown**, opt-in per project. Must work *before* the router is armed | not started |
 | **W3** | **The accuracy gate** — per-task pass/fail, blinded by construction (JEV-29 + JEV-36) | not started |
-| **W4** | **Jev enters**, aimed at the `general-purpose` residue (65–79%, disputed — see the corpus-size note below). **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3 |
+| **W4** | **Jev enters**, aimed at the `general-purpose` residue (65–79%, disputed — see the corpus-size note below). **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3, and JEV-57 |
+| **W5** | **58** — label `data/labels/` so the accuracy gate can clear Class 1 at all; **57** (the ledger needs a `project` field); **59** (baseline snapshots still carry the defective costing rule) | The follow-ups this wave handed over. 58 is the **cheapest high-value item on the board**: without labels the accuracy gate cannot clear Class 1 at all. 57 blocks W4 |
 | **W5** | **Context reduction.** Must clear the +337-token / +557ms bar, so it fires only on large payloads | not started |
-| **W6** | **Operate** — canary on a schedule, latency SLO, weekly cost report | not started |
+| **W7** | **Operate** — canary on a schedule, latency SLO, weekly cost report | not started |
 
 ## Four operator decisions, 2026-09-21
 
@@ -182,9 +183,11 @@ A single ticket, done by one agent, no parallelism:
 6. Only then: remove `.jev-disabled`, start the worker, register the first
    surface.
 
-Step 1's "from a clean checkout" is **currently impossible** and JEV-56 exists to
-resolve it: `tests/reversibility.sh` needs `.claude/settings.local.json`, which
-is gitignored by design, so four of its gates fail on any fresh clone.
+~~Step 1's "from a clean checkout" is currently impossible~~ — **RESOLVED
+2026-09-21 by JEV-56 (`0f5901f`).** `tests/test_clean_checkout.sh` builds a real
+clean checkout and runs the whole reversibility gate inside it: 45/45 in FIXTURE
+mode. Step 1 should now point at that test. **Step 5 (the pre-registration
+amendment) is dropped entirely** — the pre-registration is retired.
 
 ### Phase B — live
 
@@ -1120,6 +1123,27 @@ routable.
 
 **PIVOT TRIAGE 2026-09-21 — REPURPOSE.** PROMOTED. From 'primary quality measure for the A/B' to THE ACCURACY GATE on every optimization. Must become per-task pass/fail
 
+**BUILT 2026-09-21 in `df79e67` (W3). This ticket's rubric is superseded:** it
+specifies a 1–5, four-dimension rubric graded in one batch; `SPEC.md` §6
+specifies three tiers with 1–10 dimensions blocking at |Δ| ≥ 0.75. **The code
+follows SPEC §6.** The self-preference check is deferred with the live judge.
+
+**The design hole W3 found in its own first cut, recorded because it would have
+made this gate decorative:** pooling κ and band-flip across both questions meant
+a change that turns `destructive` into pure noise while leaving `needs_review`
+byte-identical scored κ 0.89 / 4.5% flips — **a PASS and a WARN on precisely the
+failure this gate exists to catch.** Now scored per question, blocked on the
+worst, with a test constructing that exact asymmetric case.
+
+**What it honestly cannot do, and says so in its own output:** Class 1 **exits 1
+on this repository today** because `data/labels/` is empty, so AUC is
+`NOT_EVALUABLE` — a byte-identical replay with κ=1.0 still returns "could not
+run", and a test pins that so nobody "fixes" it with a default. **Adding labels
+is the cheapest high-value improvement now available.** Class 2 at n=12/k=3
+catches a deterministic one-task regression always, but a regression breaking
+one task 70% of the time **only 34% of the time** — and the shipped suite
+contains such a flaky task with a test asserting the gate *passes* it.
+
 **Status:** ready-for-agent
 **Labels:** science, blocking
 **Blocked by:** None — and it blocks JEV-23
@@ -1627,6 +1651,28 @@ fail-open, kill switch, GATE 4 — all apply, plus two written for this one
 ## JEV-36: A/B outcome measurement — both primaries, per delegated task
 
 **PIVOT TRIAGE 2026-09-21 — KEEP.** PROMOTED. How you would ever know it worked. Cannot come from PostToolUse - needs SubagentStop
+
+**BUILT 2026-09-21 in `df79e67` (W3), and two things in this ticket are now
+stale:**
+
+1. **`SubagentStop` is unnecessary.** This ticket offered "the subagent
+   transcript **or** a `SubagentStop` hook". The transcript route is verified
+   and is the better one: `<session>/subagents/agent-<id>.jsonl` joins to W1's
+   assignment ledger via `meta.json`'s `toolUseId` ↔ `tool_use_id`, a clean key
+   a hook would have had to reconstruct. **No hook is needed for outcomes.**
+2. **"Agreement between Jev's assignment and a static rule, computed offline"
+   is overtaken.** W1 shipped the static rule as a live baseline **arm**, so
+   that comparison is an A/B now, not an offline statistic.
+
+**The `PostToolUse` prohibition is confirmed empirically, not assumed**: on
+session `4ba49645`, **30 of 30** delegations returned `async_launched` and **0
+of 30** tool results carried any usage-bearing field.
+
+**And the duration split turned out to be a 530× effect** — median task
+duration **794.6s** against median **blocking** duration **1.5s**, every
+delegation `requestShape: background`. A background subagent could be made twice
+as fast and the human's wait would not move. This is independent confirmation
+that "reduce execution time" was right to retire as a headline claim.
 
 **Status:** blocked
 **Labels:** analysis, science, blocking
@@ -3354,6 +3400,16 @@ than a footnote.
 
 **PIVOT TRIAGE 2026-09-21 — KEEP.** PROMOTED TO P0. You cannot distribute a tool whose suite cannot go green on a clean checkout
 
+**RESOLVED 2026-09-21 in `0f5901f` — and NOT the way this ticket's own checkbox
+specified.** The checkbox said "commit `config/settings.local.example.json` or
+equivalent". That was rejected: a hand-copied example file is exactly the drift
+the actuator-fixture idiom exists to prevent. Instead the fixture is
+**materialised by running the real `jev install`** into the gate's sandbox from
+the committed `config/registration.json` — which tests the installer inside the
+gate for free. Verified **44/44 LIVE and 45/45 FIXTURE on a genuine clean
+checkout**, with `tests/test_clean_checkout.sh` keeping it that way by building
+one and running the whole gate inside it
+
 Status: ready-for-agent
 Labels: defect, gate, safety
 Blocked by: none. **It blocks JEV-52 step 1 as that step is currently worded.**
@@ -3432,3 +3488,80 @@ claim than `docs/REVERSIBILITY.md` implies.
 **Blocks nothing but the gate.** Every other wave is unaffected; this only has to
 land before JEV-52 runs.
 
+
+---
+
+## JEV-57: the assignment ledger cannot tell one repo from another
+
+Status: ready-for-agent
+Labels: defect, schema, blocking-W4
+Blocked by: none. **Handed over by W2 (`0f5901f`); owned by W1's code.**
+
+**Found 2026-09-21** when the ledger moved to `$JEV_HOME`.
+
+`jev` is installed **per project**, but the assignment ledger now lives at
+`$JEV_HOME/data/agent_route/` — one directory, shared by every repo jev is
+installed in. The row schema `agent-route-assignment-v1` **has no `project`
+field**, so `assignment_ledger.verify()` cannot partition by repo, and rows from
+unrelated codebases interleave in one stream.
+
+**Why this blocks W4 rather than being tidiness.** Every cost and outcome claim
+is per delegated task, and a task belongs to a repo. Pooling two repos' tasks
+into one rate is the same class of error as JEV-32 (scoring rows against a
+config they did not run under) — a confound that looks like a result.
+
+- [ ] Add `project` to the row schema, sourced from the resolved project dir at
+      decision time, not inferred later
+- [ ] `verify()` partitions by it and refuses to aggregate across projects
+      unless asked explicitly
+- [ ] Decide whether existing rows are migrated or fenced behind a schema
+      version — do not silently backfill a field the rows never carried
+
+---
+
+## JEV-58: `data/labels/` is empty, and it is what caps the accuracy gate at "could not run"
+
+Status: ready-for-agent
+Labels: data, gate, cheap-high-value
+Blocked by: none.
+
+**W3's accuracy gate (`df79e67`) exits 1 — "could not run" — on this repository
+today**, even on a byte-identical replay with zero band-flips and κ = 1.0. The
+reason is not a code gap: `data/labels/` is empty, so AUC is `NOT_EVALUABLE`,
+and the gate refuses to report a pass it cannot justify.
+
+That is the gate behaving correctly, and a test pins it so nobody "fixes" it by
+adding a default. But it means **Class 1 — the cheap half, the one meant to run
+on every change — currently cannot clear.**
+
+**This is the highest-value cheap item on the board.** The corpus (578 captures
+/ 2,095 rows) already exists; what is missing is ground truth on some of it.
+
+- [ ] Decide the labelling unit and how many are needed for AUC to be meaningful
+- [ ] Label, recording who labelled and against what written criterion
+- [ ] Re-run Class 1 and confirm it reaches exit 0 on an unchanged replay
+- [ ] State the inter-rater position honestly if there is only one rater
+
+---
+
+## JEV-59: `sessions.jsonl` and `manifest.json` carry costs from the defective rule
+
+Status: ready-for-agent
+Labels: defect, data, schema
+Blocked by: none. **Follow-up to `98979a7`.**
+
+The cost-rule fix corrected `delegation-pre-rule-v1.json` via a companion, but
+**`data/baseline/sessions.jsonl` and `manifest.json` still carry costs computed
+under the old first-copy rule** — the one that understated delegated spend by
+45.2%.
+
+**They will not self-correct.** Both are **fingerprint-idempotent**: a
+re-snapshot appends nothing for an unchanged session, so simply re-running the
+baseline leaves the wrong numbers in place indefinitely, looking current.
+
+- [ ] Add a `costing_rule` field to the row schema so a row says which rule
+      produced it — this is a schema change to a committed append-only stream
+      and is the reason this is a ticket and not a footnote
+- [ ] One-off forced re-snapshot under the corrected rule
+- [ ] Anything quoting the manifest's totals (the "34% addressable" figure came
+      from here) re-derived
