@@ -26,6 +26,8 @@ than a general wish for coverage:
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import inspect
 import io
 import json
 import shutil
@@ -452,16 +454,85 @@ class TestClass2(unittest.TestCase):
 
         A diff carrying `# routed to claude-haiku-4-5`, or a prompt naming the
         `sonnet` alias, identifies the tier and therefore the arm just as well.
-        The token set is read from `config/tiers.json` rather than hardcoded,
-        so a tier added there is covered without anyone remembering this file.
+        A tier IN USE is expanded through `config/tiers.json` into its alias
+        and its resolved model prefix, so naming the model is caught too.
         """
-        tokens = fx.tier_tokens()
+        tokens = fx.tier_tokens(["haiku45"])
+        self.assertIn("haiku45", tokens)
         self.assertIn("haiku", tokens)
         self.assertIn("claude-haiku-4-5", tokens)
         found = fx.blind_check(
             {"task": "t", "file": "f", "diff": "+# routed to claude-haiku-4-5"},
-            fx.blind_tokens("baseline", "treatment"))
+            fx.blind_tokens("baseline", "treatment", tiers=["haiku45"]))
         self.assertIn("claude-haiku-4-5", found)
+
+    def test_a_tier_that_is_not_in_use_does_not_contribute_tokens(self):
+        """W5 FALSE POSITIVE. `tier_tokens()` used to enumerate every tier in
+        `config/tiers.json` whether or not the run touched it, so prose naming
+        a model the run never used tripped the blind and forced exit 1."""
+        tokens = fx.tier_tokens(["cheap"])
+        for absent in ("opus", "haiku", "sonnet", "claude-opus-5"):
+            self.assertNotIn(absent, tokens)
+
+    def test_the_tiers_actually_in_the_fixtures_are_blind_tokens(self):
+        """W5 FALSE NEGATIVE, and the sharp one.
+
+        The tier names these fixtures record are `cheap` and `frontier`.
+        Neither appears in `config/tiers.json`, so under the old hardcoded
+        list NEITHER was ever a token: a diff reading "# cheap tier" passed
+        the blind check cleanly. The check was guarding names that were not in
+        play and ignoring the two that were.
+        """
+        report = self.run_suite()
+        self.assertEqual(report.tiers_in_use, ["cheap", "frontier"])
+        tokens = fx.blind_tokens("baseline", "treatment",
+                                 tiers=report.tiers_in_use)
+        self.assertIn("cheap", tokens)
+        self.assertIn("frontier", tokens)
+        found = fx.blind_check(
+            {"task": "t", "file": "f", "diff": "+# routed to the cheap tier"},
+            tokens)
+        self.assertEqual(found, ["cheap"])
+
+    def test_a_cheap_tier_leak_in_a_fixture_is_caught_end_to_end(self):
+        """The false negative, proven through the whole gate rather than on
+        the token list alone: a planted `cheap` leak must be exit 1."""
+        path = self.suite_dir / "recorded" / "treatment" / "clamp-probability" / "0.json"
+        blob = json.loads(path.read_text())
+        blob["diff"] += "+# generated on the cheap tier\n"
+        path.write_text(json.dumps(blob))
+        report = self.run_suite(judge=fx.RecordedJudge(self.suite_dir))
+        self.assertTrue(report.blind_failures)
+        self.assertIn("cheap", report.blind_failures[0])
+        self.assertEqual(report.exit_code, gate.EXIT_COULD_NOT_RUN)
+
+    def test_the_blind_check_matches_whole_words_and_not_substrings(self):
+        """W5 FALSE POSITIVE. Substring matching flagged any diff touching a
+        variable named `control`/`controller`, and any prose containing
+        `haikus`. It erred safe -- a spurious blind failure is exit 1, not a
+        false pass -- but a guard that fires on ordinary code is a guard that
+        gets switched off, and on real mined tasks it would have produced
+        COULD-NOT-RUNs with nothing to do with the blind.
+        """
+        tokens = fx.blind_tokens("baseline", "treatment", tiers=["haiku45"])
+        for benign in ("+ self.controller = Controller()",
+                       "+ control_flow_graph = build()",
+                       "+# it wrote haikus about baselines",
+                       "+ warm=True"):
+            self.assertEqual(
+                fx.blind_check({"task": "t", "file": "f", "diff": benign}, tokens),
+                [], benign)
+
+    def test_word_boundaries_do_not_weaken_the_checks_that_must_still_fire(self):
+        """The boundary is applied only to word-character ends, so `arm=` still
+        matches `arm=treatment` and a DATED model id is still caught."""
+        tokens = fx.blind_tokens("baseline", "treatment", tiers=["haiku45"])
+        self.assertIn("arm=", fx.blind_check(
+            {"task": "t", "file": "f", "diff": "+# arm=treatment"}, tokens))
+        self.assertIn("claude-haiku-4-5", fx.blind_check(
+            {"task": "t", "file": "f", "diff": "+# claude-haiku-4-5-20251001"}, tokens))
+        self.assertIn("baseline", fx.blind_check(
+            {"task": "t", "file": "f", "diff": "+# the BASELINE run"}, tokens))
 
     def test_the_shipped_fixture_payloads_pass_the_blind_check(self):
         suite = self.load()
@@ -593,7 +664,289 @@ class TestClass2(unittest.TestCase):
     def test_the_live_judge_refuses_without_making_a_call(self):
         with self.assertRaises(gate.CouldNotRun):
             fx.LiveJudge(armed=False).score({"task": "", "file": "", "diff": ""},
-                                            task_id="t", arm="a", seed=0)
+                                            ref="0" * 32)
+
+
+# ---------------------------------------------------------------------------
+# W5 audit: the blind is a property of the INTERFACE, not of one judge's
+# good behaviour. Three ways the arm can reach a judge, and all three closed.
+# ---------------------------------------------------------------------------
+
+class SpyJudge:
+    """Records everything it is handed. It is the adversary the blind is for."""
+    enabled = True
+
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def score(self, payload, **kwargs):
+        self.calls.append({"payload": payload, **kwargs})
+        return fx.JudgeVerdict()
+
+
+class SpyExecutor:
+    """A real executor that records the order it was driven in."""
+
+    def __init__(self, root: Path):
+        self.inner = fx.RecordedExecutor(root)
+        self.order: list[tuple[str, str, int]] = []
+        self.executions: list[fx.Execution] = []
+
+    def run(self, task, arm, seed):
+        self.order.append((task.task_id, arm, seed))
+        execution = self.inner.run(task, arm, seed)
+        self.executions.append(execution)
+        return execution
+
+
+class TestBlindIsStructural(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jev-w5-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.suite_dir = self.tmp / "suite-v1"
+        shutil.copytree(SUITE, self.suite_dir)
+
+    def run_suite(self, **kwargs):
+        return fx.run_class2(fx.load_suite(self.suite_dir),
+                             kwargs.pop("executor", None) or fx.RecordedExecutor(self.suite_dir),
+                             baseline_arm="baseline", treatment_arm="treatment",
+                             **kwargs)
+
+    # -- defect 1: the arm label at the interface ---------------------------
+
+    def test_the_judge_protocol_does_not_take_an_arm(self):
+        """The regression test for the defect itself.
+
+        `Judge.score` used to require `(payload, *, task_id, arm, seed)`. A
+        clean payload handed over beside `arm="treatment"` is not a blind; it
+        is one implementation's discipline. If anyone re-adds the parameter,
+        this fails.
+        """
+        params = inspect.signature(fx.Judge.score).parameters
+        self.assertEqual([p for p in params if p != "self"], ["payload", "ref"])
+        for name in ("arm", "task_id", "seed"):
+            self.assertNotIn(name, params)
+
+    def test_no_judge_implementation_accepts_an_arm(self):
+        for cls in (fx.NoJudge, fx.RecordedJudge, fx.LiveJudge):
+            params = inspect.signature(cls.score).parameters
+            self.assertNotIn("arm", params, cls.__name__)
+
+    def test_a_spy_judge_never_receives_either_arm_name_in_any_argument(self):
+        """The end-to-end version: drive a full run and inspect every single
+        thing the judge was handed."""
+        spy = SpyJudge()
+        self.run_suite(judge=spy)
+        self.assertEqual(len(spy.calls), 72)
+        for call in spy.calls:
+            blob = json.dumps(call)
+            for leak in ("baseline", "treatment", "cheap", "frontier"):
+                self.assertNotIn(leak, blob)
+            self.assertEqual(sorted(call), ["payload", "ref"])
+            self.assertRegex(call["ref"], r"^[0-9a-f]{32}$")
+
+    def test_the_ref_is_opaque_and_not_a_relabelled_arm(self):
+        """A ref must not be decodable by guessing the arm names, which is all
+        an unsalted hash of (task, arm, seed) would take."""
+        spy = SpyJudge()
+        self.run_suite(judge=spy)
+        refs = {c["ref"] for c in spy.calls}
+        self.assertEqual(len(refs), 72)          # no collisions
+        unsalted = {
+            hashlib.sha256(f"{t}\x00{a}\x00{s}".encode()).hexdigest()[:32]
+            for t in [x.task_id for x in fx.load_suite(self.suite_dir).tasks]
+            for a in ("baseline", "treatment") for s in range(3)}
+        self.assertEqual(refs & unsalted, set())
+
+    def test_the_salt_is_fresh_per_run_so_refs_do_not_carry_across_runs(self):
+        a, b = SpyJudge(), SpyJudge()
+        self.run_suite(judge=a, order_seed=7)
+        self.run_suite(judge=b, order_seed=7)
+        # Same order_seed, so the two runs judged the SAME units in the SAME
+        # sequence -- that is the control for the assertion underneath.
+        self.assertEqual([c["payload"]["task"] for c in a.calls],
+                         [c["payload"]["task"] for c in b.calls])
+        # ...and yet no ref repeats, because the salt is fresh per run.
+        self.assertEqual(set(c["ref"] for c in a.calls) &
+                         set(c["ref"] for c in b.calls), set())
+
+    def test_the_order_seed_is_recorded_but_the_salt_is_not(self):
+        report = self.run_suite(order_seed=99)
+        self.assertEqual(report.order_seed, 99)
+        blob = json.dumps(report, default=lambda o: getattr(o, "__dict__", str(o)))
+        self.assertNotIn("salt", blob)
+
+    def test_the_live_judge_has_no_way_to_receive_the_decoder(self):
+        """`RecordedJudge.bind` is the decoder. Its ABSENCE on LiveJudge is
+        the blind, and `run_class2` type-checks rather than duck-types so a
+        live judge that grew a `bind` could not acquire the salt by accident.
+        """
+        self.assertFalse(hasattr(fx.LiveJudge(), "bind"))
+        self.assertFalse(hasattr(fx.NoJudge(), "bind"))
+        self.assertTrue(hasattr(fx.RecordedJudge(self.suite_dir), "bind"))
+        source = inspect.getsource(fx.run_class2)
+        self.assertIn("isinstance(judge, RecordedJudge)", source)
+
+    def test_the_recorded_judge_resolves_refs_through_an_index_it_scans(self):
+        """The fixtures did not move: the index is built by walking the same
+        recorded/judge/<arm>/<task>/<seed>.json tree that was always there."""
+        judge = fx.RecordedJudge(self.suite_dir)
+        mint = fx.RefMint()
+        judge.bind(mint)
+        self.assertEqual(len(judge._index), 72)
+        verdict = judge.score({"task": "t", "file": "f", "diff": "+x"},
+                              ref=mint.ref("clamp-probability", "baseline", 0))
+        self.assertEqual(verdict.dimensions["correctness"], 8.0)
+
+    def test_an_unknown_ref_is_a_harness_failure_and_leaks_nothing(self):
+        judge = fx.RecordedJudge(self.suite_dir)
+        judge.bind(fx.RefMint())
+        with self.assertRaises(fx.HarnessFailure) as ctx:
+            judge.score({}, ref="f" * 32)
+        message = str(ctx.exception)
+        self.assertIn("f" * 32, message)
+        # An error message is not a side channel.
+        for leak in ("baseline", "treatment", "cheap", "frontier"):
+            self.assertNotIn(leak, message)
+
+    def test_an_unbound_recorded_judge_refuses_rather_than_guessing(self):
+        with self.assertRaises(fx.HarnessFailure):
+            fx.RecordedJudge(self.suite_dir).score({}, ref="0" * 32)
+
+    # -- defect 2: task order is part of the blind --------------------------
+
+    def test_task_order_is_randomised_and_the_arms_interleave(self):
+        """The defect: `run_class2` ran baseline fully then treatment fully,
+        so the judge saw BBBTTTBBBTTT... and could learn the arm by counting
+        without reading a single token. JEV-29's 'randomise task order' box
+        was unticked and it was unticked truthfully.
+        """
+        spy = SpyExecutor(self.suite_dir)
+        report = self.run_suite(executor=spy, order_seed=12345)
+        self.assertEqual(len(spy.order), 72)
+
+        # Not the old block structure.
+        arms = "".join("B" if a == "baseline" else "T" for _, a, _ in spy.order)
+        self.assertNotEqual(arms, "BBBTTT" * 12)
+
+        # Tasks are not walked in manifest order either.
+        suite_order = [t.task_id for t in fx.load_suite(self.suite_dir).tasks]
+        first_seen = []
+        for task_id, _, _ in spy.order:
+            if task_id not in first_seen:
+                first_seen.append(task_id)
+        self.assertNotEqual(first_seen, suite_order)
+
+        # And every unit still ran exactly once.
+        self.assertEqual(len(set(spy.order)), 72)
+        self.assertEqual(report.execution_order, spy.order)
+
+    def test_no_task_runs_its_whole_baseline_block_before_its_treatment_block(self):
+        """The property that actually matters, stated directly: for at least
+        one task, a treatment seed precedes a baseline seed."""
+        spy = SpyExecutor(self.suite_dir)
+        self.run_suite(executor=spy, order_seed=2024)
+        positions: dict[str, list[tuple[int, str]]] = {}
+        for i, (task_id, arm, _) in enumerate(spy.order):
+            positions.setdefault(task_id, []).append((i, arm))
+        interleaved = [t for t, seq in positions.items()
+                       if [a for _, a in seq] != ["baseline"] * 3 + ["treatment"] * 3]
+        self.assertGreater(len(interleaved), 6, "arms are still blocked per task")
+
+    def test_the_judge_is_driven_in_the_same_shuffled_order_as_the_executor(self):
+        """Randomising the executor alone would fix NOTHING: the executor
+        legitimately knows the arm. It is the JUDGE's call sequence that has
+        to be unpredictable.
+
+        This is the regression test for the subtle half of defect 2. Splitting
+        `run_class2` into execute-then-judge invites judging in suite order,
+        which would leave the judge seeing the same regular structure it always
+        saw while the executor alone got shuffled -- a fix that fixes nothing
+        and looks like it worked. So: compare the judge's actual call sequence
+        to the executor's, by payload.
+        """
+        spy_exec = SpyExecutor(self.suite_dir)
+        spy_judge = SpyJudge()
+        report = self.run_suite(executor=spy_exec, judge=spy_judge, order_seed=31337)
+
+        suite = fx.load_suite(self.suite_dir)
+        prompt_of = {t.task_id: t.prompt for t in suite.tasks}
+        self.assertEqual(len(set(prompt_of.values())), len(suite.tasks),
+                         "prompts must be unique for this test to identify tasks")
+
+        # The judge's Nth payload must be the executor's Nth unit. The ref is
+        # opaque by design, so the payload's task prompt is the join.
+        judge_tasks = [c["payload"]["task"] for c in spy_judge.calls]
+        executor_tasks = [prompt_of[task_id] for task_id, _, _ in spy_exec.order]
+        self.assertEqual(judge_tasks, executor_tasks)
+
+        # And that sequence must not be suite order (each task 6x in a block),
+        # which is what judging in phase 3 would have produced.
+        suite_order_tasks = [prompt_of[t.task_id] for t in suite.tasks for _ in range(6)]
+        self.assertNotEqual(judge_tasks, suite_order_tasks)
+
+        # The diffs travel with them: the judge sees the execution that was
+        # actually run for that unit, not a re-derived one.
+        judge_diffs = [c["payload"]["diff"] for c in spy_judge.calls]
+        self.assertEqual(judge_diffs, [e.diff for e in spy_exec.executions])
+
+        self.assertEqual(len(set(c["ref"] for c in spy_judge.calls)), 72)
+        self.assertEqual(report.execution_order, spy_exec.order)
+
+    def test_the_judge_does_not_see_a_per_task_block_of_six(self):
+        """Stated as the property rather than as an inequality: if the judge
+        were driven in suite order, its first six payloads would all be the
+        same task. They must not be."""
+        spy_judge = SpyJudge()
+        self.run_suite(judge=spy_judge, order_seed=777)
+        first_six = [c["payload"]["task"] for c in spy_judge.calls[:6]]
+        self.assertGreater(len(set(first_six)), 1)
+
+    def test_the_same_order_seed_reproduces_the_run_exactly(self):
+        a, b = SpyExecutor(self.suite_dir), SpyExecutor(self.suite_dir)
+        self.run_suite(executor=a, order_seed=4242)
+        self.run_suite(executor=b, order_seed=4242)
+        self.assertEqual(a.order, b.order)
+
+    def test_a_different_order_seed_gives_a_different_order(self):
+        a, b = SpyExecutor(self.suite_dir), SpyExecutor(self.suite_dir)
+        self.run_suite(executor=a, order_seed=1)
+        self.run_suite(executor=b, order_seed=2)
+        self.assertNotEqual(a.order, b.order)
+
+    def test_an_omitted_order_seed_is_random_and_still_recorded(self):
+        seeds = {self.run_suite().order_seed for _ in range(5)}
+        self.assertGreater(len(seeds), 1)
+
+    def test_the_report_is_deterministic_even_though_the_order_is_not(self):
+        """Randomising what the judge sees is the point. Randomising the
+        OUTPUT would only make the gate harder to read."""
+        a = self.run_suite(order_seed=11, judge=fx.RecordedJudge(self.suite_dir))
+        b = self.run_suite(order_seed=99, judge=fx.RecordedJudge(self.suite_dir))
+        self.assertEqual([o.task_id for o in a.outcomes],
+                         [o.task_id for o in b.outcomes])
+        self.assertEqual([o.baseline_pass for o in a.outcomes],
+                         [o.baseline_pass for o in b.outcomes])
+        self.assertEqual(a.cost_by_tier, b.cost_by_tier)
+        self.assertEqual(a.attrition_by_tier, b.attrition_by_tier)
+        self.assertEqual([o.dimension_delta for o in a.outcomes],
+                         [o.dimension_delta for o in b.outcomes])
+
+    def test_the_order_seed_is_rendered_so_a_run_can_be_reproduced(self):
+        text = fx.render_class2(self.run_suite(order_seed=8675309))
+        self.assertIn("8675309", text)
+        self.assertIn("RANDOMISED", text)
+        self.assertIn("--order-seed", text)
+
+    def test_the_duration_medians_each_carry_their_own_n(self):
+        report = self.run_suite()
+        for arm in ("baseline", "treatment"):
+            self.assertIn("n_task", report.durations[arm])
+            self.assertIn("n_blocking", report.durations[arm])
+        text = fx.render_class2(report)
+        self.assertIn("task_s", text)
+        self.assertIn("blocking_s", text)
 
 
 # ---------------------------------------------------------------------------
@@ -847,15 +1200,16 @@ class TestOutcomes(unittest.TestCase):
         self.assertTrue(blocking["toolu_A"].async_launched)
 
         outcomes = so.read_session_subagents(self.session)
-        rows = so.join_outcomes(
+        result = so.join_outcomes(
             [{"tool_use_id": "toolu_A", "tier": "cheap", "decision": "routed"}],
             outcomes, blocking)
+        rows = result.rows
         self.assertEqual(len(rows), 1)
         self.assertAlmostEqual(rows[0].task_duration_s, 540.0)
         self.assertAlmostEqual(rows[0].blocking_duration_s, 1.4, places=3)
         self.assertNotEqual(rows[0].task_duration_s, rows[0].blocking_duration_s)
         self.assertEqual(rows[0].request_shape, "background")
-        rendered = so.render_outcomes(rows)
+        rendered = so.render_outcomes(result)
         self.assertIn("task_s", rendered)
         self.assertIn("block_s", rendered)
 
@@ -875,13 +1229,13 @@ class TestOutcomes(unittest.TestCase):
     # -- requirement 8: attrition by tier -----------------------------------
 
     def test_an_assignment_with_no_transcript_is_attrition_not_a_zero(self):
-        rows = so.join_outcomes(
+        result = so.join_outcomes(
             [{"tool_use_id": "toolu_A", "tier": "cheap"},
              {"tool_use_id": "toolu_MISSING", "tier": "cheap"}],
             [], {})
-        self.assertEqual([r.outcome_found for r in rows], [False, False])
-        self.assertIn("no subagent transcript", rows[0].attrition_reason)
-        self.assertIn("ATTRITION", so.render_outcomes(rows))
+        self.assertEqual([r.outcome_found for r in result.rows], [False, False])
+        self.assertIn("no subagent transcript", result.rows[0].attrition_reason)
+        self.assertIn("ATTRITION", so.render_outcomes(result))
 
     def test_a_tier_that_fails_more_often_does_not_look_cheaper(self):
         """The mechanism JEV-36's last bullet exists to prevent.
@@ -905,14 +1259,197 @@ class TestOutcomes(unittest.TestCase):
         self.assertAlmostEqual(by_tier["cheap"]["cost_per_outcome"], 0.01)
         self.assertGreater(by_tier["cheap"]["cost_per_outcome"],
                            by_tier["cheap"]["cost_per_assignment"])
-        text = so.render_outcomes(rows)
+        text = so.render_outcomes(so.SessionOutcomes(rows=rows))
         self.assertIn("$/assigned", text)
         self.assertIn("$/outcome", text)
 
     def test_intention_to_treat_keeps_every_assigned_row(self):
         ledger = [{"tool_use_id": f"t{i}", "tier": "cheap"} for i in range(5)]
-        rows = so.join_outcomes(ledger, [], {})
-        self.assertEqual(len(rows), len(ledger))
+        result = so.join_outcomes(ledger, [], {})
+        self.assertEqual(len(result.rows), len(ledger))
+
+    # -- W5: the MIRROR of attrition ----------------------------------------
+
+    def test_a_transcript_with_no_assignment_is_a_named_category_not_a_drop(self):
+        """The W5 defect, in its smallest form.
+
+        A transcript that joins to no ledger row used to be read off disk and
+        discarded without a line of output. On the real 4ba49645 session that
+        was 3 transcripts and $3.93 -- 2.3% of delegated spend -- vanishing
+        while the same table printed an attrition rate of 0.00%.
+        """
+        self.write_subagent("orphan1", [
+            assistant_line("req1", "2026-09-20T10:00:00.000Z"),
+        ], {"agentType": "general-purpose", "toolUseId": "toolu_NESTED",
+            "spawnDepth": 2, "parentAgentId": "aparent1"})
+        outcomes = so.read_session_subagents(self.session)
+        result = so.join_outcomes([{"tool_use_id": "toolu_A", "tier": "cheap"}],
+                                  outcomes, {})
+        self.assertEqual(len(result.rows), 1)
+        self.assertEqual(len(result.unassigned), 1)
+        self.assertGreater(result.unassigned_cost_usd, 0.0)
+        self.assertAlmostEqual(result.total_cost_usd,
+                               result.assigned_cost_usd + result.unassigned_cost_usd)
+
+    def test_the_orphan_cost_is_rendered_with_its_share_and_its_reason(self):
+        self.write_subagent("orphan1", [
+            assistant_line("req1", "2026-09-20T10:00:00.000Z"),
+        ], {"agentType": "general-purpose", "toolUseId": "toolu_NESTED",
+            "spawnDepth": 2, "parentAgentId": "aparent1"})
+        result = so.join_outcomes([], so.read_session_subagents(self.session), {})
+        text = so.render_outcomes(result)
+        self.assertIn("joined to NO assignment", text)
+        self.assertIn("nested spawn", text)
+        self.assertIn("aparent1", text)
+        self.assertIn("total delegated spend", text)
+        self.assertIn("unattributed", text)
+
+    def test_the_orphan_section_is_printed_even_when_there_are_none(self):
+        """Silence is the defect. An empty category must still say so --
+        otherwise the reader cannot tell 'none' from 'not checked'."""
+        result = so.join_outcomes([{"tool_use_id": "t0", "tier": "cheap"}], [], {})
+        text = so.render_outcomes(result)
+        self.assertIn("joined to NO assignment", text)
+        self.assertIn("every transcript on disk is attributed", text)
+
+    def test_both_medians_are_rendered_with_their_own_explicit_n(self):
+        """The two published medians were over 33 and 30 and were printed
+        side by side under one implied n."""
+        self.write_parent([
+            {"type": "assistant", "timestamp": "2026-09-20T10:00:00.000Z",
+             "message": {"role": "assistant", "content": [
+                 {"type": "tool_use", "id": "toolu_A", "name": "Agent", "input": {}}]}},
+            {"type": "user", "timestamp": "2026-09-20T10:00:01.400Z",
+             "message": {"role": "user", "content": [ASYNC_RESULT]}},
+        ])
+        self.write_subagent("a1", [
+            assistant_line("req1", "2026-09-20T10:00:02.000Z"),
+            assistant_line("req2", "2026-09-20T10:09:02.000Z"),
+        ], {"agentType": "Explore", "toolUseId": "toolu_A"})
+        self.write_subagent("orphan1", [
+            assistant_line("req3", "2026-09-20T10:00:00.000Z"),
+            assistant_line("req4", "2026-09-20T10:03:00.000Z"),
+        ], {"agentType": "general-purpose", "toolUseId": "toolu_NESTED",
+            "spawnDepth": 2, "parentAgentId": "aparent1"})
+        result = so.outcomes_for_session(self.session)
+        text = so.render_outcomes(result)
+        self.assertIn("ITS OWN n", text)
+        # task duration over 2 transcripts, blocking over 1 assignment.
+        self.assertIn("n=2", text)
+        self.assertIn("n=1", text)
+        self.assertIn("DIFFERENT sets", text)
+
+    def test_the_cli_does_not_report_could_not_run_when_only_orphans_exist(self):
+        """Orphans alone are still a measurement, and $3.93 is not nothing."""
+        self.write_parent([])
+        self.write_subagent("orphan1", [
+            assistant_line("req1", "2026-09-20T10:00:00.000Z"),
+        ], {"agentType": "general-purpose", "toolUseId": "toolu_NESTED",
+            "spawnDepth": 2, "parentAgentId": "aparent1"})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = so.main(["--session", str(self.session)])
+        self.assertEqual(code, 0)
+        self.assertIn("joined to NO assignment", buf.getvalue())
+
+    # -- W5: a task that never completed ------------------------------------
+
+    def test_a_truncated_transcript_is_not_indistinguishable_from_a_finished_one(self):
+        """Nothing read a status or completion marker, so a truncated
+        transcript yielded `outcome_found=True` with a PARTIAL cost that read
+        as a final one. Observed for real: one of the 33 transcripts on the
+        4ba49645 session ends on an assistant `tool_use` whose result came
+        back and was never answered.
+        """
+        finished = [assistant_line("req1", "2026-09-20T10:00:00.000Z")]
+        finished[-1]["message"]["stop_reason"] = "end_turn"
+        self.write_subagent("done", finished,
+                            {"agentType": "Explore", "toolUseId": "toolu_DONE"})
+        cut = [assistant_line("req2", "2026-09-20T10:00:00.000Z")]
+        cut[-1]["message"]["stop_reason"] = "tool_use"
+        self.write_subagent("cut", cut,
+                            {"agentType": "Explore", "toolUseId": "toolu_CUT"})
+
+        by_id = {o.tool_use_id: o for o in so.read_session_subagents(self.session)}
+        self.assertTrue(by_id["toolu_DONE"].completed)
+        self.assertFalse(by_id["toolu_CUT"].completed)
+        self.assertIn("tool_use", by_id["toolu_CUT"].completion)
+
+        result = so.join_outcomes(
+            [{"tool_use_id": "toolu_DONE"}, {"tool_use_id": "toolu_CUT"}],
+            by_id.values(), {})
+        # Both have an outcome; only one finished. Three states, not two.
+        self.assertEqual([r.outcome_found for r in result.rows], [True, True])
+        self.assertEqual([r.completed for r in result.rows], [True, False])
+        self.assertEqual(len(result.incomplete), 1)
+        self.assertIn("INCOMPLETE", so.render_outcomes(result))
+
+    def test_a_trailing_non_assistant_line_does_not_read_as_truncation(self):
+        """A transcript may carry an `attachment`, `tool_result` or system
+        line AFTER a final assistant turn that ended cleanly. Last-line-only
+        would read every one of those as truncated; the marker is the last
+        ASSISTANT message.
+
+        This case is SYNTHETIC on purpose. The real 4ba49645 corpus does not
+        discriminate between the two rules -- its one attachment-tailed file
+        is also its one genuinely truncated file -- so the corpus cannot be
+        cited as evidence for this choice, and this test supplies the case the
+        corpus lacks.
+        """
+        lines = [assistant_line("req1", "2026-09-20T10:00:00.000Z")]
+        lines[-1]["message"]["stop_reason"] = "end_turn"
+        lines.append({"type": "attachment", "timestamp": "2026-09-20T10:00:01.000Z"})
+        self.write_subagent("a1", lines,
+                            {"agentType": "Explore", "toolUseId": "toolu_A"})
+        outcome = so.read_subagent(self.subagents / "agent-a1.jsonl")
+        self.assertTrue(outcome.completed)
+        self.assertEqual(outcome.completion, "end_turn")
+
+    def test_a_transcript_with_no_assistant_message_is_not_complete(self):
+        self.write_subagent("a1", [{"type": "user", "message": {"role": "user"}}],
+                            {"agentType": "Explore", "toolUseId": "toolu_A"})
+        outcome = so.read_subagent(self.subagents / "agent-a1.jsonl")
+        self.assertFalse(outcome.completed)
+        self.assertIn("no assistant message", outcome.completion)
+
+    # -- W5: a retried task --------------------------------------------------
+
+    def test_two_transcripts_sharing_a_tool_use_id_do_not_collapse(self):
+        """`{o.tool_use_id: o for o in outcomes}` silently kept the LAST file
+        and the earlier attempt's cost disappeared. A retry costs what both
+        attempts cost."""
+        for name, req in (("try1", "req1"), ("try2", "req2")):
+            lines = [assistant_line(req, "2026-09-20T10:00:00.000Z")]
+            lines[-1]["message"]["stop_reason"] = "end_turn"
+            self.write_subagent(name, lines,
+                                {"agentType": "Explore", "toolUseId": "toolu_RETRY"})
+        outcomes = so.read_session_subagents(self.session)
+        self.assertEqual(len(outcomes), 2)
+        each = outcomes[0].cost_usd
+        self.assertGreater(each, 0.0)
+
+        result = so.join_outcomes([{"tool_use_id": "toolu_RETRY", "tier": "cheap"}],
+                                  outcomes, {})
+        row = result.rows[0]
+        self.assertEqual(row.attempts, 2)
+        self.assertAlmostEqual(row.cost_usd, each * 2)
+        self.assertEqual(result.unassigned, [])   # neither attempt is an orphan
+        self.assertIn("RETRIED x2", so.render_outcomes(result))
+
+    def test_a_retry_is_one_assignment_not_two(self):
+        """Intention-to-treat: the unit is the ASSIGNMENT. Two attempts at one
+        assignment must not inflate the denominator."""
+        for name, req in (("try1", "req1"), ("try2", "req2")):
+            self.write_subagent(name, [assistant_line(req, "2026-09-20T10:00:00.000Z")],
+                                {"agentType": "Explore", "toolUseId": "toolu_RETRY"})
+        result = so.join_outcomes([{"tool_use_id": "toolu_RETRY", "tier": "cheap"}],
+                                  so.read_session_subagents(self.session), {})
+        self.assertEqual(len(result.rows), 1)
+        by_tier = so.attrition_by_tier(result.rows)
+        self.assertEqual(by_tier["cheap"]["assignments"], 1)
+        self.assertEqual(by_tier["cheap"]["outcomes"], 1)
+        # but both transcripts are accounted for
+        self.assertEqual(result.n_transcripts, 2)
 
     # -- the CLI: "report attrition by tier" must be a command, not a promise --
 

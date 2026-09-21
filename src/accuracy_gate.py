@@ -62,6 +62,12 @@ Usage:
     uv run src/accuracy_gate.py class2 \\
         --suite tests/fixtures/accuracy/suite-v1 \\
         --baseline-arm baseline --treatment-arm treatment
+
+Class 2 runs its (task, arm, seed) units in a RANDOMISED, arm-interleaved
+order (JEV-29). The seed is printed; pass `--order-seed N` to reproduce a run
+exactly. Running the arms in blocks would let a sequence-aware judge learn the
+arm by counting rather than by reading, which is a broken blind that no
+payload check can see.
 """
 
 from __future__ import annotations
@@ -391,8 +397,23 @@ def class1_compare(
     # question, with the pooled figure kept only as a report line.
     #
     # Pooling is not a stylistic choice here, it is a hole. Take this corpus's
-    # own shape: `destructive` fires on roughly 5% of units, `needs_review` on
-    # roughly half. Suppose a change turns `destructive` into noise while
+    # own shape -- and note that a firing rate is meaningless without the tau
+    # it was measured at, because it IS a function of tau. Measured over
+    # data/runs/2026-09-20.jsonl, arm=jev, ok rows deduplicated to units,
+    # n=567 per question:
+    #
+    #     destructive    at its tau of 0.36    fires on  5.6% of units
+    #     needs_review   at its tau of 0.95    fires on  4.6% of units
+    #     needs_review   at tau 0.5            fires on 52.9% of units
+    #
+    # This comment used to read "`destructive` fires on roughly 5% of units,
+    # `needs_review` on roughly half", which quietly took its first figure at
+    # one tau and its second at another: "roughly half" is needs_review at
+    # tau=0.5, NOT at the 0.95 this gate actually uses. At the taus in play the
+    # two questions fire at nearly the SAME rate, so the asymmetry below is
+    # carried by the worked example, not by a difference in base rates.
+    #
+    # The hole is real either way. Suppose a change turns `destructive` into noise while
     # leaving `needs_review` byte-identical. Per question that is kappa ~ 0 on
     # `destructive` -- the question the gate most exists to protect, destroyed.
     # Pooled it is kappa ~ 0.88 and a ~4.75% flip rate: a PASS and a WARN. The
@@ -706,6 +727,7 @@ def cmd_class2(args: argparse.Namespace) -> int:
             baseline_arm=args.baseline_arm,
             treatment_arm=args.treatment_arm,
             judge=fx.build_judge(args),
+            order_seed=args.order_seed,
         )
     except fx.HarnessFailure as exc:
         # The harness broke. That is an ABSENCE of measurement, and it is
@@ -752,6 +774,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="required by --executor live / --judge live")
     c2.add_argument("--smoke", type=int, default=None,
                     help="run only the first N tasks (the ~6-task per-change subset)")
+    c2.add_argument("--order-seed", type=int, default=None,
+                    help="seed for the randomised, arm-interleaved execution "
+                         "order (JEV-29). Omit for a fresh random order; the "
+                         "seed used is printed so any run reproduces exactly. "
+                         "Task order is part of the blind: run the arms in "
+                         "blocks and a sequence-aware judge learns the arm by "
+                         "counting.")
     c2.set_defaults(func=cmd_class2)
     return parser
 

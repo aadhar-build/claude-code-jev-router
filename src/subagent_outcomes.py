@@ -28,6 +28,62 @@ So: assignment comes from the ledger, outcome comes from the subagent
 transcript, and the two meet on the tool-use id. A ledger row with no matching
 transcript is ATTRITION, not a zero.
 
+### The mirror, which was missing (W5 audit, 2026-09-21)
+
+The paragraph above had a hole exactly the width of its own promise. "A ledger
+row with no matching transcript is ATTRITION, not a zero" names ONE of the two
+ways a join can fail, and the module only ever implemented that one. A
+TRANSCRIPT with no matching ledger row was read off disk, joined against
+nothing, and dropped on the floor without a line of output.
+
+Measured on the real session
+`~/.claude/projects/<proj>/4ba49645-fb8d-4fb2-b496-c274f6ed1490.jsonl`:
+
+    subagent transcripts on disk                    33
+    rows the CLI printed                            30
+    cost the CLI reported                     $168.02
+    cost actually on disk                     $171.94
+    silently dropped                            $3.93   (2.3% of delegated spend)
+    attrition the CLI printed                    0.00%
+
+Every one of the three orphans is a NESTED spawn -- `spawnDepth: 2`, spawned by
+another agent rather than by the parent session -- so its `tool_use` block is
+in the spawning AGENT's transcript, not in the parent's. `outcomes_for_session`
+builds its stand-in ledger from `blocking_intervals`, which only sees top-level
+`Agent`/`Task` blocks in the parent. Sidechains and compacted-away regions fail
+the same way. The reported figure was not merely incomplete, it was reported
+with an attrition rate of 0.00% -- i.e. the module asserted that nothing was
+missing, in the same table from which $3.93 was missing.
+
+So: every transcript that joins to no assignment is now its own NAMED CATEGORY
+(`SessionOutcomes.unassigned`), with its own count and its own cost, rendered
+whether or not it is empty. A number that cannot be attributed is reported as
+unattributed; it is never rounded to nothing.
+
+### Denominators are printed, because they are not the same denominator
+
+The two medians this module and its Class 2 sibling publish are taken over
+DIFFERENT SETS -- task duration over every transcript, blocking duration over
+every assignment -- and on the session above those were 33 and 30. Two medians
+printed side by side under one implied `n` invite a comparison that is not
+valid. Every median rendered here carries the `n` it was taken over.
+
+### Two failure modes that the corpus happens not to contain
+
+Neither was observed; both were unguarded, and "not observed yet" is not a
+guard.
+
+  - A TASK THAT NEVER COMPLETED. Nothing read a status or a completion marker,
+    so a truncated transcript yielded `outcome_found=True` with a partial cost,
+    indistinguishable from a finished one -- which is precisely the shape of
+    error the attrition machinery exists to prevent, one level down.
+    `transcript_completion` now reads the final assistant message's
+    `stop_reason` and a row carries `completed` separately from `outcome_found`.
+  - A RETRIED TASK. `{o.tool_use_id: o for o in outcomes}` silently kept the
+    LAST file sharing a `toolUseId` and discarded the earlier attempt's cost.
+    Outcomes are now grouped into lists per id, cost is summed across attempts,
+    and `attempts` travels on the row.
+
 ### Two durations, never one (SPEC §2 S2, JEV-36 A3.5)
 
   task duration      first to last timestamp inside the subagent transcript.
@@ -73,6 +129,14 @@ import session_metrics as sm  # noqa: E402
 AGENT_TOOL_NAMES = frozenset({"Agent", "Task"})
 
 ASYNC_LAUNCH_MARKER = "Async agent launched successfully"
+
+# A subagent turn that ended on purpose. Anything else as the LAST assistant
+# stop_reason -- `max_tokens`, `tool_use`, a missing field because the file was
+# cut mid-write -- means the transcript stops rather than ends, and its cost is
+# a partial cost. Measured across the 33 transcripts of the 4ba49645 session:
+# 31 `end_turn`, 1 `stop_sequence`, and 1 `tool_use` -- that last one being a
+# genuinely truncated task the old code reported as a finished outcome.
+TERMINAL_STOP_REASONS = frozenset({"end_turn", "stop_sequence"})
 
 # Every field that would let us cost a call. If any of these ever appears in an
 # async-launch tool result, `PostToolUse` becomes viable and this module's
@@ -213,6 +277,67 @@ class SubagentOutcome:
     output_tokens: int = 0
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    # Why a transcript may be an orphan. `spawn_depth > 1` means it was
+    # spawned by another AGENT, so its tool_use block is in that agent's
+    # transcript and will never be found in the parent's.
+    spawn_depth: int | None = None
+    parent_agent_id: str | None = None
+    # Did the turn END, or does the file merely STOP? See
+    # `transcript_completion`. A partial cost that reads as a final one is the
+    # error this exists to prevent.
+    completed: bool = True
+    completion: str = ""
+
+
+def transcript_completion(transcript: Path) -> tuple[bool, str]:
+    """Did this subagent turn finish, or is the transcript truncated?
+
+    W5 audit: nothing read a status or a completion marker, so a truncated
+    transcript produced `outcome_found=True` with a partial cost and was
+    indistinguishable from a finished one.
+
+    The marker is the LAST ASSISTANT message's `stop_reason`. A file cut
+    mid-write has no terminal stop_reason at all.
+
+    Deliberately the last *assistant* line rather than the last line of the
+    file, and the reason is a principle rather than a corpus observation: a
+    transcript may legitimately carry non-assistant trailing lines -- an
+    `attachment`, a `tool_result`, a system line -- AFTER a final assistant
+    turn that ended cleanly, and last-line-only would read every one of those
+    as truncated. On the 4ba49645 corpus the two rules happen to agree, which
+    is luck and not evidence: the single file there whose last line is an
+    `attachment` is also the single genuinely truncated one, so it does not
+    discriminate between the rules. Do not read the corpus as having tested
+    this choice; it has not.
+    """
+    last_stop: Any = None
+    saw_assistant = False
+    if not transcript.exists():
+        return False, "no transcript file"
+    for raw in transcript.read_text(encoding="utf-8", errors="ignore").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            line = json.loads(raw)
+        except json.JSONDecodeError:
+            # A half-written final line is itself evidence of truncation, but
+            # it is not conclusive on its own -- keep what we have.
+            continue
+        if line.get("type") != "assistant":
+            continue
+        message = line.get("message")
+        if not isinstance(message, dict):
+            continue
+        saw_assistant = True
+        last_stop = message.get("stop_reason")
+    if not saw_assistant:
+        return False, "no assistant message in the transcript"
+    if last_stop is None:
+        return False, "final assistant message carries no stop_reason (truncated)"
+    if last_stop in TERMINAL_STOP_REASONS:
+        return True, str(last_stop)
+    return False, f"final assistant message stopped at {last_stop!r}"
 
 
 def read_subagent(transcript: Path) -> SubagentOutcome:
@@ -223,6 +348,7 @@ def read_subagent(transcript: Path) -> SubagentOutcome:
     file has none, so calling it per file is safe and does not double-count.
     """
     metrics = sm.analyse(transcript)
+    completed, completion = transcript_completion(transcript)
     meta: dict[str, Any] = {}
     candidate = transcript.parent / (transcript.name[:-len(".jsonl")] + ".meta.json")
     if candidate.exists():
@@ -248,6 +374,10 @@ def read_subagent(transcript: Path) -> SubagentOutcome:
         output_tokens=metrics.output_tokens,
         cache_creation_input_tokens=metrics.cache_creation_input_tokens,
         cache_read_input_tokens=metrics.cache_read_input_tokens,
+        spawn_depth=meta.get("spawnDepth"),
+        parent_agent_id=meta.get("parentAgentId"),
+        completed=completed,
+        completion=completion,
     )
 
 
@@ -276,10 +406,57 @@ class DelegatedTask:
     cost_usd: float | None = None
     outcome_found: bool = False
     attrition_reason: str | None = None
+    # More than one transcript shared this tool_use_id: the task was RETRIED.
+    # Cost is summed across attempts. This used to be a silent overwrite.
+    attempts: int = 0
+    # False when any attempt's transcript is truncated. Separate from
+    # `outcome_found`: an outcome that exists but did not finish is a third
+    # state, and folding it into either of the other two loses it.
+    completed: bool = True
+    completion: str = ""
+
+
+@dataclass
+class SessionOutcomes:
+    """Both sides of the join, and the two ways it can fail, kept together.
+
+    `rows` is the intention-to-treat table: one row per ASSIGNMENT.
+    `unassigned` is its mirror: transcripts that exist on disk and belong to no
+    assignment. Neither is allowed to be silent, and the module returns both
+    together precisely so that printing one without the other takes an effort.
+    """
+    rows: list[DelegatedTask] = field(default_factory=list)
+    unassigned: list[SubagentOutcome] = field(default_factory=list)
+
+    @property
+    def assigned_cost_usd(self) -> float:
+        return sum(r.cost_usd or 0.0 for r in self.rows)
+
+    @property
+    def unassigned_cost_usd(self) -> float:
+        return sum(o.cost_usd for o in self.unassigned)
+
+    @property
+    def total_cost_usd(self) -> float:
+        return self.assigned_cost_usd + self.unassigned_cost_usd
+
+    @property
+    def unassigned_share(self) -> float:
+        total = self.total_cost_usd
+        return (self.unassigned_cost_usd / total) if total else 0.0
+
+    @property
+    def n_transcripts(self) -> int:
+        """The denominator for task duration: every transcript, orphans too."""
+        return sum(r.attempts for r in self.rows) + len(self.unassigned)
+
+    @property
+    def incomplete(self) -> list[DelegatedTask]:
+        return [r for r in self.rows if r.outcome_found and not r.completed]
 
 
 def join_outcomes(ledger_rows: Iterable[dict], outcomes: Iterable[SubagentOutcome],
-                  blocking: dict[str, Blocking] | None = None) -> list[DelegatedTask]:
+                  blocking: dict[str, Blocking] | None = None) -> SessionOutcomes:
     """Join W1's assignment ledger to the subagent transcripts on tool_use_id.
 
     Intention-to-treat: EVERY ledger row produces a row here, including the ones
@@ -287,10 +464,26 @@ def join_outcomes(ledger_rows: Iterable[dict], outcomes: Iterable[SubagentOutcom
     `attrition_reason`. Dropping them would be a per-protocol analysis wearing
     an ITT label, and it would bias in the one direction that matters -- towards
     whichever tier's tasks die before they finish.
+
+    AND THE MIRROR, which this function used to omit: every OUTCOME that joins
+    to no ledger row is returned in `unassigned` rather than discarded. A join
+    has two sides and both of them can be empty; reporting only one of those
+    facts is how $3.93 of real delegated spend disappeared while the same table
+    printed an attrition rate of 0.00%.
+
+    Returns `SessionOutcomes`, not a bare list, so that the orphan side cannot
+    be ignored by a caller that simply never asked for it.
     """
     blocking = blocking or {}
-    by_tool_use: dict[str, SubagentOutcome] = {
-        o.tool_use_id: o for o in outcomes if o.tool_use_id}
+    outcomes = list(outcomes)   # iterated twice: once to group, once to orphan
+    # Grouped, not overwritten. Two transcripts sharing a toolUseId is a
+    # RETRY, and `{o.tool_use_id: o for o in outcomes}` kept only the last.
+    by_tool_use: dict[str, list[SubagentOutcome]] = {}
+    for outcome in outcomes:
+        if outcome.tool_use_id:
+            by_tool_use.setdefault(outcome.tool_use_id, []).append(outcome)
+
+    claimed: set[str] = set()
     rows: list[DelegatedTask] = []
     for ledger in ledger_rows:
         tool_use_id = ledger.get("tool_use_id") or ""
@@ -305,17 +498,35 @@ def join_outcomes(ledger_rows: Iterable[dict], outcomes: Iterable[SubagentOutcom
         if wait:
             row.blocking_duration_s = wait.blocking_duration_s
             row.request_shape = "background" if wait.async_launched else row.request_shape
-        outcome = by_tool_use.get(tool_use_id)
-        if outcome is None:
+        attempts = by_tool_use.get(tool_use_id) or []
+        if not attempts:
             row.attrition_reason = "no subagent transcript joined to this assignment"
         else:
+            claimed.add(tool_use_id)
             row.outcome_found = True
-            row.agent_id = outcome.agent_id
-            row.task_duration_s = outcome.task_duration_s
-            row.cost_usd = outcome.cost_usd
-            row.request_shape = outcome.request_shape or row.request_shape
+            row.attempts = len(attempts)
+            row.agent_id = ", ".join(a.agent_id for a in attempts)
+            # Summed, never last-wins: a retried task cost what every attempt
+            # cost, and the earlier attempt's spend is not free.
+            row.cost_usd = sum(a.cost_usd for a in attempts)
+            durations = [a.task_duration_s for a in attempts
+                         if a.task_duration_s is not None]
+            row.task_duration_s = sum(durations) if durations else None
+            row.request_shape = next(
+                (a.request_shape for a in attempts if a.request_shape),
+                row.request_shape)
+            unfinished = [a for a in attempts if not a.completed]
+            if unfinished:
+                row.completed = False
+                row.completion = unfinished[0].completion
+            else:
+                row.completed = True
+                row.completion = attempts[-1].completion
         rows.append(row)
-    return rows
+
+    unassigned = [o for o in outcomes
+                  if not o.tool_use_id or o.tool_use_id not in claimed]
+    return SessionOutcomes(rows=rows, unassigned=unassigned)
 
 
 def attrition_by_tier(rows: Iterable[DelegatedTask]) -> dict[str, dict[str, float]]:
@@ -351,13 +562,23 @@ def attrition_by_tier(rows: Iterable[DelegatedTask]) -> dict[str, dict[str, floa
 
 def outcomes_for_session(session_transcript: Path,
                          ledger_rows: Iterable[dict] | None = None
-                         ) -> list[DelegatedTask]:
-    """Everything joinable for one session.
+                         ) -> SessionOutcomes:
+    """Everything joinable for one session, AND everything that did not join.
 
     When no ledger is supplied, the delegations found in the parent transcript
     stand in for assignments so the two durations are still reportable on a
     session that predates the router. Tier is unknown in that case and reads
     as `(unrouted)` -- which is the truth, not a default.
+
+    That stand-in ledger is exactly where the W5 defect lived, and it is worth
+    being precise about why, because the fix is NOT to make the stand-in
+    complete. `blocking_intervals` reads the PARENT transcript, so it can only
+    ever see top-level `Agent`/`Task` blocks. A subagent spawned by another
+    subagent (`spawnDepth > 1`) has its `tool_use` block in that agent's
+    transcript; a sidechain or a compacted-away region loses it too. There is
+    no way to recover those assignments from the parent, so the stand-in
+    ledger is IRREDUCIBLY incomplete and the only honest move is to say so
+    about the transcripts it fails to cover -- which is what `unassigned` is.
     """
     blocking = blocking_intervals(session_transcript)
     outcomes = read_session_subagents(session_transcript)
@@ -366,7 +587,15 @@ def outcomes_for_session(session_transcript: Path,
     return join_outcomes(ledger_rows, outcomes, blocking)
 
 
-def render_outcomes(rows: list[DelegatedTask]) -> str:
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+def render_outcomes(result: SessionOutcomes) -> str:
+    rows = result.rows
     out = ["=== delegated-task outcomes (JEV-36) ===",
            "  BOTH durations are reported. A background subagent can get faster",
            "  while the human waits exactly as long; the SPEC's goal is 'no added",
@@ -380,11 +609,86 @@ def render_outcomes(rows: list[DelegatedTask]) -> str:
         cost = "-" if row.cost_usd is None else f"{row.cost_usd:.4f}"
         tier = row.tier or "(unrouted)"
         shape = row.request_shape or "?"
-        flag = "" if row.outcome_found else "  ATTRITION"
+        flags = []
+        if not row.outcome_found:
+            flags.append("ATTRITION")
+        if row.outcome_found and not row.completed:
+            flags.append(f"INCOMPLETE ({row.completion})")
+        if row.attempts > 1:
+            flags.append(f"RETRIED x{row.attempts} (cost AND duration summed)")
+        flag = ("  " + "  ".join(flags)) if flags else ""
         out.append(f"    {row.tool_use_id:<32}{tier:<12}{shape:<12}"
                    f"{task_s:>9}{block_s:>9}{cost:>10}{flag}")
+
+    # --- the medians, each with the n it was taken over ---------------------
+    task_values = [r.task_duration_s for r in rows if r.task_duration_s is not None]
+    block_values = [r.blocking_duration_s for r in rows
+                    if r.blocking_duration_s is not None]
+    orphan_task_values = [o.task_duration_s for o in result.unassigned
+                          if o.task_duration_s is not None]
     out.append("")
-    out.append("  attrition by tier:")
+    out.append("  medians, each over ITS OWN n -- these are NOT the same denominator:")
+    med_task = _median(task_values + orphan_task_values)
+    med_block = _median(block_values)
+    n_task = len(task_values) + len(orphan_task_values)
+    retried = sum(r.attempts - 1 for r in rows if r.attempts > 1)
+    task_note = ("assignments with a duration, retries SUMMED into one value, "
+                 "plus orphans")
+    out.append(f"    task duration      "
+               f"{'-' if med_task is None else format(med_task, '.1f'):>10}s   "
+               f"n={n_task}  ({task_note})")
+    out.append(f"    blocking duration  "
+               f"{'-' if med_block is None else format(med_block, '.1f'):>10}s   "
+               f"n={len(block_values)}  (assignments with a parent tool_result)")
+    if retried:
+        out.append(f"    note: {retried} extra attempt(s) are summed into their "
+                   f"assignment's value, so n={n_task} is over assignments +")
+        out.append(f"          orphans, not over the {result.n_transcripts} "
+                   "transcripts on disk.")
+    if n_task != len(block_values):
+        out.append(f"    -> the two medians are over DIFFERENT sets "
+                   f"({n_task} vs {len(block_values)}). They are both true and")
+        out.append("       they are not a ratio. Do not divide one by the other.")
+
+    # --- the mirror of attrition: transcripts that joined to nothing --------
+    out.append("")
+    out.append("  transcripts that joined to NO assignment (the mirror of attrition):")
+    if not result.unassigned:
+        out.append("    none -- every transcript on disk is attributed to an assignment.")
+    else:
+        out.append(f"    {'agent_id':<20}{'type':<22}{'depth':>6}{'cost_usd':>10}"
+                   f"   why it did not join")
+        for o in result.unassigned:
+            depth = "-" if o.spawn_depth is None else str(o.spawn_depth)
+            why = ("nested spawn: its tool_use block is in agent "
+                   f"{o.parent_agent_id}'s transcript, not the parent session's"
+                   if (o.spawn_depth or 0) > 1 and o.parent_agent_id
+                   else "no toolUseId in .meta.json" if not o.tool_use_id
+                   else "tool_use block absent from the parent transcript")
+            out.append(f"    {o.agent_id:<20}{(o.agent_type or '?'):<22}{depth:>6}"
+                       f"{o.cost_usd:>10.4f}   {why}")
+        out.append(f"    {len(result.unassigned)} transcript(s), "
+                   f"${result.unassigned_cost_usd:.4f} "
+                   f"= {result.unassigned_share:.2%} of delegated spend.")
+        out.append("    This cost is REAL and is excluded from every per-tier figure")
+        out.append("    below, because there is no assignment to attribute it to.")
+
+    out.append("")
+    out.append(f"  total delegated spend  ${result.total_cost_usd:.4f}"
+               f"   = ${result.assigned_cost_usd:.4f} attributed"
+               f" + ${result.unassigned_cost_usd:.4f} unattributed")
+
+    incomplete = result.incomplete
+    if incomplete:
+        out.append("")
+        out.append("  transcripts that STOP rather than END -- partial costs, counted:")
+        for row in incomplete:
+            out.append(f"    {row.tool_use_id:<32}{row.completion}")
+
+    out.append("")
+    out.append(f"  attrition by tier (over {len(rows)} assignment(s); the "
+               f"{len(result.unassigned)} unattributed")
+    out.append("  transcript(s) above are NOT in these figures):")
     out.append(f"    {'tier':<14}{'assigned':>9}{'outcomes':>9}{'attrition':>11}"
                f"{'$/assigned':>12}{'$/outcome':>12}")
     for tier, b in sorted(attrition_by_tier(rows).items()):
@@ -439,13 +743,13 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         ledger_rows = assignment_ledger.read_ledger(ledger_dir)
 
-    rows = outcomes_for_session(session, ledger_rows)
-    if not rows:
+    result = outcomes_for_session(session, ledger_rows)
+    if not result.rows and not result.unassigned:
         print("COULD NOT RUN: no delegations found in this transcript and no "
               "ledger rows supplied. Nothing was measured -- this is NOT a "
               "report that there were no costs.", file=sys.stderr)
         return 1
-    print(render_outcomes(rows))
+    print(render_outcomes(result))
     return 0
 
 

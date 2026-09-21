@@ -22,11 +22,32 @@ labelled with it:
      that shifted its edits into Bash would show fewer flagged edits and look
      FALSELY BETTER. There is no code path in this file that reads a tool call.
 
-  3. BLIND BY CONSTRUCTION, NOT BY PROCEDURE (`judge_payload`, `blind_check`).
-     The payload is {task, file, diff} and is BUILT from those three fields --
-     the conversation and the arm label are never in scope to be stripped. The
-     blind-integrity check therefore reduces to asserting the arm label is
-     absent from the payload, and it is asserted rather than assumed.
+  3. BLIND BY CONSTRUCTION, NOT BY PROCEDURE (`judge_payload`, `blind_check`,
+     `Judge.score`, `RefMint`). The payload is {task, file, diff} and is BUILT
+     from those three fields -- the conversation and the arm label are never in
+     scope to be stripped.
+
+     THE PAYLOAD WAS NEVER THE WHOLE INTERFACE. Until the W5 audit, `Judge`
+     required `score(payload, *, task_id, arm, seed)`: the arm label was handed
+     to the judge as a REQUIRED KEYWORD ARGUMENT, beside the payload it was
+     meant to be blind to. A clean payload and a `arm="treatment"` kwarg is not
+     a blind; it is one implementation's good manners. `RecordedJudge` happened
+     not to look, and a blind that depends on an implementation not looking is
+     not a guard.
+
+     The judge is now addressed by an OPAQUE REFERENCE (`RefMint`): a salted
+     hash of (task, arm, seed) whose salt is minted fresh per run, never
+     recorded and never rendered. `RecordedJudge` resolves it through an index
+     it builds by scanning its own fixture tree -- it can only resolve refs for
+     runs it already holds on disk. `LiveJudge` is given no way to receive the
+     salt, so for it the ref is a 32-hex opaque handle and the arm is not
+     recoverable. The blind is now a property of the INTERFACE.
+
+     Three things can still leak the arm, and all three are checked:
+     the payload contents (`blind_check`), the tier and model names that
+     identify the arm indirectly (`tier_tokens`), and the ORDER of the calls
+     (see `run_class2` -- a stateful judge reading a BBBTTT block structure
+     learns the arm without reading a single token).
 
 Attrition (requirement 8): a tier that fails more often must not look cheaper
 because its failures are cheap. `Class2Report.attrition` counts non-completing
@@ -37,7 +58,11 @@ reading as a saving.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import random
+import re
+import secrets
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -302,8 +327,8 @@ def judge_payload(task: Task, execution: Execution) -> dict[str, Any]:
     }
 
 
-def tier_tokens() -> list[str]:
-    """Tier names, aliases and resolved model prefixes from `config/tiers.json`.
+def tier_tokens(tiers: Sequence[str] = ()) -> list[str]:
+    """Arm-identifying names for the tiers ACTUALLY IN USE in this run.
 
     The arm label is not the only way a judge could learn which arm it is
     looking at. A diff carrying `# routed to claude-haiku-4-5`, or a prompt
@@ -311,36 +336,80 @@ def tier_tokens() -> list[str]:
     just as effectively. Checking only for "baseline"/"treatment" would pass
     that payload and the blind would be broken in a way the check was blind to.
 
-    Reads the config rather than hardcoding, so a tier added to `tiers.json`
-    is covered without anyone remembering to update this list. Returns [] if
-    the config cannot be read -- the arm-label tokens still apply, and a
-    missing config is `tier_map`'s problem to report, not this function's.
+    W5 AUDIT -- THIS FUNCTION USED TO TAKE NO ARGUMENT, and that was both a
+    false negative and a false positive at once:
+
+      FALSE NEGATIVE. It enumerated `config/tiers.json` -- haiku45, sonnet5,
+      opus5 -- while the tiers this suite's fixtures actually record are
+      `cheap` and `frontier`. Those two names were in NO token list, so a diff
+      reading "# cheap tier" passed the blind check cleanly. The check was
+      guarding names that were not in play and ignoring the ones that were.
+
+      FALSE POSITIVE. Enumerating every configured tier meant every run
+      carried `opus`, `haiku` and `sonnet` as tokens whether or not any of
+      them was in use, so prose naming a model the run never touched tripped
+      a blind failure and forced exit 1.
+
+    So the tiers are now passed IN, taken from the executions the run actually
+    produced, and the config is consulted only to expand a tier that is in use
+    into its alias and resolved model prefix. A tier added to `tiers.json` and
+    never used costs nothing; a tier used and never configured is still
+    covered by its own name.
     """
+    tokens: set[str] = {str(t) for t in tiers if t}
     try:
         import tier_map
         config = tier_map.load()
     except Exception:
-        return []
-    tokens: set[str] = set()
-    for name, spec in (config.get("tiers") or {}).items():
-        tokens.add(name)
+        # A missing config is `tier_map`'s problem to report, not this
+        # function's. The names of the tiers in use still apply.
+        return sorted(tokens)
+    configured = config.get("tiers") or {}
+    for name in list(tokens):
+        spec = configured.get(name)
         if isinstance(spec, dict):
             for key in ("alias", "resolved_prefix"):
                 if spec.get(key):
                     tokens.add(str(spec[key]))
-    if config.get("frontier_tier"):
-        tokens.add(str(config["frontier_tier"]))
     return sorted(tokens)
 
 
 def blind_tokens(baseline_arm: str, treatment_arm: str,
+                 tiers: Sequence[str] = (),
                  extra: Sequence[str] = ()) -> list[str]:
-    """Substrings whose presence in a payload would break the blind."""
-    tokens = {baseline_arm, treatment_arm, "baseline", "treatment",
-              "control", "arm="}
-    tokens.update(tier_tokens())
+    """Words whose presence in a payload would break the blind.
+
+    Note what is NOT here any more: the hardcoded literals "baseline",
+    "treatment" and "control". The first two arrive as the arm PARAMETERS --
+    hardcoding them as well did nothing except guarantee they were checked
+    for even when the arms were named something else. "control" was pure
+    false positive: it is not an arm name this harness ever uses, and it made
+    every diff touching a variable named `control` a blind failure.
+    """
+    tokens = {baseline_arm, treatment_arm, "arm="}
+    tokens.update(tier_tokens(tiers))
     tokens.update(extra)
     return sorted(t for t in tokens if t)
+
+
+def _token_pattern(token: str) -> re.Pattern[str]:
+    """Match `token` as a WHOLE WORD, not as a substring.
+
+    W5 AUDIT. The check used to be `token.lower() in blob`, which flagged
+    `controller` for containing "control" and `haikus` for containing "haiku".
+    It erred safe -- a spurious blind failure is exit 1, not a false pass --
+    but a guard that fires on ordinary code is a guard that gets switched off,
+    and on real mined tasks it would have produced COULD-NOT-RUNs that have
+    nothing to do with the blind.
+
+    The boundary is applied only to the ends of the token that are word
+    characters, so `arm=` still matches `arm=treatment` (and not `warm=`), and
+    `claude-haiku-4-5` still matches the dated `claude-haiku-4-5-20251001`.
+    """
+    word = r"[0-9A-Za-z_]"
+    prefix = rf"(?<!{word})" if re.match(word, token[:1] or " ") else ""
+    suffix = rf"(?!{word})" if re.match(word, token[-1:] or " ") else ""
+    return re.compile(prefix + re.escape(token) + suffix, re.IGNORECASE)
 
 
 def blind_check(payload: dict[str, Any], tokens: Sequence[str]) -> list[str]:
@@ -349,8 +418,8 @@ def blind_check(payload: dict[str, Any], tokens: Sequence[str]) -> list[str]:
     A non-empty result is exit 1, not exit 3: the judge's verdict is UNUSABLE,
     which is a failure to measure, not a measured regression.
     """
-    blob = json.dumps(payload, ensure_ascii=False).lower()
-    return [t for t in tokens if t.lower() in blob]
+    blob = json.dumps(payload, ensure_ascii=False)
+    return [t for t in tokens if _token_pattern(t).search(blob)]
 
 
 # ---------------------------------------------------------------------------
@@ -363,16 +432,48 @@ class JudgeVerdict:
     dimensions: dict[str, float] = field(default_factory=dict)
 
 
+class RefMint:
+    """Mints the OPAQUE REFERENCE that stands in for (task, arm, seed).
+
+    The judge has to be told WHICH verdict it is being asked for -- a scorer
+    that cannot address its subject cannot be replayed, cached or audited. The
+    audit's finding was not that an identifier is wrong, it is that the
+    identifier we used WAS THE ARM ITSELF.
+
+    A ref is `sha256(salt || task || arm || seed)` truncated to 32 hex. The
+    salt is 16 random bytes minted per run, is never written to the report,
+    never rendered, and never leaves the harness except to a judge that is
+    explicitly handed the mint. Without the salt the mapping is not invertible
+    by inspection and not enumerable by guessing arm names: a live judge
+    holding a ref holds 32 hex characters.
+
+    The mint is deliberately NOT derived from `order_seed`. `order_seed` IS
+    recorded, so that a run can be reproduced; deriving the salt from it would
+    publish the decoder beside the ciphertext.
+    """
+
+    def __init__(self, salt: str | None = None) -> None:
+        self.salt = salt or secrets.token_hex(16)
+
+    def ref(self, task_id: str, arm: str, seed: int) -> str:
+        material = f"{self.salt}\x00{task_id}\x00{arm}\x00{seed}".encode("utf-8")
+        return hashlib.sha256(material).hexdigest()[:32]
+
+
 class Judge(Protocol):
-    def score(self, payload: dict[str, Any], *, task_id: str, arm: str, seed: int
-              ) -> JudgeVerdict: ...
+    # `arm` is ABSENT and must stay absent. See the module docstring, point 3:
+    # handing the judge the arm label beside a payload it is meant to be blind
+    # to made the blind a property of RecordedJudge's good behaviour rather
+    # than of this signature. `tests/test_accuracy_gate.py` asserts the
+    # parameter list of this method, so re-adding it fails the suite.
+    def score(self, payload: dict[str, Any], *, ref: str) -> JudgeVerdict: ...
 
 
 class NoJudge:
     """Tier 1 only. The default, because tier 1 carries most of the weight."""
     enabled = False
 
-    def score(self, payload, *, task_id, arm, seed) -> JudgeVerdict:  # pragma: no cover
+    def score(self, payload, *, ref: str) -> JudgeVerdict:  # pragma: no cover
         return JudgeVerdict()
 
 
@@ -382,14 +483,51 @@ class RecordedJudge:
 
     It is handed the SAME blind payload the live judge would get, so the blind
     check exercises the real payload shape rather than a test-only one.
+
+    It resolves the opaque ref through an index it builds by SCANNING ITS OWN
+    FIXTURE TREE: every `recorded/judge/<arm>/<task>/<seed>.json` on disk is
+    minted through the same `RefMint` and filed under the resulting ref. The
+    fixtures did not move. Note what this gives for free -- the recorded judge
+    can only resolve refs for runs it ALREADY HOLDS, so a ref for a task it
+    has no verdict for is a `HarnessFailure`, never a fabricated verdict.
     """
     root: Path
     enabled: bool = True
+    _index: dict[str, Path] = field(default_factory=dict, repr=False)
+    _bound: bool = field(default=False, repr=False)
 
-    def score(self, payload, *, task_id: str, arm: str, seed: int) -> JudgeVerdict:
-        path = self.root / "recorded" / "judge" / arm / task_id / f"{seed}.json"
-        if not path.exists():
-            raise HarnessFailure(f"no recorded judge verdict at {path}")
+    def bind(self, mint: RefMint) -> None:
+        """Receive the run's mint and index the fixture tree under it.
+
+        `run_class2` calls this ONLY for a judge it has type-checked as a
+        recorded one. It is a named method rather than a duck-typed attribute
+        so that a live judge cannot acquire the decoder by accident.
+        """
+        self._index = {}
+        judge_root = self.root / "recorded" / "judge"
+        for path in sorted(judge_root.glob("*/*/*.json")):
+            arm = path.parent.parent.name
+            task_id = path.parent.name
+            try:
+                seed = int(path.stem)
+            except ValueError:
+                continue
+            self._index[mint.ref(task_id, arm, seed)] = path
+        self._bound = True
+
+    def score(self, payload, *, ref: str) -> JudgeVerdict:
+        if not self._bound:
+            raise HarnessFailure(
+                "the recorded judge was asked to score before it was bound to "
+                "a ref mint, so it cannot resolve the reference. This is a "
+                "harness error (exit 1), not a verdict.")
+        path = self._index.get(ref)
+        if path is None:
+            # Deliberately reports the hex and the index size and NOT the
+            # task/arm/seed: an error message is not a side channel.
+            raise HarnessFailure(
+                f"no recorded judge verdict for ref {ref} "
+                f"({len(self._index)} verdicts indexed under {self.root})")
         blob = json.loads(path.read_text(encoding="utf-8"))
         return JudgeVerdict(
             rule_violations=list(blob.get("rule_violations", [])),
@@ -399,11 +537,16 @@ class RecordedJudge:
 
 @dataclass
 class LiveJudge:
-    """The real model-backed judge. UNEXERCISED; refuses unless armed."""
+    """The real model-backed judge. UNEXERCISED; refuses unless armed.
+
+    It has NO `bind` method, and that absence is the blind. It never receives
+    the salt, so the `ref` it is handed is 32 opaque hex characters and the
+    arm is not recoverable from it.
+    """
     armed: bool = False
     enabled: bool = True
 
-    def score(self, payload, *, task_id, arm, seed) -> JudgeVerdict:
+    def score(self, payload, *, ref: str) -> JudgeVerdict:
         raise CouldNotRun(
             "the live judge is not armed; no API call was made and no verdict "
             "exists. This is exit 1 (COULD NOT RUN), never exit 0."
@@ -447,6 +590,16 @@ class Class2Report:
     baseline_arm: str = ""
     treatment_arm: str = ""
     judged: bool = False
+    # The shuffle seed for the execution order. RECORDED so a run reproduces;
+    # see `run_class2`. This is NOT the ref-mint salt, which is never recorded.
+    order_seed: int = 0
+    # The permutation actually executed, and the order the judge was driven
+    # in. Kept so a reviewer can SEE that the arms interleave rather than
+    # having to trust that they did.
+    execution_order: list[tuple[str, str, int]] = field(default_factory=list)
+    # The tiers this run actually produced. The blind token set is derived
+    # from these rather than from every tier that happens to be configured.
+    tiers_in_use: list[str] = field(default_factory=list)
     outcomes: list[TaskOutcome] = field(default_factory=list)
     attrition_by_arm: dict[str, int] = field(default_factory=dict)
     attrition_by_tier: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -456,6 +609,12 @@ class Class2Report:
     # never one: a background subagent can get objectively faster while the
     # human waits exactly as long, and the SPEC's goal is "no added FELT
     # latency". Reported here so a Class 2 run carries its own S2 evidence.
+    #
+    # Each median carries its OWN `n_*`. The two are not always over the same
+    # runs -- a run can report a task duration and no blocking duration -- and
+    # two medians over two different denominators printed side by side with one
+    # implied n is how a reader comes to compare numbers that are not
+    # comparable. See `subagent_outcomes.py`, where exactly that happened.
     durations: dict[str, dict[str, float | None]] = field(default_factory=dict)
 
     @property
@@ -490,14 +649,49 @@ class Class2Report:
 
 
 def run_class2(suite: Suite, executor: Executor, *, baseline_arm: str,
-               treatment_arm: str, judge: Judge | None = None) -> Class2Report:
+               treatment_arm: str, judge: Judge | None = None,
+               order_seed: int | None = None) -> Class2Report:
     """Execute both arms over the suite and score the final diffs.
 
     Raises CouldNotRun (exit 1) if the executor or judge cannot run at all, and
     HarnessFailure (also surfaced as exit 1) if the harness itself breaks.
     Neither is ever converted into a failed task.
+
+    ### Order is part of the blind (JEV-29, W5 audit)
+
+    This used to walk the suite in manifest order and run `baseline_arm` to
+    completion -- all k seeds -- before starting `treatment_arm`. Every payload
+    the judge saw arrived in a perfectly regular block: `BBBTTTBBBTTT...`. A
+    stateful or sequence-aware judge does not need to read a single token to
+    know the arm; it only needs to count to three. JEV-29's "randomise task
+    order" box was unticked and it was unticked truthfully.
+
+    So the (task, arm, seed) units are shuffled ONCE and both the executor and
+    the judge are driven in that same shuffled order. This randomises task
+    order and interleaves the arms in one move -- the two are not separate
+    knobs, they are the same permutation.
+
+    `order_seed` is recorded on the report so a run reproduces exactly. That
+    is the whole reason it is a seeded `random.Random` and not `secrets`.
+
+    Three phases, and the split is load-bearing rather than tidiness:
+
+      1. EXECUTE every unit in shuffled order, keeping the executions.
+      2. JUDGE every unit in THE SAME shuffled order. It has to be a separate
+         pass because the blind token set is derived from the tiers the run
+         actually produced (see `tier_tokens`), which is not known until every
+         execution is in hand. Judging inside phase 1 would mean the first
+         payloads were checked against a token set built from an incomplete
+         view of the run.
+      3. AGGREGATE in suite order, so that the REPORT is deterministic and
+         diffable no matter which permutation produced it. Randomising what
+         the judge sees is the point; randomising the output would only make
+         the gate harder to read.
     """
     judge = judge or NoJudge()
+    judging = bool(getattr(judge, "enabled", False))
+    if order_seed is None:
+        order_seed = secrets.randbits(32)
     report = Class2Report(
         suite_id=suite.suite_id,
         synthetic=suite.synthetic,
@@ -506,11 +700,52 @@ def run_class2(suite: Suite, executor: Executor, *, baseline_arm: str,
         seeds=suite.seeds,
         baseline_arm=baseline_arm,
         treatment_arm=treatment_arm,
-        judged=getattr(judge, "enabled", False),
+        judged=judging,
+        order_seed=order_seed,
     )
-    tokens = blind_tokens(baseline_arm, treatment_arm)
-    seconds: dict[str, dict[str, list[float]]] = {}
 
+    # A ref mint per run. The salt is fresh, is not derived from order_seed,
+    # and is never stored on the report -- so reproducing the ORDER of a run
+    # does not reproduce the ability to decode its refs.
+    mint = RefMint()
+    # Only a judge we have type-checked as recorded is handed the decoder.
+    # Duck-typing on a `bind` attribute would mean a live judge that happened
+    # to grow one silently received the salt.
+    if isinstance(judge, RecordedJudge):
+        judge.bind(mint)
+
+    # --- phase 1: execute, in shuffled order -------------------------------
+    units = [(task, arm, seed)
+             for task in suite.tasks
+             for arm in (baseline_arm, treatment_arm)
+             for seed in range(suite.seeds)]
+    random.Random(order_seed).shuffle(units)
+    report.execution_order = [(t.task_id, a, s) for t, a, s in units]
+
+    executions: dict[tuple[str, str, int], Execution] = {}
+    for task, arm, seed in units:
+        executions[(task.task_id, arm, seed)] = executor.run(task, arm, seed)
+
+    # --- phase 2: judge, in THE SAME shuffled order ------------------------
+    tiers_in_use = sorted({e.tier for e in executions.values() if e.tier})
+    report.tiers_in_use = tiers_in_use
+    tokens = blind_tokens(baseline_arm, treatment_arm, tiers=tiers_in_use)
+
+    verdicts: dict[tuple[str, str, int], JudgeVerdict] = {}
+    if judging:
+        for task, arm, seed in units:
+            key = (task.task_id, arm, seed)
+            payload = judge_payload(task, executions[key])
+            found = blind_check(payload, tokens)
+            if found:
+                report.blind_failures.append(
+                    f"{task.task_id}/{arm}/seed{seed}: arm-identifying "
+                    f"token(s) {found} present in the judge payload")
+                continue
+            verdicts[key] = judge.score(payload, ref=mint.ref(task.task_id, arm, seed))
+
+    # --- phase 3: aggregate, in suite order --------------------------------
+    seconds: dict[str, dict[str, list[float]]] = {}
     for task in suite.tasks:
         outcome = TaskOutcome(task_id=task.task_id)
         dims: dict[str, list[float]] = {}
@@ -519,7 +754,8 @@ def run_class2(suite: Suite, executor: Executor, *, baseline_arm: str,
             (treatment_arm, outcome.treatment_pass, outcome.treatment_reasons),
         ):
             for seed in range(suite.seeds):
-                execution = executor.run(task, arm, seed)
+                key = (task.task_id, arm, seed)
+                execution = executions[key]
                 if not execution.completed:
                     # Agent attrition: a failed seed, and a data point. It is
                     # counted by tier so that a tier which fails more often
@@ -550,15 +786,8 @@ def run_class2(suite: Suite, executor: Executor, *, baseline_arm: str,
                 passes.append(check.passed)
                 reasons.extend(check.reasons)
 
-                if getattr(judge, "enabled", False):
-                    payload = judge_payload(task, execution)
-                    found = blind_check(payload, tokens)
-                    if found:
-                        report.blind_failures.append(
-                            f"{task.task_id}/{arm}/seed{seed}: arm-identifying "
-                            f"token(s) {found} present in the judge payload")
-                        continue
-                    verdict = judge.score(payload, task_id=task.task_id, arm=arm, seed=seed)
+                verdict = verdicts.get(key)
+                if verdict is not None:
                     if arm == baseline_arm:
                         outcome.baseline_violations += len(verdict.rule_violations)
                     else:
@@ -581,8 +810,11 @@ def run_class2(suite: Suite, executor: Executor, *, baseline_arm: str,
         return ordered[len(ordered) // 2]
 
     for arm, buckets in seconds.items():
+        # Each median carries its own n. They are not always equal.
         report.durations[arm] = {"task_s": median(buckets["task"]),
-                                 "blocking_s": median(buckets["blocking"])}
+                                 "n_task": len(buckets["task"]),
+                                 "blocking_s": median(buckets["blocking"]),
+                                 "n_blocking": len(buckets["blocking"])}
     return report
 
 
@@ -602,6 +834,20 @@ def render_class2(report: Class2Report) -> str:
     out.append(f"  scored on           the FINAL DIFF of the turn "
                f"(never per-edit-call; Bash-written changes included)")
     out.append(f"  tiers 2/3 judge     {'on' if report.judged else 'off (hard checks only)'}")
+    order = "".join("B" if a == report.baseline_arm else "T"
+                    for _, a, _ in report.execution_order)
+    out.append(f"  execution order     RANDOMISED, arms interleaved; "
+               f"order_seed = {report.order_seed}")
+    out.append(f"                      reproduce with --order-seed {report.order_seed}")
+    if order:
+        out.append(f"                      arm sequence {order[:48]}"
+                   + ("..." if len(order) > 48 else ""))
+        out.append("                      (a judge that sees a regular BBBTTT block "
+                   "learns the arm")
+        out.append("                       by counting, without reading a token)")
+    if report.tiers_in_use:
+        out.append(f"  tiers in use        {', '.join(report.tiers_in_use)}  "
+                   "(the blind token set is derived from these)")
     out.append("")
     out.append("  per-task pass/fail (never an aggregate):")
     for o in report.outcomes:
@@ -628,13 +874,17 @@ def render_class2(report: Class2Report) -> str:
     if report.durations:
         out.append("")
         out.append("  median seconds per run -- BOTH durations, never one. A background")
-        out.append("  subagent can get faster while the human waits exactly as long:")
-        out.append(f"    {'arm':<14}{'task_s':>10}{'blocking_s':>13}")
+        out.append("  subagent can get faster while the human waits exactly as long.")
+        out.append("  Each median carries its OWN n: they are not always the same runs,")
+        out.append("  and two medians over two denominators under one implied n is how")
+        out.append("  a reader comes to compare numbers that are not comparable.")
+        out.append(f"    {'arm':<14}{'task_s':>10}{'n':>6}{'blocking_s':>13}{'n':>6}")
         for arm in sorted(report.durations):
             d = report.durations[arm]
             task_s = "-" if d["task_s"] is None else f"{d['task_s']:.1f}"
             block_s = "-" if d["blocking_s"] is None else f"{d['blocking_s']:.1f}"
-            out.append(f"    {arm:<14}{task_s:>10}{block_s:>13}")
+            out.append(f"    {arm:<14}{task_s:>10}{int(d.get('n_task') or 0):>6}"
+                       f"{block_s:>13}{int(d.get('n_blocking') or 0):>6}")
     if report.judged:
         out.append("")
         worse = sum(1 for o in report.outcomes
