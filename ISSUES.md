@@ -3238,10 +3238,34 @@ real work**, not "everything anyone ever planned":
 | **JEV-40** | OFF is *proven* equal to vanilla | ✅ done |
 | **JEV-51** | disabled means **quiescent**, not merely silent | ✅ done |
 | **JEV-56** | the suite is green from a **clean checkout** | ✅ `0f5901f` |
-| **JEV-57** | the ledger can tell one repo from another — **must land before a second repo installs, not after** | ⬜ open |
-| **JEV-58** | the accuracy gate can actually *pass*. SPEC non-negotiable 6 forbids enabling anything whose gate has not passed, and today it exits 1 | ⬜ open |
-| **JEV-37** | a canary baseline exists *before* the window opens, so drift has a reference | ⬜ open |
-| **JEV-59** | the "before" it will be compared against is correct | ⬜ open |
+| **JEV-57** | the ledger can tell one repo from another | ✅ `8f80d24` |
+| **JEV-59** | the "before" it will be compared against is correct | ✅ `8f80d24` |
+| **JEV-06** | there is an instrument that can read the result | ✅ `cafffe2` |
+| **JEV-58** | labels, so the accuracy gate's Class 1 can clear | **NOT A BLOCKER FOR W1 — see below.** Blocks **W4** |
+| **JEV-37** | a canary baseline, so vendor drift has a reference | **NOT A BLOCKER FOR W1 — see below.** Blocks **W4** |
+
+### Why JEV-58 and JEV-37 do not gate W1, verified 2026-09-21
+
+**W1 makes zero Jev calls.** `grep -cE "curl|typesafe|systemone|AI_GATEWAY|api\." hooks/agent_route_actuator.sh` returns **0**. It is a static `subagent_type → tier` map read from `config/tiers.json` by `jq`. No network, no key, no endpoint.
+
+- **JEV-58** supplies labels so the accuracy gate's **Class 1** can compute AUC.
+  Class 1 measures **the judge** — Jev's answers — under a changed code path.
+  **W1 has no judge.** Class 1 is not merely unsatisfied for W1, it is
+  *inapplicable*.
+- **JEV-37** records a canary baseline so **vendor drift in Jev** has a
+  reference. **W1 never calls the vendor.** There is nothing for it to drift.
+
+Both become hard blockers the moment **W4** introduces a Jev call, and they stay
+in this table for that reason. Scoping the gate per-optimization rather than
+once for the whole product is the correction; a gate that demands irrelevant
+evidence is the same defect as one blocked by KILLed tickets, arriving from the
+other side.
+
+**What arming W1 does NOT prove, stated plainly:** R3 quality non-regression is
+**not pre-established**. Class 2's live executor has never run and its fixtures
+are synthetic, so W1's effect on task success is *monitored after the fact*, not
+proven before. The risk is bounded rather than eliminated — see the gate
+sequence below.
 
 **Deliberately NOT blockers**, recorded so nobody re-adds them:
 
