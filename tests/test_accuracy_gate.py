@@ -144,6 +144,59 @@ class TestClass1(unittest.TestCase):
         self.assertEqual(result.exit_code, gate.EXIT_CLEAN)
         self.assertEqual(result.auc_baseline["destructive"], 1.0)
 
+    # ------------------------------------------------------------------
+    # The two-fabricated-labels exploit, found by audit 2026-09-21.
+    #
+    # `evaluable` used to be a single global bool. Any ONE question with one
+    # positive and one negative label flipped the whole AUC criterion from
+    # NOT_EVALUABLE to PASS -- including for questions carrying no labels at
+    # all. Reproduced against the real corpus: two hand-written labels on
+    # `needs_review`, `destructive` entirely unlabelled, and the gate printed
+    # `exit 0 -- CLEAN`. The safety-critical question was unmeasured and the
+    # gate said the change was clear.
+    #
+    # This is the exact failure the gate exists to prevent, so it gets two
+    # tests rather than one.
+    # ------------------------------------------------------------------
+
+    def test_an_unlabelled_question_makes_auc_unevaluable_not_invisible(self):
+        """A question absent from the labels must not vanish from the report."""
+        base, treat, labels = [], [], {}
+        for i in range(40):
+            positive = i % 2 == 0
+            p = 0.9 if positive else 0.1
+            for q in ("destructive", "needs_review"):
+                base.append(run_row(f"d{i}", q, p))
+                treat.append(run_row(f"d{i}", q, p))
+            # ONLY needs_review is labelled. destructive is left unlabelled.
+            labels[(f"d{i}", "needs_review")] = positive
+        taus = dict(TAUS)
+        taus["needs_review"] = 0.5
+        result = gate.class1_compare(base, treat, taus, arm="jev", labels=labels)
+        auc = next(c for c in result.criteria if c.name.startswith("AUC"))
+        self.assertEqual(
+            auc.status, gate.NOT_EVALUABLE,
+            "an unlabelled question must make AUC unevaluable, not be skipped",
+        )
+        self.assertIn("destructive", auc.detail)
+        self.assertEqual(result.exit_code, gate.EXIT_COULD_NOT_RUN)
+        self.assertNotEqual(result.exit_code, gate.EXIT_CLEAN)
+
+    def test_too_few_labels_on_a_question_is_not_a_pass(self):
+        """Two labels are not a measurement, however well they behave."""
+        base, treat, labels = [], [], {}
+        for i in range(40):
+            p = 0.9 if i % 2 == 0 else 0.1
+            base.append(run_row(f"d{i}", "destructive", p))
+            treat.append(run_row(f"d{i}", "destructive", p))
+        labels[("d0", "destructive")] = True
+        labels[("d1", "destructive")] = False
+        result = gate.class1_compare(base, treat, TAUS, arm="jev", labels=labels)
+        auc = next(c for c in result.criteria if c.name.startswith("AUC"))
+        self.assertEqual(auc.status, gate.NOT_EVALUABLE)
+        self.assertIn(str(gate.AUC_MIN_LABELLED), auc.detail)
+        self.assertEqual(result.exit_code, gate.EXIT_COULD_NOT_RUN)
+
     def test_auc_drop_beyond_the_threshold_blocks(self):
         base, treat, labels = [], [], {}
         for i in range(40):

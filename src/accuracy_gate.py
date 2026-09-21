@@ -122,6 +122,10 @@ class CouldNotRun(RuntimeError):
 BAND_FLIP_BLOCK = 0.05      # > 5% of paired units blocks
 BAND_FLIP_WARN = 0.02       # 2-5% is report-only
 AUC_DROP_BLOCK = 0.03       # a drop larger than this blocks
+# Minimum labelled units PER QUESTION before AUC on that question means
+# anything. Without this, two hand-written labels satisfy the criterion.
+# See `_auc_coverage` for the exploit this closes.
+AUC_MIN_LABELLED = 30
 KAPPA_BLOCK = 0.80          # below this blocks
 
 PASS = "pass"
@@ -453,7 +457,15 @@ def class1_compare(
 
     # --- AUC, on the labelled subset only ----------------------------------
     worst_drop: float | None = None
-    evaluable = False
+    # PER QUESTION, not a single global flag. The single flag was a hole: any
+    # one question with one positive and one negative label turned the whole
+    # criterion from NOT_EVALUABLE to PASS -- including for questions carrying
+    # no labels at all. Reproduced 2026-09-21 with TWO fabricated labels on
+    # `needs_review`, with `destructive` (the safety-critical question)
+    # entirely unlabelled: the gate printed `exit 0 -- CLEAN`.
+    evaluable: set[str] = set()
+    under_labelled: list[str] = []
+    unlabelled: list[str] = []
     for question in questions:
         pos_b: list[float] = []
         neg_b: list[float] = []
@@ -473,7 +485,13 @@ def class1_compare(
             # AUC needs both classes present. One-class labels are not a
             # degenerate 0.5 -- they are no measurement at all.
             continue
-        evaluable = True
+        if n_labelled < AUC_MIN_LABELLED:
+            # Labelled, but not enough to mean anything. This is NOT a pass and
+            # NOT silence -- it is recorded and it makes the criterion
+            # unevaluable, exactly like no labels at all.
+            under_labelled.append(f"{question} n={n_labelled}<{AUC_MIN_LABELLED}")
+            continue
+        evaluable.add(question)
         a_b = stats.auc(pos_b, neg_b)
         a_t = stats.auc(pos_t, neg_t)
         result.auc_baseline[question] = a_b
@@ -481,12 +499,30 @@ def class1_compare(
         drop = a_b - a_t
         worst_drop = drop if worst_drop is None else max(worst_drop, drop)
 
-    if not evaluable:
+    # EVERY question in the paired data must be adequately labelled. A question
+    # that is simply absent from the labels used to vanish from this loop and
+    # was therefore invisible -- the gate reported on the questions it could
+    # see and said nothing about the ones it could not.
+    for question in questions:
+        if question in evaluable:
+            continue
+        if result.auc_n_labelled.get(question, 0) == 0:
+            unlabelled.append(question)
+
+    gaps = unlabelled + under_labelled
+    if gaps:
+        detail = (
+            f"NOT evaluable on {len(gaps)} of {len(questions)} question(s): "
+            + "; ".join(sorted(gaps))
+            + f". Every question needs >= {AUC_MIN_LABELLED} labelled units "
+              "with both classes present. A question with no labels is a "
+              "MEASUREMENT GAP, not a pass"
+        )
+        if evaluable:
+            detail += (f". {len(evaluable)} question(s) WERE evaluable "
+                       "-- that does not cover the rest")
         result.criteria.append(Criterion(
-            "AUC drop vs baseline", NOT_EVALUABLE, None, AUC_DROP_BLOCK,
-            "no labelled subset with both classes present -- data/labels/ is "
-            "empty on this repository, so this criterion CANNOT be evaluated "
-            "and the gate exits 1, not 0"))
+            "AUC drop vs baseline", NOT_EVALUABLE, None, AUC_DROP_BLOCK, detail))
     else:
         a_status = FAIL if worst_drop > AUC_DROP_BLOCK else PASS
         labelled = ", ".join(f"{q} n={result.auc_n_labelled[q]}" for q in result.auc_baseline)

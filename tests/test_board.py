@@ -152,8 +152,11 @@ class TestTheBoardIsInternallyConsistent(unittest.TestCase):
         is the only way a fixture like this is worth anything.
         """
         expected = {
-            # ten blockers over five wrapped lines, two of them repeated
-            "JEV-23": {"52", "34", "35", "36", "24a", "27", "28", "29", "46", "47"},
+            # nine blockers over five wrapped lines, one of them repeated.
+            # JEV-27 was struck 2026-09-21: it is KILLed, and the edge made
+            # JEV-23 permanently stuck. The fixture objected to that edit, which
+            # is the fixture working -- a blocker set must not change silently.
+            "JEV-23": {"52", "34", "35", "36", "24a", "28", "29", "46", "47"},
             # five blockers, wrapped, mixing bold and plain
             "JEV-53": {"12", "23", "50", "48", "52"},
             # bolded blockers with parentheticals, wrapped mid-parenthetical
@@ -238,25 +241,79 @@ class TestTheBoardIsInternallyConsistent(unittest.TestCase):
             f"forgotten): {orphans}",
         )
 
-    def test_the_gate_blocks_on_every_phase_a_ticket(self) -> None:
-        """INCONSISTENCY 5. JEV-52 omitted six, two load-bearing.
+    def test_the_gate_is_reachable(self) -> None:
+        """REPLACES `test_the_gate_blocks_on_every_phase_a_ticket`, 2026-09-21.
 
-        JEV-37 builds what the gate's own step 5 runs; JEV-55 decides what its
-        step 6 must write down.
+        The old assertion required every A-wave ticket to appear in JEV-52's
+        blocker list. Post-pivot that was actively harmful: 17 tickets in those
+        waves are KILLed, so the assertion was *mechanically enforcing an
+        unreachable gate*. An audit found eight KILLed-or-PARKed tickets
+        blocking it -- the actuator could never be armed, no "after" corpus
+        could ever exist, and the product could not produce a single measured
+        number. The test was holding the defect in place.
+
+        The invariant that actually matters is the opposite one: **a gate must
+        not be blocked by work nobody intends to do.**
         """
         gate = self.sections["JEV-52"]
-        listed = set(JEV_REF_RE.findall(gate))
-        missing = []
-        for name, wave in self.waves.items():
-            if not wave.startswith("A"):
-                continue
-            num = name.split("-")[1]
-            if num.lstrip("0") not in {n.lstrip("0") for n in listed}:
-                missing.append(name)
-        self.assertEqual(
-            [], missing,
-            f"Phase A tickets absent from JEV-52's blockers: {missing}",
+        # Only the blocker table, not the whole ticket -- the prose deliberately
+        # names the dead tickets to explain why they were removed.
+        # Only the TABLE ROWS, not the surrounding prose -- the prose
+        # deliberately names the eight dead tickets in order to explain why
+        # they were removed, and scanning it would re-report them forever.
+        start = gate.find("| ticket | why it gates arming | state |")
+        stop = gate.find("**Deliberately NOT blockers**")
+        self.assertGreater(start, 0, "JEV-52's blocker TABLE is missing")
+        self.assertGreater(stop, start, "JEV-52's blocker section lost its shape")
+        blockers = set(JEV_REF_RE.findall(gate[start:stop]))
+        self.assertGreaterEqual(
+            len(blockers), 4,
+            "JEV-52's blocker table parsed to almost nothing -- the table "
+            "format changed and this assertion is now vacuous",
         )
+
+        dead = []
+        for num in blockers:
+            name = f"JEV-{num}"
+            blob = self.sections.get(name)
+            if blob is None:
+                continue
+            m = re.search(r"PIVOT TRIAGE 2026-09-21 — (\w+)", blob)
+            if m and m.group(1) in ("KILL", "PARK"):
+                dead.append(f"{name} ({m.group(1)})")
+        self.assertEqual(
+            [], sorted(dead),
+            "JEV-52 is blocked by work nobody intends to do, so it can never "
+            f"close and nothing can ever be armed: {sorted(dead)}",
+        )
+
+    def test_no_live_ticket_is_blocked_by_a_dead_one(self) -> None:
+        """The same defect, generalised beyond the gate.
+
+        A live ticket blocked by a KILLed one is stuck forever, and nothing in
+        the board says so -- the blocker line looks perfectly normal. Found by
+        audit on JEV-46 ("it gates JEV-27", KILLed) and JEV-28 (whose cheapest
+        path is JEV-22, KILLed).
+        """
+        stuck = []
+        for name, blob in self.sections.items():
+            tri = re.search(r"PIVOT TRIAGE 2026-09-21 — (\w+)", blob)
+            if not tri or tri.group(1) in ("KILL", "PARK"):
+                continue
+            st = STATUS_RE.search(blob)
+            if st and "done" in st.group(1).lower():
+                continue  # already shipped; its blockers are history, not a trap
+            bm = BLOCKED_RE.search(blob)
+            if not bm:
+                continue
+            for num in _live_edges(bm.group(1)):
+                dep = self.sections.get(f"JEV-{num}")
+                if dep is None:
+                    continue
+                dtri = re.search(r"PIVOT TRIAGE 2026-09-21 — (\w+)", dep)
+                if dtri and dtri.group(1) == "KILL":
+                    stuck.append(f"{name} blocked by dead JEV-{num}")
+        self.assertEqual([], sorted(stuck), "\n".join(sorted(stuck)))
 
     def test_no_phase_a_ticket_claims_to_register_or_arm_anything(self) -> None:
         """The standing rule that the dev/live gate exists to enforce."""

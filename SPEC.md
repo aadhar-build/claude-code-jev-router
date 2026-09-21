@@ -65,9 +65,21 @@ itself is out of reach, and per-turn routing is impossible.
 > **Lower realised cost per delegated task, at equal task success, with no added
 > felt latency** — plus context reduction where it removes more than it costs.
 
-**And the asymmetry that makes the project worth doing anyway:** one delegation
-moved Opus→Haiku saves **$0.0520** against a **$0.000014** Jev call —
-**3,674× leverage.** Routing is the only mechanism in the repo with that sign.
+**And the asymmetry that makes the project worth doing anyway** — stated with
+the unit it was actually measured in, after an audit found it quoted wrongly in
+three files:
+
+`FINDINGS.md:546` measures **$0.0520 saved per TURN correctly downgraded** (a
+representative turn: 30K cache read, 2K write, 1.5K out — $0.0650 on Opus,
+$0.0130 on Haiku), against a **$0.000014** Jev call: **3,674× leverage on one
+decision.**
+
+The routing decision is taken **once per delegated task**, and a delegated task
+is a median **38 requests** (§10). So the leverage on a *delegation* is larger
+than 3,674× — but **how much larger is unmeasured**, because it depends on how
+many of those 38 turns would actually have been downgraded, which nothing has
+counted. **Do not multiply these numbers together and publish the result.**
+Routing remains the only mechanism in the repo with this sign.
 
 The difference is not cosmetic. The old deliverable was *a number about Jev*.
 The new deliverable is *a faster, cheaper session that is no worse*. Almost all
@@ -292,8 +304,9 @@ prevents.
 The original P1 was "adopt `tamaratran/fast-jev-compaction`" — 5,405 stars, MIT,
 clean TypeScript, 29/29 tests passing. **Its core mechanism is empirically shown
 not to work**, by four independent reporters using the repo's own code against
-the live API. Detail is in `.scratch/pivot/harvest-compaction.md`; the three
-findings that matter:
+the live API. Detail is in the agent's harvest report (summarised here rather than
+stored separately — the standalone file was never written); the three findings
+that matter:
 
 1. **No signal.** 87.7% reduction with Jev vs **88.5% with a constant-0 asker**
    on the same 256 tool calls. Every `keepResult` score was below 0.3. Cause is
@@ -331,7 +344,7 @@ cache-neutral by construction, whereas pruning mid-session invalidates the
 prompt cache from the edit point onward and is not automatically a win. It is
 also the one place none of the surveyed repos has built for a coding agent.
 
-⏳ *P3's concrete starting code pending the provider/routing agent.*
+*(Provider and routing choices landed in §4 and §7.)*
 
 ---
 
@@ -520,7 +533,7 @@ access is not the blocker previously recorded.
   operator's sessions are indicative, not inferential**, and the report must say
   so rather than printing a confident interval.
 
-⏳ *Full 57-ticket triage pending the repo-audit agent.*
+*The full triage landed 2026-09-21 and is summarised in §9; every ticket in `ISSUES.md` carries a `PIVOT TRIAGE` line. There are **58** headings, not 57.*
 
 ---
 
@@ -578,7 +591,7 @@ clean checkout.**
 
 ### Ticket triage, summarised
 
-**16 KEEP · 15 REPURPOSE · 6 PARK · 21 KILL** across the 58 headings (the
+**24 KEEP · 13 REPURPOSE · 4 PARK · 17 KILL** across the 58 headings (the
 board's "57" is itself off by one). Roughly 1,500 lines of Python and the top
 third of `ISSUES.md` go: the agreement statistics, `PREREGISTRATION.md` as a
 live document, `tests/test_board.py`, the `cc_*` arms *as arms*, the `stop` /

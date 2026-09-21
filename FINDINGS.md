@@ -1,5 +1,26 @@
 # Findings
 
+> ## ⚠️ PIVOT BANNER — read before citing anything here
+>
+> **This project pivoted on 2026-09-21.** The measurement programme these
+> findings served was retired; the live spec is `SPEC.md`. FINDINGS remains the
+> record of **what was actually measured**, and several of its numbers are still
+> load-bearing — but three corrections apply:
+>
+> 1. **Collection is STOPPED**, frozen 2026-09-20T21:42Z. The header below says
+>    it "has started" and that Phase 1's window is open. That was true when
+>    written and is false now.
+> 2. **Session cost figures here predate the costing fix** (`98979a7`), which
+>    moved delegated spend **+82.6%** and the total **+24.6%**. Any dollar
+>    figure in this file is understated. `SPEC.md` §11 has the corrected anchor.
+> 3. **"$0.0520 / 3,674× leverage" is PER TURN**, not per delegation — this file
+>    (Part 4c) states that correctly; two other documents quoted it wrongly and
+>    have been corrected.
+>
+> Nothing here has been rewritten. A findings file edited after the fact to suit
+> a new goal would be worthless.
+
+
 A running record of everything this study has established, with the evidence for
 each and an explicit statement of how much weight it bears. Written as raw
 material for a writeup, not as the writeup.

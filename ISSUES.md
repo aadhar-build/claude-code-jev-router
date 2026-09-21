@@ -36,13 +36,13 @@ describes remain readable where tickets reference them.
 
 | # | workstream | state |
 |---|---|---|
-| **W0** | **Measure inline vs delegated on our own corpus.** Does AqueGen's result replicate — is delegating *at all* more expensive than working inline? **Blocks W4** | in progress |
-| **W1** | **The static floor.** `PreToolUse` on `Agent`, `subagent_type → tier` map, **zero Jev calls, zero added latency**. The first shippable thing, and the baseline Jev must beat | in progress |
-| **W2** | **Safe install + teardown**, opt-in per project. Must work *before* the router is armed | not started |
-| **W3** | **The accuracy gate** — per-task pass/fail, blinded by construction (JEV-29 + JEV-36) | not started |
+| **W0** | **Measure inline vs delegated on our own corpus.** Does AqueGen's result replicate — is delegating *at all* more expensive than working inline? | ✅ **done** (`8715fc6`) — it does **not** replicate; delegation is cheaper here. Keep delegating |
+| **W1** | **The static floor.** `PreToolUse` on `Agent`, `subagent_type → tier` map, **zero Jev calls, zero added latency**. The first shippable thing, and the baseline Jev must beat | ✅ **done** (`bcd982f`) — built, **not armed** |
+| **W2** | **Safe install + teardown**, opt-in per project. Must work *before* the router is armed | ✅ **done** (`0f5901f`) — `jev install`/`uninstall`, `JEV_HOME`, two switches, JEV-56 closed |
+| **W3** | **The accuracy gate** — per-task pass/fail, blinded by construction (JEV-29 + JEV-36) | ✅ **done** (`df79e67`) — but it **exits 1 ("could not run")** until JEV-58 lands labels |
 | **W4** | **Jev enters**, aimed at the `general-purpose` residue (65–79%, disputed — see the corpus-size note below). **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3, and JEV-57 |
-| **W5** | **58** — label `data/labels/` so the accuracy gate can clear Class 1 at all; **57** (the ledger needs a `project` field); **59** (baseline snapshots still carry the defective costing rule) | The follow-ups this wave handed over. 58 is the **cheapest high-value item on the board**: without labels the accuracy gate cannot clear Class 1 at all. 57 blocks W4 |
-| **W5** | **Context reduction.** Must clear the +337-token / +557ms bar, so it fires only on large payloads | not started |
+| **W5** | **Unstick the gate and produce the first "after".** **06** (the before/after reporter — it has never existed), **57** (ledger `project` field, before a second repo installs), **58** (label `data/labels/`), **59** (re-snapshot under the corrected rule), then **52** — arm it | **THE CRITICAL PATH.** Nothing this project claims has ever been measured, because the actuator has never fired. 58 is the cheapest item and gates everything: without labels the accuracy gate cannot clear Class 1 at all |
+| **W6** | **Context reduction.** Must clear the +337-token / +557ms bar, so it fires only on large payloads | not started |
 | **W7** | **Operate** — canary on a schedule, latency SLO, weekly cost report | not started |
 
 ## Four operator decisions, 2026-09-21
@@ -903,9 +903,16 @@ same cost; nothing is discarded, only deferred.
 **Labels:** science, hooks
 **Blocked by:** **JEV-52** (the activation gate), JEV-34 (the surface), JEV-35 (the actuator and its gates),
 JEV-36 (outcome measurement), JEV-24a (the pre-rule baseline this destroys),
-JEV-27 (the stopping rule), JEV-28 (Fable pricing, now inside a primary
+~~JEV-27 (the stopping rule)~~, JEV-28 (Fable pricing, now inside a primary
 outcome), JEV-29 (the grader), **JEV-46** (the third routing arm), **JEV-47**
 (delegation-shape equality), **JEV-52** (the activation gate — this ticket needs live collection, which does not exist until the gate opens).
+
+**JEV-27 struck from the blocker list, 2026-09-21.** JEV-27 is KILLed, so that
+edge made this ticket **permanently stuck** — a live ticket waiting on work
+nobody intends to do, which looks like an ordinary blocker line and never
+resolves. Found by `tests/test_board.py::test_no_live_ticket_is_blocked_by_a_dead_one`,
+written the same day after the same defect was found blocking JEV-52 eight times
+over.
 
 **Prior-art amendment (2026-09-20).** Three changes from `.scratch/prior-art.md`:
 1. **A third routing arm, `random_matched` (JEV-46), is now required.** Two arms
@@ -1120,6 +1127,8 @@ routable.
 ---
 
 ## JEV-29: The blinded grader — build it, freeze it, prove the blind holds
+
+**Status: done 2026-09-21 (`df79e67`) — shipped as `src/accuracy_gate.py`.** The rubric in the body below is SUPERSEDED by `SPEC.md` §6; the code follows the SPEC.
 
 **PIVOT TRIAGE 2026-09-21 — REPURPOSE.** PROMOTED. From 'primary quality measure for the A/B' to THE ACCURACY GATE on every optimization. Must become per-task pass/fail
 
@@ -1545,6 +1554,8 @@ lands** — JEV-35 must update it deliberately, not delete it.
 
 ## JEV-35: Make the routing hook an actuator — behind two new gates
 
+**Status: done 2026-09-21 (`bcd982f`) — built, NOT armed.** Arming is JEV-52.
+
 ### ⚠️ W1 FINDING, 2026-09-21 — the bug that would have made treatment identical to control
 
 **`tool_input.model` takes an ALIAS, not a model id.** The `Agent` tool schema
@@ -1649,6 +1660,8 @@ fail-open, kill switch, GATE 4 — all apply, plus two written for this one
 ---
 
 ## JEV-36: A/B outcome measurement — both primaries, per delegated task
+
+**Status: done 2026-09-21 (`df79e67`) — shipped as `src/subagent_outcomes.py`.**
 
 **PIVOT TRIAGE 2026-09-21 — KEEP.** PROMOTED. How you would ever know it worked. Cannot come from PostToolUse - needs SubagentStop
 
@@ -3007,36 +3020,34 @@ nothing. Both corrected, and `worker.py` now uses `paths.SPOOL_CLAIMED` /
 
 Status: blocked
 Labels: gate, safety, science
-Blocked by: **every ticket in Phase A**, and as of 2026-09-21 the list below is
-read off the wave table rather than maintained by hand — which is how it came to
-omit six tickets, including two the gate's own steps depend on:
+Blocked by: **the live safety set below.** Rewritten 2026-09-21 after an audit
+found the previous list contained **eight tickets that are KILLed or PARKed** —
+JEV-12, 25, 27, 28, 39, 48, 50, 55. **The gate was unreachable**, which meant the
+actuator could never be armed, no "after" corpus could ever exist, and the
+product could not produce a single measured number. That was the board's worst
+structural defect and it was invisible from any single ticket.
 
-| wave | blockers |
-|---|---|
-| A1 | JEV-30, JEV-31, JEV-31b, JEV-44, JEV-51 |
-| A2 | JEV-16 (Run A), JEV-32, JEV-43, JEV-49 |
-| A3 | JEV-17, JEV-28, JEV-29, **JEV-34** |
-| A4 | JEV-25, JEV-46, JEV-47, **JEV-55** |
-| A5 | JEV-27, JEV-35, JEV-50 |
-| A6 | JEV-36, JEV-37, JEV-39 |
-| A7 | JEV-45, JEV-48, **JEV-56** |
+The list is now scoped to **what must be true before a hook is allowed to change
+real work**, not "everything anyone ever planned":
 
-**The six that were missing, and why two of them matter more than bookkeeping:**
-JEV-37, JEV-39, JEV-45, JEV-55 were absent entirely; JEV-12 and JEV-54 were
-absent and have since moved to Phase B, so they are correctly not blockers.
+| ticket | why it gates arming | state |
+|---|---|---|
+| **JEV-35** | the actuator itself exists and its gates pass | ✅ `bcd982f` |
+| **JEV-40** | OFF is *proven* equal to vanilla | ✅ done |
+| **JEV-51** | disabled means **quiescent**, not merely silent | ✅ done |
+| **JEV-56** | the suite is green from a **clean checkout** | ✅ `0f5901f` |
+| **JEV-57** | the ledger can tell one repo from another — **must land before a second repo installs, not after** | ⬜ open |
+| **JEV-58** | the accuracy gate can actually *pass*. SPEC non-negotiable 6 forbids enabling anything whose gate has not passed, and today it exits 1 | ⬜ open |
+| **JEV-37** | a canary baseline exists *before* the window opens, so drift has a reference | ⬜ open |
+| **JEV-59** | the "before" it will be compared against is correct | ⬜ open |
 
-- **JEV-37 is a prerequisite of this ticket's own step 5.** The gate requires a
-  canary baseline sweep recorded before the window opens, and 37 is the ticket
-  that builds the scheduler and wrapper to record it. The gate was blocking on
-  everything except the thing one of its steps runs.
-- **JEV-55 is a prerequisite of this ticket's own step 6.** The amendment must
-  state the primary interval, and 55 is the ticket deciding whether that
-  interval can be computed at all. Amending the pre-registration before 55
-  reports would commit us to a metric we already know is degenerate.
+**Deliberately NOT blockers**, recorded so nobody re-adds them:
 
-**JEV-34 is `done` but carries one deferred box** — the live spawn-latency
-measurement, which Phase A cannot perform. This gate must not read 34 as fully
-closed: the surface is proven inert, not proven cheap.
+- **JEV-34's deferred box** (live spawn latency) — it *requires* arming, so making
+  it a blocker is circular. It is the first measurement taken *after* the gate.
+- **JEV-06** (the before/after reporter) — needed to get *value* from arming, not
+  to arm *safely*. It is on the critical path (W5) but it is not a safety gate.
+- Everything KILLed or PARKed.
 
 **Why this ticket exists.** The operator's constraint is that the system is
 dev-complete before any part of it goes live. A rule in prose is not a gate — an
@@ -3397,6 +3408,8 @@ than a footnote.
 ---
 
 ## JEV-56: `reversibility.sh` cannot be green on a clean checkout, which is what the gate demands
+
+**Status: done 2026-09-21 (`0f5901f`) — 44/44 LIVE, 45/45 FIXTURE on a real clean checkout.**
 
 **PIVOT TRIAGE 2026-09-21 — KEEP.** PROMOTED TO P0. You cannot distribute a tool whose suite cannot go green on a clean checkout
 
