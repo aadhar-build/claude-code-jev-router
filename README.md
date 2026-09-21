@@ -25,7 +25,7 @@ delegated task before it spawns, opt-in per project, reversible in one command.
 `subagent_type → tier` map, zero classifier calls, zero added latency. Five
 independent sources find classifier routers frequently fail to beat exactly that
 trivial baseline, while published static heuristics already deliver 46% and 28%
-savings. Jev enters as increment two, aimed at the 65% of delegated tasks typed
+savings. Jev enters as increment two, aimed at the majority of delegated tasks typed
 `general-purpose` where the static rule has no signal, and **it ships only if it
 beats the static rule on realised cost at equal task success.**
 

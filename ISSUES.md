@@ -40,7 +40,7 @@ describes remain readable where tickets reference them.
 | **W1** | **The static floor.** `PreToolUse` on `Agent`, `subagent_type → tier` map, **zero Jev calls, zero added latency**. The first shippable thing, and the baseline Jev must beat | in progress |
 | **W2** | **Safe install + teardown**, opt-in per project. Must work *before* the router is armed | not started |
 | **W3** | **The accuracy gate** — per-task pass/fail, blinded by construction (JEV-29 + JEV-36) | not started |
-| **W4** | **Jev enters**, aimed at the 65% `general-purpose` residue. **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3 |
+| **W4** | **Jev enters**, aimed at the `general-purpose` residue (65–79%, disputed — see the corpus-size note below). **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3 |
 | **W5** | **Context reduction.** Must clear the +337-token / +557ms bar, so it fires only on large payloads | not started |
 | **W6** | **Operate** — canary on a schedule, latency SLO, weekly cost report | not started |
 

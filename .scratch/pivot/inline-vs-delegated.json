@@ -1,0 +1,3330 @@
+{
+  "schema": "inline-vs-delegated-v1",
+  "caveats": [
+    "LOWER BOUND: FINDINGS.md Part 1.4 -- transcript-derived cost runs ~27.6% under Claude Code's own total.",
+    "NO CI: JEV-55 -- this corpus is effectively one session. Descriptives only.",
+    "Run rows in data/runs are NOT used: JEV-49 says the corrections are inapplicable to them.",
+    "Cache-write TTL read per row (Amendment 8 A8.2), never inferred from the auth path."
+  ],
+  "corpora": [
+    {
+      "label": "main-project",
+      "project_dir": "/Users/aadharagarwal/.claude/projects/-Users-aadharagarwal-projects-JEV-experiments",
+      "pricing_version": "pricing-2026-09-20b",
+      "sessions_with_activity": 44,
+      "delegated_tasks": 33,
+      "overall": {
+        "tasks": 33,
+        "cost_usd": {
+          "n": 33,
+          "min": 0.108587,
+          "p25": 2.215457,
+          "median": 4.500166,
+          "p75": 7.512106,
+          "max": 13.353542,
+          "mean": 5.210447,
+          "sum": 171.944749
+        },
+        "requests": {
+          "n": 33,
+          "min": 6.0,
+          "p25": 20.0,
+          "median": 38.0,
+          "p75": 59.0,
+          "max": 107.0,
+          "mean": 42.363636,
+          "sum": 1398.0
+        },
+        "total_usd": 171.944749,
+        "components_usd": {
+          "input_tokens": 26.112319,
+          "output_tokens": 42.619545,
+          "cache_read_input_tokens": 76.019373,
+          "ephemeral_5m_input_tokens": 27.193523,
+          "ephemeral_1h_input_tokens": 0.0
+        },
+        "cache_write_share": 0.1582,
+        "cache_read_share": 0.4421,
+        "cold_start_prefix_usd_total": 3.459937,
+        "cold_start_share_of_cost": 0.0201,
+        "cold_start_prefix_tokens": {
+          "n": 33,
+          "min": 12797.0,
+          "p25": 15990.0,
+          "median": 16515.0,
+          "p75": 21514.0,
+          "max": 22122.0,
+          "mean": 18148.939394,
+          "sum": 598915.0
+        },
+        "counterfactual_net_usd": {
+          "n": 30,
+          "min": -13.540625,
+          "p25": -9.660409,
+          "median": -6.557328,
+          "p75": -2.681377,
+          "max": -0.004657,
+          "mean": -6.316942,
+          "sum": -189.50826
+        },
+        "counterfactual_resolvable": 30,
+        "inline_same_n_usd_total": 357.525359,
+        "breakeven_turn_ratio": {
+          "n": 30,
+          "min": 0.0809,
+          "p25": 0.4304,
+          "median": 0.4704,
+          "p75": 0.5319,
+          "max": 0.9934,
+          "mean": 0.507747,
+          "sum": 15.2324
+        },
+        "spawn_models": {
+          "claude-opus-5": 30
+        },
+        "ttl_of_cold_start": {
+          "5m": 33
+        },
+        "single_request_tasks": 0,
+        "tool_errors": 15,
+        "interruptions": 3,
+        "permission_denials": 3,
+        "unpriced_requests": 2
+      },
+      "by_agent_type": {
+        "Explore": {
+          "tasks": 2,
+          "cost_usd": {
+            "n": 2,
+            "min": 0.697533,
+            "p25": 0.697533,
+            "median": 1.72473,
+            "p75": 2.751926,
+            "max": 2.751926,
+            "mean": 1.72473,
+            "sum": 3.449459
+          },
+          "requests": {
+            "n": 2,
+            "min": 8.0,
+            "p25": 8.0,
+            "median": 15.0,
+            "p75": 22.0,
+            "max": 22.0,
+            "mean": 15.0,
+            "sum": 30.0
+          },
+          "total_usd": 3.449459,
+          "components_usd": {
+            "input_tokens": 0.469445,
+            "output_tokens": 1.135175,
+            "cache_read_input_tokens": 0.854183,
+            "ephemeral_5m_input_tokens": 0.990657,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "cache_write_share": 0.2872,
+          "cache_read_share": 0.2476,
+          "cold_start_prefix_usd_total": 0.232775,
+          "cold_start_share_of_cost": 0.0675,
+          "cold_start_prefix_tokens": {
+            "n": 2,
+            "min": 17452.0,
+            "p25": 17452.0,
+            "median": 18622.0,
+            "p75": 19792.0,
+            "max": 19792.0,
+            "mean": 18622.0,
+            "sum": 37244.0
+          },
+          "counterfactual_net_usd": {
+            "n": 2,
+            "min": -1.429918,
+            "p25": -1.429918,
+            "median": -0.717287,
+            "p75": -0.004657,
+            "max": -0.004657,
+            "mean": -0.717287,
+            "sum": -1.434575
+          },
+          "counterfactual_resolvable": 2,
+          "inline_same_n_usd_total": 4.884034,
+          "breakeven_turn_ratio": {
+            "n": 2,
+            "min": 0.6581,
+            "p25": 0.6581,
+            "median": 0.82575,
+            "p75": 0.9934,
+            "max": 0.9934,
+            "mean": 0.82575,
+            "sum": 1.6515
+          },
+          "spawn_models": {
+            "claude-opus-5": 2
+          },
+          "ttl_of_cold_start": {
+            "5m": 2
+          },
+          "single_request_tasks": 0,
+          "tool_errors": 0,
+          "interruptions": 0,
+          "permission_denials": 0,
+          "unpriced_requests": 0
+        },
+        "Plan": {
+          "tasks": 2,
+          "cost_usd": {
+            "n": 2,
+            "min": 0.810694,
+            "p25": 0.810694,
+            "median": 1.513075,
+            "p75": 2.215457,
+            "max": 2.215457,
+            "mean": 1.513075,
+            "sum": 3.026151
+          },
+          "requests": {
+            "n": 2,
+            "min": 6.0,
+            "p25": 6.0,
+            "median": 10.0,
+            "p75": 14.0,
+            "max": 14.0,
+            "mean": 10.0,
+            "sum": 20.0
+          },
+          "total_usd": 3.026151,
+          "components_usd": {
+            "input_tokens": 0.411395,
+            "output_tokens": 1.302,
+            "cache_read_input_tokens": 0.531925,
+            "ephemeral_5m_input_tokens": 0.780831,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "cache_write_share": 0.258,
+          "cache_read_share": 0.1758,
+          "cold_start_prefix_usd_total": 0.225831,
+          "cold_start_share_of_cost": 0.0746,
+          "cold_start_prefix_tokens": {
+            "n": 2,
+            "min": 15909.0,
+            "p25": 15909.0,
+            "median": 18066.5,
+            "p75": 20224.0,
+            "max": 20224.0,
+            "mean": 18066.5,
+            "sum": 36133.0
+          },
+          "counterfactual_net_usd": {
+            "n": 2,
+            "min": -2.681377,
+            "p25": -2.681377,
+            "median": -1.367409,
+            "p75": -0.05344,
+            "max": -0.05344,
+            "mean": -1.367409,
+            "sum": -2.734817
+          },
+          "counterfactual_resolvable": 2,
+          "inline_same_n_usd_total": 5.760967,
+          "breakeven_turn_ratio": {
+            "n": 2,
+            "min": 0.4524,
+            "p25": 0.4524,
+            "median": 0.6953,
+            "p75": 0.9382,
+            "max": 0.9382,
+            "mean": 0.6953,
+            "sum": 1.3906
+          },
+          "spawn_models": {
+            "claude-opus-5": 2
+          },
+          "ttl_of_cold_start": {
+            "5m": 2
+          },
+          "single_request_tasks": 0,
+          "tool_errors": 0,
+          "interruptions": 0,
+          "permission_denials": 0,
+          "unpriced_requests": 0
+        },
+        "claude-code-guide": {
+          "tasks": 3,
+          "cost_usd": {
+            "n": 3,
+            "min": 0.108587,
+            "p25": 0.108587,
+            "median": 0.375352,
+            "p75": 0.476288,
+            "max": 0.476288,
+            "mean": 0.320076,
+            "sum": 0.960227
+          },
+          "requests": {
+            "n": 3,
+            "min": 9.0,
+            "p25": 9.0,
+            "median": 22.0,
+            "p75": 24.0,
+            "max": 24.0,
+            "mean": 18.333333,
+            "sum": 55.0
+          },
+          "total_usd": 0.960227,
+          "components_usd": {
+            "input_tokens": 0.209954,
+            "output_tokens": 0.19437,
+            "cache_read_input_tokens": 0.269997,
+            "ephemeral_5m_input_tokens": 0.285907,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "cache_write_share": 0.2977,
+          "cache_read_share": 0.2812,
+          "cold_start_prefix_usd_total": 0.070821,
+          "cold_start_share_of_cost": 0.0738,
+          "cold_start_prefix_tokens": {
+            "n": 3,
+            "min": 12797.0,
+            "p25": 12797.0,
+            "median": 21781.0,
+            "p75": 22079.0,
+            "max": 22079.0,
+            "mean": 18885.666667,
+            "sum": 56657.0
+          },
+          "counterfactual_net_usd": {
+            "n": 2,
+            "min": -5.409646,
+            "p25": -5.409646,
+            "median": -3.041928,
+            "p75": -0.67421,
+            "max": -0.67421,
+            "mean": -3.041928,
+            "sum": -6.083856
+          },
+          "counterfactual_resolvable": 2,
+          "inline_same_n_usd_total": 6.935495,
+          "breakeven_turn_ratio": {
+            "n": 2,
+            "min": 0.0809,
+            "p25": 0.0809,
+            "median": 0.21925,
+            "p75": 0.3576,
+            "max": 0.3576,
+            "mean": 0.21925,
+            "sum": 0.4385
+          },
+          "spawn_models": {
+            "claude-opus-5": 2
+          },
+          "ttl_of_cold_start": {
+            "5m": 3
+          },
+          "single_request_tasks": 0,
+          "tool_errors": 1,
+          "interruptions": 0,
+          "permission_denials": 0,
+          "unpriced_requests": 0
+        },
+        "general-purpose": {
+          "tasks": 26,
+          "cost_usd": {
+            "n": 26,
+            "min": 0.443183,
+            "p25": 3.719749,
+            "median": 6.203817,
+            "p75": 7.8488,
+            "max": 13.353542,
+            "mean": 6.327266,
+            "sum": 164.508912
+          },
+          "requests": {
+            "n": 26,
+            "min": 7.0,
+            "p25": 26.0,
+            "median": 45.0,
+            "p75": 73.0,
+            "max": 107.0,
+            "mean": 49.730769,
+            "sum": 1293.0
+          },
+          "total_usd": 164.508912,
+          "components_usd": {
+            "input_tokens": 25.021525,
+            "output_tokens": 39.988,
+            "cache_read_input_tokens": 74.363268,
+            "ephemeral_5m_input_tokens": 25.136128,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "cache_write_share": 0.1528,
+          "cache_read_share": 0.452,
+          "cold_start_prefix_usd_total": 2.93051,
+          "cold_start_share_of_cost": 0.0178,
+          "cold_start_prefix_tokens": {
+            "n": 26,
+            "min": 15379.0,
+            "p25": 15990.0,
+            "median": 16400.5,
+            "p75": 21514.0,
+            "max": 22122.0,
+            "mean": 18033.884615,
+            "sum": 468881.0
+          },
+          "counterfactual_net_usd": {
+            "n": 24,
+            "min": -13.540625,
+            "p25": -10.523606,
+            "median": -7.787002,
+            "p75": -4.087393,
+            "max": -0.0772,
+            "mean": -7.468959,
+            "sum": -179.255012
+          },
+          "counterfactual_resolvable": 24,
+          "inline_same_n_usd_total": 339.944863,
+          "breakeven_turn_ratio": {
+            "n": 24,
+            "min": 0.3533,
+            "p25": 0.4374,
+            "median": 0.4704,
+            "p75": 0.5235,
+            "max": 0.8516,
+            "mean": 0.489658,
+            "sum": 11.7518
+          },
+          "spawn_models": {
+            "claude-opus-5": 24
+          },
+          "ttl_of_cold_start": {
+            "5m": 26
+          },
+          "single_request_tasks": 0,
+          "tool_errors": 14,
+          "interruptions": 3,
+          "permission_denials": 3,
+          "unpriced_requests": 2
+        }
+      },
+      "frozen_vs_corrected": {
+        "delegated_cost_frozen_rule_usd": 105.086239,
+        "delegated_cost_corrected_usd": 171.944749,
+        "understatement_usd": 66.85851,
+        "understatement_pct": 38.88
+      },
+      "sessions": [
+        {
+          "session_id": "0982af7b-db24-4935-82a4-e6db1b01c9a4",
+          "main_requests": 4,
+          "main_cost_usd": 0.496186,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 9,
+            "output_tokens": 4969,
+            "cache_read_input_tokens": 126594,
+            "ephemeral_5m_input_tokens": 49379,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.5078737499999999,
+            "computed_cost_usd": 0.496186,
+            "ratio": 0.977
+          }
+        },
+        {
+          "session_id": "0b34eb46-eb0c-4e71-bdcc-0fd7b282e7d2",
+          "main_requests": 3,
+          "main_cost_usd": 0.408564,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 8,
+            "output_tokens": 4167,
+            "cache_read_input_tokens": 112736,
+            "ephemeral_5m_input_tokens": 39677,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.42109025000000005,
+            "computed_cost_usd": 0.408564,
+            "ratio": 0.9703
+          }
+        },
+        {
+          "session_id": "18a4fb13-1f30-4ae9-8abf-9ce7cf2b4384",
+          "main_requests": 5,
+          "main_cost_usd": 0.483511,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 10,
+            "output_tokens": 3451,
+            "cache_read_input_tokens": 272323,
+            "ephemeral_5m_input_tokens": 41764,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.49754849999999995,
+            "computed_cost_usd": 0.483511,
+            "ratio": 0.9718
+          }
+        },
+        {
+          "session_id": "19e6780b-be69-4b5f-8056-92d2e8834e8b",
+          "main_requests": 3,
+          "main_cost_usd": 0.314949,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 8,
+            "output_tokens": 6280,
+            "cache_read_input_tokens": 82656,
+            "ephemeral_5m_input_tokens": 18653,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.31754725000000006,
+            "computed_cost_usd": 0.314949,
+            "ratio": 0.9918
+          }
+        },
+        {
+          "session_id": "1d926ee0-e031-4e1b-843d-55096f168159",
+          "main_requests": 2,
+          "main_cost_usd": 0.399577,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 5064,
+            "cache_read_input_tokens": 65696,
+            "ephemeral_5m_input_tokens": 38415,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.41605475000000003,
+            "computed_cost_usd": 0.399577,
+            "ratio": 0.9604
+          }
+        },
+        {
+          "session_id": "20299ea6-2465-47e3-990e-214ceca98deb",
+          "main_requests": 6,
+          "main_cost_usd": 0.613445,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 11,
+            "output_tokens": 6787,
+            "cache_read_input_tokens": 217855,
+            "ephemeral_5m_input_tokens": 53566,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.623447,
+            "computed_cost_usd": 0.613445,
+            "ratio": 0.984
+          }
+        },
+        {
+          "session_id": "2a042102-d5fa-4d22-8a0a-3f0f5eec81c3",
+          "main_requests": 10,
+          "main_cost_usd": 1.078752,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 15,
+            "output_tokens": 7940,
+            "cache_read_input_tokens": 644853,
+            "ephemeral_5m_input_tokens": 89240,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 1.0955685,
+            "computed_cost_usd": 1.078752,
+            "ratio": 0.9846
+          }
+        },
+        {
+          "session_id": "4578ec68-18b9-490d-9fd1-6e87891adfd3",
+          "main_requests": 3,
+          "main_cost_usd": 0.282092,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 8,
+            "output_tokens": 5079,
+            "cache_read_input_tokens": 129216,
+            "ephemeral_5m_input_tokens": 14475,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.29458775,
+            "computed_cost_usd": 0.282092,
+            "ratio": 0.9576
+          }
+        },
+        {
+          "session_id": "48f5b07c-0360-4437-ba3c-9ff97dd399bd",
+          "main_requests": 4,
+          "main_cost_usd": 0.310265,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 9,
+            "output_tokens": 2439,
+            "cache_read_input_tokens": 143239,
+            "ephemeral_5m_input_tokens": 28420,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.31522649999999997,
+            "computed_cost_usd": 0.310265,
+            "ratio": 0.9843
+          }
+        },
+        {
+          "session_id": "4ba49645-fb8d-4fb2-b496-c274f6ed1490",
+          "main_requests": 600,
+          "main_cost_usd": 119.022688,
+          "main_unpriced_requests": 1,
+          "main_tokens": {
+            "input_tokens": 722738,
+            "output_tokens": 856760,
+            "cache_read_input_tokens": 144598661,
+            "ephemeral_5m_input_tokens": 8798,
+            "ephemeral_1h_input_tokens": 2163568
+          },
+          "delegated_tasks": 33,
+          "delegated_cost_usd": 171.944749,
+          "delegated_cost_frozen_rule_usd": 105.086239,
+          "coverage": {
+            "reported_cost_usd": 383.77817055000054,
+            "computed_cost_usd": 290.967437,
+            "ratio": 0.7582
+          }
+        },
+        {
+          "session_id": "5378b3e4-6c59-48a2-b7a9-cd5fb13b5773",
+          "main_requests": 4,
+          "main_cost_usd": 0.472975,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 9,
+            "output_tokens": 3212,
+            "cache_read_input_tokens": 206498,
+            "ephemeral_5m_input_tokens": 46301,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.50120425,
+            "computed_cost_usd": 0.472975,
+            "ratio": 0.9437
+          }
+        },
+        {
+          "session_id": "53bbfa19-2c93-404b-a982-367e5bd70895",
+          "main_requests": 5,
+          "main_cost_usd": 0.174377,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 10,
+            "output_tokens": 1670,
+            "cache_read_input_tokens": 133429,
+            "ephemeral_5m_input_tokens": 10538,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.17583600000000002,
+            "computed_cost_usd": 0.174377,
+            "ratio": 0.9917
+          }
+        },
+        {
+          "session_id": "5f69634b-aa6e-42da-aab3-d0b3c291b48d",
+          "main_requests": 4,
+          "main_cost_usd": 0.406498,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 9,
+            "output_tokens": 2810,
+            "cache_read_input_tokens": 111005,
+            "ephemeral_5m_input_tokens": 44912,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.41078349999999997,
+            "computed_cost_usd": 0.406498,
+            "ratio": 0.9896
+          }
+        },
+        {
+          "session_id": "60096036-c4d8-4efd-9fdb-3814bc3dfee6",
+          "main_requests": 11,
+          "main_cost_usd": 0.909399,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 16,
+            "output_tokens": 8354,
+            "cache_read_input_tokens": 518437,
+            "ephemeral_5m_input_tokens": 70600,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.9204034999999999,
+            "computed_cost_usd": 0.909399,
+            "ratio": 0.988
+          }
+        },
+        {
+          "session_id": "6045106e-912d-48f8-9ff6-01d125633de8",
+          "main_requests": 3,
+          "main_cost_usd": 0.811108,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 8,
+            "output_tokens": 12917,
+            "cache_read_input_tokens": 109899,
+            "ephemeral_5m_input_tokens": 69311,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.8285752500000001,
+            "computed_cost_usd": 0.811108,
+            "ratio": 0.9789
+          }
+        },
+        {
+          "session_id": "625e3742-18e1-4867-90a8-6a53fd451daf",
+          "main_requests": 2,
+          "main_cost_usd": 0.110234,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 1224,
+            "cache_read_input_tokens": 48260,
+            "ephemeral_5m_input_tokens": 8875,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.11304875,
+            "computed_cost_usd": 0.110234,
+            "ratio": 0.9751
+          }
+        },
+        {
+          "session_id": "62975612-d5ee-4b3a-b325-486a0b943cc6",
+          "main_requests": 8,
+          "main_cost_usd": 0.691618,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 13,
+            "output_tokens": 4033,
+            "cache_read_input_tokens": 369793,
+            "ephemeral_5m_input_tokens": 64933,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.6963157500000001,
+            "computed_cost_usd": 0.691618,
+            "ratio": 0.9933
+          }
+        },
+        {
+          "session_id": "63725bcb-6e28-436c-98b2-0e8c3e45fa87",
+          "main_requests": 9,
+          "main_cost_usd": 1.117209,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 14,
+            "output_tokens": 8437,
+            "cache_read_input_tokens": 713279,
+            "ephemeral_5m_input_tokens": 87932,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 1.1560195,
+            "computed_cost_usd": 1.117209,
+            "ratio": 0.9664
+          }
+        },
+        {
+          "session_id": "66793040-2323-4425-8518-1fb911d2da7a",
+          "main_requests": 4,
+          "main_cost_usd": 0.790524,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 9,
+            "output_tokens": 9466,
+            "cache_read_input_tokens": 253621,
+            "ephemeral_5m_input_tokens": 68323,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.82754725,
+            "computed_cost_usd": 0.790524,
+            "ratio": 0.9553
+          }
+        },
+        {
+          "session_id": "6e1f4f81-5e53-4955-bdf1-5d6c161cefb8",
+          "main_requests": 10,
+          "main_cost_usd": 0.913128,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 15,
+            "output_tokens": 9727,
+            "cache_read_input_tokens": 865355,
+            "ephemeral_5m_input_tokens": 37952,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.9519525,
+            "computed_cost_usd": 0.913128,
+            "ratio": 0.9592
+          }
+        },
+        {
+          "session_id": "6e46440d-715f-438f-8e95-9750be3f8801",
+          "main_requests": 2,
+          "main_cost_usd": 0.239999,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 1427,
+            "cache_read_input_tokens": 27016,
+            "ephemeral_5m_input_tokens": 30525,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.24252525,
+            "computed_cost_usd": 0.239999,
+            "ratio": 0.9896
+          }
+        },
+        {
+          "session_id": "75786498-731d-4d58-8b45-569f7ad2d879",
+          "main_requests": 2,
+          "main_cost_usd": 0.275015,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 747,
+            "cache_read_input_tokens": 25248,
+            "ephemeral_5m_input_tokens": 38989,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.27621825,
+            "computed_cost_usd": 0.275015,
+            "ratio": 0.9956
+          }
+        },
+        {
+          "session_id": "7b00a5bd-df0e-4158-b6fc-efdd56d3ad9d",
+          "main_requests": 4,
+          "main_cost_usd": 0.4707,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 9,
+            "output_tokens": 5543,
+            "cache_read_input_tokens": 165610,
+            "ephemeral_5m_input_tokens": 39884,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.478549,
+            "computed_cost_usd": 0.4707,
+            "ratio": 0.9836
+          }
+        },
+        {
+          "session_id": "8ff98521-1536-42d5-a2f1-638afd7dcdc5",
+          "main_requests": 4,
+          "main_cost_usd": 0.468494,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 9,
+            "output_tokens": 3860,
+            "cache_read_input_tokens": 184822,
+            "ephemeral_5m_input_tokens": 44726,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.48377149999999997,
+            "computed_cost_usd": 0.468494,
+            "ratio": 0.9684
+          }
+        },
+        {
+          "session_id": "96ca1687-348d-48bf-baf2-adae25bdeaf3",
+          "main_requests": 4,
+          "main_cost_usd": 0.302569,
+          "main_unpriced_requests": 1,
+          "main_tokens": {
+            "input_tokens": 8,
+            "output_tokens": 2760,
+            "cache_read_input_tokens": 97882,
+            "ephemeral_5m_input_tokens": 29534,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.30627350000000003,
+            "computed_cost_usd": 0.302569,
+            "ratio": 0.9879
+          }
+        },
+        {
+          "session_id": "97c68141-7d9f-46d5-87df-6440f1bbe535",
+          "main_requests": 2,
+          "main_cost_usd": 0.216396,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 624,
+            "cache_read_input_tokens": 28610,
+            "ephemeral_5m_input_tokens": 29833,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.22025825,
+            "computed_cost_usd": 0.216396,
+            "ratio": 0.9825
+          }
+        },
+        {
+          "session_id": "9bcdf73f-20bf-468a-bb21-7a24fcbbf0ab",
+          "main_requests": 3,
+          "main_cost_usd": 0.330409,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 8,
+            "output_tokens": 4793,
+            "cache_read_input_tokens": 104650,
+            "ephemeral_5m_input_tokens": 25315,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.34246275,
+            "computed_cost_usd": 0.330409,
+            "ratio": 0.9648
+          }
+        },
+        {
+          "session_id": "a1176b4f-fcae-46bb-b67b-35e6656032cc",
+          "main_requests": 12,
+          "main_cost_usd": 1.176509,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 17,
+            "output_tokens": 13089,
+            "cache_read_input_tokens": 792586,
+            "ephemeral_5m_input_tokens": 72465,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 1.19505425,
+            "computed_cost_usd": 1.176509,
+            "ratio": 0.9845
+          }
+        },
+        {
+          "session_id": "a215a9ad-51f8-4412-811d-3d158457c7f5",
+          "main_requests": 3,
+          "main_cost_usd": 0.466162,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 8,
+            "output_tokens": 3008,
+            "cache_read_input_tokens": 90568,
+            "ephemeral_5m_input_tokens": 55302,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.4767385,
+            "computed_cost_usd": 0.466162,
+            "ratio": 0.9778
+          }
+        },
+        {
+          "session_id": "a25cd7d2-ffaf-4a4c-8289-58a5ef4678a9",
+          "main_requests": 1,
+          "main_cost_usd": 0.0,
+          "main_unpriced_requests": 1,
+          "main_tokens": {},
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0,
+            "computed_cost_usd": 0.0,
+            "ratio": null
+          }
+        },
+        {
+          "session_id": "a967ae0b-12ef-49be-82e5-3ae75c3720b3",
+          "main_requests": 6,
+          "main_cost_usd": 0.559075,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 11,
+            "output_tokens": 4287,
+            "cache_read_input_tokens": 353740,
+            "ephemeral_5m_input_tokens": 43996,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.5731120000000001,
+            "computed_cost_usd": 0.559075,
+            "ratio": 0.9755
+          }
+        },
+        {
+          "session_id": "aa6831ce-bc24-4e39-b4ec-695b263133d4",
+          "main_requests": 5,
+          "main_cost_usd": 0.681091,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 10,
+            "output_tokens": 11834,
+            "cache_read_input_tokens": 291731,
+            "ephemeral_5m_input_tokens": 38292,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.6985824999999999,
+            "computed_cost_usd": 0.681091,
+            "ratio": 0.975
+          }
+        },
+        {
+          "session_id": "acf3a3c5-f58c-44d8-a6b1-d38c496b963e",
+          "main_requests": 2,
+          "main_cost_usd": 0.167911,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 998,
+            "cache_read_input_tokens": 48502,
+            "ephemeral_5m_input_tokens": 18988,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.170956,
+            "computed_cost_usd": 0.167911,
+            "ratio": 0.9822
+          }
+        },
+        {
+          "session_id": "b524be2a-77db-49af-b0ad-ed89f10f3a3d",
+          "main_requests": 2,
+          "main_cost_usd": 0.185237,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 2204,
+            "cache_read_input_tokens": 47541,
+            "ephemeral_5m_input_tokens": 17013,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.18739775,
+            "computed_cost_usd": 0.185237,
+            "ratio": 0.9885
+          }
+        },
+        {
+          "session_id": "b5d4c1a9-144f-4fbd-ade4-668a435cd09a",
+          "main_requests": 6,
+          "main_cost_usd": 0.877912,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 11,
+            "output_tokens": 12061,
+            "cache_read_input_tokens": 364013,
+            "ephemeral_5m_input_tokens": 63092,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.9028824999999999,
+            "computed_cost_usd": 0.877912,
+            "ratio": 0.9723
+          }
+        },
+        {
+          "session_id": "b7bad539-a3d8-4dd2-afc2-d97a17b456c4",
+          "main_requests": 10,
+          "main_cost_usd": 0.724254,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 15,
+            "output_tokens": 5581,
+            "cache_read_input_tokens": 441920,
+            "ephemeral_5m_input_tokens": 58191,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.7359937499999999,
+            "computed_cost_usd": 0.724254,
+            "ratio": 0.984
+          }
+        },
+        {
+          "session_id": "c94bbd26-a241-41ae-bcfc-2131e4e36902",
+          "main_requests": 2,
+          "main_cost_usd": 0.35942,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 1799,
+            "cache_read_input_tokens": 30570,
+            "ephemeral_5m_input_tokens": 47860,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.365145,
+            "computed_cost_usd": 0.35942,
+            "ratio": 0.9843
+          }
+        },
+        {
+          "session_id": "cd50bd95-651b-4659-b693-3aefeb287ba7",
+          "main_requests": 4,
+          "main_cost_usd": 0.392194,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 9,
+            "output_tokens": 4337,
+            "cache_read_input_tokens": 161298,
+            "ephemeral_5m_input_tokens": 32492,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.404815,
+            "computed_cost_usd": 0.392194,
+            "ratio": 0.9688
+          }
+        },
+        {
+          "session_id": "d16e0fe1-5695-4626-8391-a42fc04812c7",
+          "main_requests": 2,
+          "main_cost_usd": 0.142327,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 1851,
+            "cache_read_input_tokens": 49185,
+            "ephemeral_5m_input_tokens": 11428,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.1460075,
+            "computed_cost_usd": 0.142327,
+            "ratio": 0.9748
+          }
+        },
+        {
+          "session_id": "d3f38195-c32e-4f47-8cdb-9b1bec5f7bc2",
+          "main_requests": 2,
+          "main_cost_usd": 0.066011,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 311,
+            "cache_read_input_tokens": 46789,
+            "ephemeral_5m_input_tokens": 5569,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.06758675,
+            "computed_cost_usd": 0.066011,
+            "ratio": 0.9767
+          }
+        },
+        {
+          "session_id": "ddc79a40-62db-4803-9194-4f8486f51828",
+          "main_requests": 2,
+          "main_cost_usd": 0.204495,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 567,
+            "cache_read_input_tokens": 25807,
+            "ephemeral_5m_input_tokens": 28381,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.20610675,
+            "computed_cost_usd": 0.204495,
+            "ratio": 0.9922
+          }
+        },
+        {
+          "session_id": "f233c1d4-a704-428d-86db-efd255e22ea8",
+          "main_requests": 5,
+          "main_cost_usd": 0.850193,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 10,
+            "output_tokens": 10234,
+            "cache_read_input_tokens": 302449,
+            "ephemeral_5m_input_tokens": 70891,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.8719472499999998,
+            "computed_cost_usd": 0.850193,
+            "ratio": 0.9751
+          }
+        },
+        {
+          "session_id": "fa5988cb-0857-4be5-9cce-43fcacde0102",
+          "main_requests": 7,
+          "main_cost_usd": 0.694776,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 12,
+            "output_tokens": 3423,
+            "cache_read_input_tokens": 418869,
+            "ephemeral_5m_input_tokens": 63953,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.7088127500000001,
+            "computed_cost_usd": 0.694776,
+            "ratio": 0.9802
+          }
+        },
+        {
+          "session_id": "fb7c47fe-8ee2-4901-9a52-00bb3a5d409b",
+          "main_requests": 7,
+          "main_cost_usd": 0.886802,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 12,
+            "output_tokens": 11986,
+            "cache_read_input_tokens": 423997,
+            "ephemeral_5m_input_tokens": 60015,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.90900325,
+            "computed_cost_usd": 0.886802,
+            "ratio": 0.9756
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "agent_file": "agent-a0745642efe255b6e.jsonl",
+          "agent_type": "Plan",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 6,
+          "models": {
+            "claude-opus-5": 6
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 0.810694,
+          "cost_frozen_rule_usd": 0.234844,
+          "components_usd": {
+            "input_tokens": 6e-05,
+            "output_tokens": 0.57665,
+            "cache_read_input_tokens": 0.063109,
+            "ephemeral_5m_input_tokens": 0.170875,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 12,
+            "output_tokens": 23066,
+            "cache_read_input_tokens": 126217,
+            "ephemeral_5m_input_tokens": 27340,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 27340
+          },
+          "cold_start_prefix_tokens": 15909,
+          "cold_start_prefix_usd": 0.099431,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 66866,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 0.152871,
+          "counterfactual_net_usd": -0.05344,
+          "counterfactual_inline_same_n_usd": 0.864133,
+          "breakeven_turn_ratio": 0.9382,
+          "flags": {
+            "copies": 18
+          }
+        },
+        {
+          "agent_file": "agent-a07e28bc84516b554.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 47,
+          "models": {
+            "claude-opus-5": 47
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 7.512106,
+          "cost_frozen_rule_usd": 3.814434,
+          "components_usd": {
+            "input_tokens": 1.53113,
+            "output_tokens": 2.030125,
+            "cache_read_input_tokens": 2.863583,
+            "ephemeral_5m_input_tokens": 1.087269,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 306226,
+            "output_tokens": 81205,
+            "cache_read_input_tokens": 5727165,
+            "ephemeral_5m_input_tokens": 173963,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 173963
+          },
+          "cold_start_prefix_tokens": 16513,
+          "cold_start_prefix_usd": 0.103206,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 431986,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 9.763616,
+          "counterfactual_net_usd": -9.660409,
+          "counterfactual_inline_same_n_usd": 17.172516,
+          "breakeven_turn_ratio": 0.4374,
+          "flags": {
+            "copies": 94,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-a0ab1c14f226120c4.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 107,
+          "models": {
+            "claude-opus-5": 107
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 13.353542,
+          "cost_frozen_rule_usd": 9.459671,
+          "components_usd": {
+            "input_tokens": 1.37325,
+            "output_tokens": 2.9234,
+            "cache_read_input_tokens": 7.639305,
+            "ephemeral_5m_input_tokens": 1.417587,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 274650,
+            "output_tokens": 116936,
+            "cache_read_input_tokens": 15278609,
+            "ephemeral_5m_input_tokens": 226814,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 226814
+          },
+          "cold_start_prefix_tokens": 21940,
+          "cold_start_prefix_usd": 0.137125,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 221206,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 10.660731,
+          "counterfactual_net_usd": -10.523606,
+          "counterfactual_inline_same_n_usd": 23.877148,
+          "breakeven_turn_ratio": 0.5593,
+          "flags": {
+            "copies": 198
+          }
+        },
+        {
+          "agent_file": "agent-a2290953b867faa16.jsonl",
+          "agent_type": "Explore",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 22,
+          "models": {
+            "claude-opus-5": 22
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 2.751926,
+          "cost_frozen_rule_usd": 1.36108,
+          "components_usd": {
+            "input_tokens": 0.469365,
+            "output_tokens": 0.8637,
+            "cache_read_input_tokens": 0.728149,
+            "ephemeral_5m_input_tokens": 0.690713,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 93873,
+            "output_tokens": 34548,
+            "cache_read_input_tokens": 1456297,
+            "ephemeral_5m_input_tokens": 110514,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 110514
+          },
+          "cold_start_prefix_tokens": 19792,
+          "cold_start_prefix_usd": 0.1237,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 161030,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 1.553618,
+          "counterfactual_net_usd": -1.429918,
+          "counterfactual_inline_same_n_usd": 4.181844,
+          "breakeven_turn_ratio": 0.6581,
+          "flags": {
+            "copies": 63
+          }
+        },
+        {
+          "agent_file": "agent-a34cda8af3ff328f2.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 56,
+          "models": {
+            "claude-opus-5": 56
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 6.105047,
+          "cost_frozen_rule_usd": 3.506464,
+          "components_usd": {
+            "input_tokens": 0.912185,
+            "output_tokens": 1.686875,
+            "cache_read_input_tokens": 2.708762,
+            "ephemeral_5m_input_tokens": 0.797225,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 182437,
+            "output_tokens": 67475,
+            "cache_read_input_tokens": 5417524,
+            "ephemeral_5m_input_tokens": 127556,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 127556
+          },
+          "cold_start_prefix_tokens": 16027,
+          "cold_start_prefix_usd": 0.100169,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 221206,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 5.745012,
+          "counterfactual_net_usd": -5.644843,
+          "counterfactual_inline_same_n_usd": 11.74989,
+          "breakeven_turn_ratio": 0.5196,
+          "flags": {
+            "copies": 115
+          }
+        },
+        {
+          "agent_file": "agent-a37b21dd99a3ffe4e.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 26,
+          "models": {
+            "claude-opus-5": 26
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 2.992694,
+          "cost_frozen_rule_usd": 1.740941,
+          "components_usd": {
+            "input_tokens": 0.41638,
+            "output_tokens": 0.828175,
+            "cache_read_input_tokens": 1.024127,
+            "ephemeral_5m_input_tokens": 0.724012,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 83276,
+            "output_tokens": 33127,
+            "cache_read_input_tokens": 2048254,
+            "ephemeral_5m_input_tokens": 115842,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 115842
+          },
+          "cold_start_prefix_tokens": 22040,
+          "cold_start_prefix_usd": 0.13775,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 347051,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 4.225143,
+          "counterfactual_net_usd": -4.087393,
+          "counterfactual_inline_same_n_usd": 7.080088,
+          "breakeven_turn_ratio": 0.4227,
+          "flags": {
+            "copies": 57,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-a3a2d4f5e329bc4f1.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 32,
+          "models": {
+            "claude-opus-5": 32
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 3.719749,
+          "cost_frozen_rule_usd": 1.834536,
+          "components_usd": {
+            "input_tokens": 0.742045,
+            "output_tokens": 1.06365,
+            "cache_read_input_tokens": 1.119142,
+            "ephemeral_5m_input_tokens": 0.794912,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 148409,
+            "output_tokens": 42546,
+            "cache_read_input_tokens": 2238283,
+            "ephemeral_5m_input_tokens": 127186,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 127186
+          },
+          "cold_start_prefix_tokens": 15990,
+          "cold_start_prefix_usd": 0.099938,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 426627,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 6.570192,
+          "counterfactual_net_usd": -6.470255,
+          "counterfactual_inline_same_n_usd": 10.190004,
+          "breakeven_turn_ratio": 0.365,
+          "flags": {
+            "copies": 105
+          }
+        },
+        {
+          "agent_file": "agent-a5919f81c913f370c.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 54,
+          "models": {
+            "claude-opus-5": 53,
+            "<synthetic>": 1
+          },
+          "unpriced_requests": 1,
+          "unpriced_models": [
+            "<synthetic>"
+          ],
+          "cost_usd": 7.8488,
+          "cost_frozen_rule_usd": 4.601413,
+          "components_usd": {
+            "input_tokens": 1.311565,
+            "output_tokens": 1.975875,
+            "cache_read_input_tokens": 3.433135,
+            "ephemeral_5m_input_tokens": 1.128225,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 262313,
+            "output_tokens": 79035,
+            "cache_read_input_tokens": 6866270,
+            "ephemeral_5m_input_tokens": 180516,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 180516
+          },
+          "cold_start_prefix_tokens": 16218,
+          "cold_start_prefix_usd": 0.101363,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 352951,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 9.091791,
+          "counterfactual_net_usd": -8.990429,
+          "counterfactual_inline_same_n_usd": 16.839229,
+          "breakeven_turn_ratio": 0.4661,
+          "flags": {
+            "copies": 104,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-a682699c260085219.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 40,
+          "models": {
+            "claude-opus-5": 40
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 6.004838,
+          "cost_frozen_rule_usd": 3.271286,
+          "components_usd": {
+            "input_tokens": 1.22841,
+            "output_tokens": 1.549075,
+            "cache_read_input_tokens": 2.366935,
+            "ephemeral_5m_input_tokens": 0.860419,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 245682,
+            "output_tokens": 61963,
+            "cache_read_input_tokens": 4733869,
+            "ephemeral_5m_input_tokens": 137667,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 137667
+          },
+          "cold_start_prefix_tokens": 15795,
+          "cold_start_prefix_usd": 0.098719,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 352951,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 6.74312,
+          "counterfactual_net_usd": -6.644401,
+          "counterfactual_inline_same_n_usd": 12.64924,
+          "breakeven_turn_ratio": 0.4747,
+          "flags": {
+            "copies": 77
+          }
+        },
+        {
+          "agent_file": "agent-a6af54967bd78b91d.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 26,
+          "models": {
+            "claude-opus-5": 26
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 4.500166,
+          "cost_frozen_rule_usd": 2.178328,
+          "components_usd": {
+            "input_tokens": 1.058065,
+            "output_tokens": 1.244275,
+            "cache_read_input_tokens": 1.366732,
+            "ephemeral_5m_input_tokens": 0.831094,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 211613,
+            "output_tokens": 49771,
+            "cache_read_input_tokens": 2733464,
+            "ephemeral_5m_input_tokens": 132975,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 132975
+          },
+          "cold_start_prefix_tokens": 21393,
+          "cold_start_prefix_usd": 0.133706,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 204119,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 2.375438,
+          "counterfactual_net_usd": -2.241732,
+          "counterfactual_inline_same_n_usd": 6.741898,
+          "breakeven_turn_ratio": 0.6675,
+          "flags": {
+            "copies": 61
+          }
+        },
+        {
+          "agent_file": "agent-a6b5dea805b65ff67.jsonl",
+          "agent_type": "claude-code-guide",
+          "spawn_depth": 2,
+          "request_shape": "background",
+          "requests": 9,
+          "models": {
+            "claude-haiku-4-5-20251001": 9
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 0.108587,
+          "cost_frozen_rule_usd": 0.078727,
+          "components_usd": {
+            "input_tokens": 7.6e-05,
+            "output_tokens": 0.030925,
+            "cache_read_input_tokens": 0.02239,
+            "ephemeral_5m_input_tokens": 0.055196,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 76,
+            "output_tokens": 6185,
+            "cache_read_input_tokens": 223896,
+            "ephemeral_5m_input_tokens": 44157,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 44157
+          },
+          "cold_start_prefix_tokens": 12797,
+          "cold_start_prefix_usd": 0.015996,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": null,
+          "spawn_model": null,
+          "counterfactual_saving_usd": null,
+          "counterfactual_net_usd": null,
+          "counterfactual_inline_same_n_usd": null,
+          "breakeven_turn_ratio": null,
+          "flags": {
+            "copies": 32
+          }
+        },
+        {
+          "agent_file": "agent-a70d036747b84d290.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 95,
+          "models": {
+            "claude-opus-5": 95
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 13.135947,
+          "cost_frozen_rule_usd": 7.87533,
+          "components_usd": {
+            "input_tokens": 2.14877,
+            "output_tokens": 3.3055,
+            "cache_read_input_tokens": 6.369728,
+            "ephemeral_5m_input_tokens": 1.31195,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 429754,
+            "output_tokens": 132220,
+            "cache_read_input_tokens": 12739455,
+            "ephemeral_5m_input_tokens": 209912,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 209912
+          },
+          "cold_start_prefix_tokens": 22122,
+          "cold_start_prefix_usd": 0.138263,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 278514,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 12.17862,
+          "counterfactual_net_usd": -12.040358,
+          "counterfactual_inline_same_n_usd": 25.176305,
+          "breakeven_turn_ratio": 0.5218,
+          "flags": {
+            "copies": 182,
+            "permission_denials": 1,
+            "interruptions": 2,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-a788353304f4c10ca.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 86,
+          "models": {
+            "claude-opus-5": 86
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 10.757705,
+          "cost_frozen_rule_usd": 7.04017,
+          "components_usd": {
+            "input_tokens": 1.380485,
+            "output_tokens": 2.455725,
+            "cache_read_input_tokens": 5.703652,
+            "ephemeral_5m_input_tokens": 1.217844,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 276097,
+            "output_tokens": 98229,
+            "cache_read_input_tokens": 11407303,
+            "ephemeral_5m_input_tokens": 194855,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 194855
+          },
+          "cold_start_prefix_tokens": 16515,
+          "cold_start_prefix_usd": 0.103219,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 278514,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 11.265957,
+          "counterfactual_net_usd": -11.162738,
+          "counterfactual_inline_same_n_usd": 21.920444,
+          "breakeven_turn_ratio": 0.4908,
+          "flags": {
+            "copies": 181,
+            "tool_errors": 2
+          }
+        },
+        {
+          "agent_file": "agent-a82aec51475471f27.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 20,
+          "models": {
+            "claude-opus-5": 20
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 1.951872,
+          "cost_frozen_rule_usd": 0.777976,
+          "components_usd": {
+            "input_tokens": 0.498355,
+            "output_tokens": 0.624725,
+            "cache_read_input_tokens": 0.471317,
+            "ephemeral_5m_input_tokens": 0.357475,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 99671,
+            "output_tokens": 24989,
+            "cache_read_input_tokens": 942633,
+            "ephemeral_5m_input_tokens": 57196,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 57196
+          },
+          "cold_start_prefix_tokens": 16288,
+          "cold_start_prefix_usd": 0.1018,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 204119,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 1.87831,
+          "counterfactual_net_usd": -1.77651,
+          "counterfactual_inline_same_n_usd": 3.728382,
+          "breakeven_turn_ratio": 0.5235,
+          "flags": {
+            "copies": 43
+          }
+        },
+        {
+          "agent_file": "agent-a87235a9c723540c2.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 81,
+          "models": {
+            "claude-opus-5": 81
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 8.975634,
+          "cost_frozen_rule_usd": 6.063248,
+          "components_usd": {
+            "input_tokens": 1.187965,
+            "output_tokens": 1.862275,
+            "cache_read_input_tokens": 4.884757,
+            "ephemeral_5m_input_tokens": 1.040638,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 237593,
+            "output_tokens": 74491,
+            "cache_read_input_tokens": 9769513,
+            "ephemeral_5m_input_tokens": 166502,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 166502
+          },
+          "cold_start_prefix_tokens": 16126,
+          "cold_start_prefix_usd": 0.100788,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 352951,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 13.641413,
+          "counterfactual_net_usd": -13.540625,
+          "counterfactual_inline_same_n_usd": 22.516259,
+          "breakeven_turn_ratio": 0.3986,
+          "flags": {
+            "copies": 148,
+            "permission_denials": 1,
+            "interruptions": 1
+          }
+        },
+        {
+          "agent_file": "agent-a93f8b1dc3953cbb6.jsonl",
+          "agent_type": "Explore",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 8,
+          "models": {
+            "claude-opus-5": 8
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 0.697533,
+          "cost_frozen_rule_usd": 0.584558,
+          "components_usd": {
+            "input_tokens": 8e-05,
+            "output_tokens": 0.271475,
+            "cache_read_input_tokens": 0.126034,
+            "ephemeral_5m_input_tokens": 0.299944,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 16,
+            "output_tokens": 10859,
+            "cache_read_input_tokens": 252068,
+            "ephemeral_5m_input_tokens": 47991,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 47991
+          },
+          "cold_start_prefix_tokens": 17452,
+          "cold_start_prefix_usd": 0.109075,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 45885,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 0.113732,
+          "counterfactual_net_usd": -0.004657,
+          "counterfactual_inline_same_n_usd": 0.70219,
+          "breakeven_turn_ratio": 0.9934,
+          "flags": {
+            "copies": 23
+          }
+        },
+        {
+          "agent_file": "agent-a9480b1f29cf1a80a.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 2,
+          "request_shape": "background",
+          "requests": 17,
+          "models": {
+            "claude-opus-5": 17
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 2.441571,
+          "cost_frozen_rule_usd": 0.978185,
+          "components_usd": {
+            "input_tokens": 0.63813,
+            "output_tokens": 0.746625,
+            "cache_read_input_tokens": 0.476023,
+            "ephemeral_5m_input_tokens": 0.580794,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 127626,
+            "output_tokens": 29865,
+            "cache_read_input_tokens": 952045,
+            "ephemeral_5m_input_tokens": 92927,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 92927
+          },
+          "cold_start_prefix_tokens": 15648,
+          "cold_start_prefix_usd": 0.0978,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": null,
+          "spawn_model": null,
+          "counterfactual_saving_usd": null,
+          "counterfactual_net_usd": null,
+          "counterfactual_inline_same_n_usd": null,
+          "breakeven_turn_ratio": null,
+          "flags": {
+            "copies": 60
+          }
+        },
+        {
+          "agent_file": "agent-a974a63c986a30531.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 41,
+          "models": {
+            "claude-opus-5": 41
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 6.23542,
+          "cost_frozen_rule_usd": 3.521699,
+          "components_usd": {
+            "input_tokens": 1.16102,
+            "output_tokens": 1.7205,
+            "cache_read_input_tokens": 2.385687,
+            "ephemeral_5m_input_tokens": 0.968212,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 232204,
+            "output_tokens": 68820,
+            "cache_read_input_tokens": 4771374,
+            "ephemeral_5m_input_tokens": 154914,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 154914
+          },
+          "cold_start_prefix_tokens": 21514,
+          "cold_start_prefix_usd": 0.134463,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 415322,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 8.073064,
+          "counterfactual_net_usd": -7.938602,
+          "counterfactual_inline_same_n_usd": 14.174021,
+          "breakeven_turn_ratio": 0.4399,
+          "flags": {
+            "copies": 76,
+            "permission_denials": 1,
+            "tool_errors": 2
+          }
+        },
+        {
+          "agent_file": "agent-a9926baa64a6c304a.jsonl",
+          "agent_type": "claude-code-guide",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 22,
+          "models": {
+            "claude-haiku-4-5-20251001": 22
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 0.476288,
+          "cost_frozen_rule_usd": 0.252213,
+          "components_usd": {
+            "input_tokens": 0.123035,
+            "output_tokens": 0.090815,
+            "cache_read_input_tokens": 0.133246,
+            "ephemeral_5m_input_tokens": 0.129193,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 123035,
+            "output_tokens": 18163,
+            "cache_read_input_tokens": 1332457,
+            "ephemeral_5m_input_tokens": 103354,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 103354
+          },
+          "cold_start_prefix_tokens": 22079,
+          "cold_start_prefix_usd": 0.027599,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 516374,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 5.437245,
+          "counterfactual_net_usd": -5.409646,
+          "counterfactual_inline_same_n_usd": 5.885934,
+          "breakeven_turn_ratio": 0.0809,
+          "flags": {
+            "copies": 65,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-aa0923d8a19c8c7c3.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 34,
+          "models": {
+            "claude-opus-5": 34
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 3.817685,
+          "cost_frozen_rule_usd": 2.044169,
+          "components_usd": {
+            "input_tokens": 0.845985,
+            "output_tokens": 0.93035,
+            "cache_read_input_tokens": 1.414556,
+            "ephemeral_5m_input_tokens": 0.626794,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 169197,
+            "output_tokens": 37214,
+            "cache_read_input_tokens": 2829112,
+            "ephemeral_5m_input_tokens": 100287,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 100287
+          },
+          "cold_start_prefix_tokens": 15922,
+          "cold_start_prefix_usd": 0.099513,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 227170,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 3.591216,
+          "counterfactual_net_usd": -3.491704,
+          "counterfactual_inline_same_n_usd": 7.309388,
+          "breakeven_turn_ratio": 0.5223,
+          "flags": {
+            "copies": 74
+          }
+        },
+        {
+          "agent_file": "agent-aabb9834b2da32760.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 43,
+          "models": {
+            "claude-opus-5": 43
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 6.4704,
+          "cost_frozen_rule_usd": 3.401227,
+          "components_usd": {
+            "input_tokens": 1.081275,
+            "output_tokens": 2.054675,
+            "cache_read_input_tokens": 2.370132,
+            "ephemeral_5m_input_tokens": 0.964319,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 216255,
+            "output_tokens": 82187,
+            "cache_read_input_tokens": 4740263,
+            "ephemeral_5m_input_tokens": 154291,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 154291
+          },
+          "cold_start_prefix_tokens": 21968,
+          "cold_start_prefix_usd": 0.1373,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 426627,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 8.700169,
+          "counterfactual_net_usd": -8.562869,
+          "counterfactual_inline_same_n_usd": 15.033269,
+          "breakeven_turn_ratio": 0.4304,
+          "flags": {
+            "copies": 98,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-aacf82d2a205243a1.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 75,
+          "models": {
+            "claude-opus-5": 75
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 7.820937,
+          "cost_frozen_rule_usd": 4.936923,
+          "components_usd": {
+            "input_tokens": 1.00202,
+            "output_tokens": 2.05835,
+            "cache_read_input_tokens": 3.810098,
+            "ephemeral_5m_input_tokens": 0.950469,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 200404,
+            "output_tokens": 82334,
+            "cache_read_input_tokens": 7620196,
+            "ephemeral_5m_input_tokens": 152075,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 152075
+          },
+          "cold_start_prefix_tokens": 15997,
+          "cold_start_prefix_usd": 0.099981,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 221206,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 7.695338,
+          "counterfactual_net_usd": -7.595356,
+          "counterfactual_inline_same_n_usd": 15.416293,
+          "breakeven_turn_ratio": 0.5073,
+          "flags": {
+            "copies": 159
+          }
+        },
+        {
+          "agent_file": "agent-ab26e78e4fccfc737.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 83,
+          "models": {
+            "claude-opus-5": 83
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 12.232016,
+          "cost_frozen_rule_usd": 8.602475,
+          "components_usd": {
+            "input_tokens": 1.54949,
+            "output_tokens": 2.249475,
+            "cache_read_input_tokens": 5.997857,
+            "ephemeral_5m_input_tokens": 2.435194,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 309898,
+            "output_tokens": 89979,
+            "cache_read_input_tokens": 11995714,
+            "ephemeral_5m_input_tokens": 389631,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 389631
+          },
+          "cold_start_prefix_tokens": 16640,
+          "cold_start_prefix_usd": 0.104,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 278514,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 10.867771,
+          "counterfactual_net_usd": -10.763771,
+          "counterfactual_inline_same_n_usd": 22.995787,
+          "breakeven_turn_ratio": 0.5319,
+          "flags": {
+            "copies": 165,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-ab2dd12ef7c79d3a9.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 58,
+          "models": {
+            "claude-opus-5": 58
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 7.275015,
+          "cost_frozen_rule_usd": 4.336808,
+          "components_usd": {
+            "input_tokens": 1.03067,
+            "output_tokens": 2.008925,
+            "cache_read_input_tokens": 3.242939,
+            "ephemeral_5m_input_tokens": 0.992481,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 206134,
+            "output_tokens": 80357,
+            "cache_read_input_tokens": 6485878,
+            "ephemeral_5m_input_tokens": 158797,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 158797
+          },
+          "cold_start_prefix_tokens": 15867,
+          "cold_start_prefix_usd": 0.099169,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 419032,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 11.691785,
+          "counterfactual_net_usd": -11.592616,
+          "counterfactual_inline_same_n_usd": 18.867632,
+          "breakeven_turn_ratio": 0.3856,
+          "flags": {
+            "copies": 104
+          }
+        },
+        {
+          "agent_file": "agent-ab3b949c182ab4aef.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 2,
+          "request_shape": "background",
+          "requests": 12,
+          "models": {
+            "claude-opus-5": 12
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 1.377495,
+          "cost_frozen_rule_usd": 0.650429,
+          "components_usd": {
+            "input_tokens": 0.18412,
+            "output_tokens": 0.518725,
+            "cache_read_input_tokens": 0.259881,
+            "ephemeral_5m_input_tokens": 0.414769,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 36824,
+            "output_tokens": 20749,
+            "cache_read_input_tokens": 519762,
+            "ephemeral_5m_input_tokens": 66363,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 66363
+          },
+          "cold_start_prefix_tokens": 15550,
+          "cold_start_prefix_usd": 0.097187,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": null,
+          "spawn_model": null,
+          "counterfactual_saving_usd": null,
+          "counterfactual_net_usd": null,
+          "counterfactual_inline_same_n_usd": null,
+          "breakeven_turn_ratio": null,
+          "flags": {
+            "copies": 51
+          }
+        },
+        {
+          "agent_file": "agent-ab51a9bfed6bcb7f1.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 19,
+          "models": {
+            "claude-opus-5": 19
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 2.44808,
+          "cost_frozen_rule_usd": 1.07126,
+          "components_usd": {
+            "input_tokens": 0.70527,
+            "output_tokens": 0.616,
+            "cache_read_input_tokens": 0.624067,
+            "ephemeral_5m_input_tokens": 0.502744,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 141054,
+            "output_tokens": 24640,
+            "cache_read_input_tokens": 1248133,
+            "ephemeral_5m_input_tokens": 80439,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 80439
+          },
+          "cold_start_prefix_tokens": 21579,
+          "cold_start_prefix_usd": 0.134869,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 507523,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 4.616468,
+          "counterfactual_net_usd": -4.481599,
+          "counterfactual_inline_same_n_usd": 6.92968,
+          "breakeven_turn_ratio": 0.3533,
+          "flags": {
+            "copies": 35,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-ac6d01be50eee0b02.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 38,
+          "models": {
+            "claude-opus-5": 38
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 4.098479,
+          "cost_frozen_rule_usd": 2.348203,
+          "components_usd": {
+            "input_tokens": 0.88643,
+            "output_tokens": 0.9169,
+            "cache_read_input_tokens": 1.65155,
+            "ephemeral_5m_input_tokens": 0.6436,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 177286,
+            "output_tokens": 36676,
+            "cache_read_input_tokens": 3303099,
+            "ephemeral_5m_input_tokens": 102976,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 102976
+          },
+          "cold_start_prefix_tokens": 15379,
+          "cold_start_prefix_usd": 0.096119,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 204119,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 3.58606,
+          "counterfactual_net_usd": -3.489941,
+          "counterfactual_inline_same_n_usd": 7.588421,
+          "breakeven_turn_ratio": 0.5401,
+          "flags": {
+            "copies": 82
+          }
+        },
+        {
+          "agent_file": "agent-acd79ac2bb17d3e6f.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 73,
+          "models": {
+            "claude-opus-5": 72,
+            "<synthetic>": 1
+          },
+          "unpriced_requests": 1,
+          "unpriced_models": [
+            "<synthetic>"
+          ],
+          "cost_usd": 9.934407,
+          "cost_frozen_rule_usd": 8.076729,
+          "components_usd": {
+            "input_tokens": 0.622685,
+            "output_tokens": 1.47445,
+            "cache_read_input_tokens": 5.467259,
+            "ephemeral_5m_input_tokens": 2.370013,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 124537,
+            "output_tokens": 58978,
+            "cache_read_input_tokens": 10934519,
+            "ephemeral_5m_input_tokens": 379202,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 379202
+          },
+          "cold_start_prefix_tokens": 16967,
+          "cold_start_prefix_usd": 0.106044,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 363618,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 12.652762,
+          "counterfactual_net_usd": -12.546718,
+          "counterfactual_inline_same_n_usd": 22.481125,
+          "breakeven_turn_ratio": 0.4419,
+          "flags": {
+            "copies": 130,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-ad25522efd154df58.jsonl",
+          "agent_type": "claude-code-guide",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 24,
+          "models": {
+            "claude-haiku-4-5-20251001": 24
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 0.375352,
+          "cost_frozen_rule_usd": 0.208054,
+          "components_usd": {
+            "input_tokens": 0.086843,
+            "output_tokens": 0.07263,
+            "cache_read_input_tokens": 0.114361,
+            "ephemeral_5m_input_tokens": 0.101518,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 86843,
+            "output_tokens": 14526,
+            "cache_read_input_tokens": 1143612,
+            "ephemeral_5m_input_tokens": 81214,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 81214
+          },
+          "cold_start_prefix_tokens": 21781,
+          "cold_start_prefix_usd": 0.027226,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 80234,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 0.701436,
+          "counterfactual_net_usd": -0.67421,
+          "counterfactual_inline_same_n_usd": 1.049561,
+          "breakeven_turn_ratio": 0.3576,
+          "flags": {
+            "copies": 61
+          }
+        },
+        {
+          "agent_file": "agent-ad5e5b6b918929afc.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 64,
+          "models": {
+            "claude-opus-5": 64
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 6.883911,
+          "cost_frozen_rule_usd": 4.462135,
+          "components_usd": {
+            "input_tokens": 1.05336,
+            "output_tokens": 1.5752,
+            "cache_read_input_tokens": 3.335839,
+            "ephemeral_5m_input_tokens": 0.919513,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 210672,
+            "output_tokens": 63008,
+            "cache_read_input_tokens": 6671678,
+            "ephemeral_5m_input_tokens": 147122,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 147122
+          },
+          "cold_start_prefix_tokens": 16118,
+          "cold_start_prefix_usd": 0.100738,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 278514,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 8.396672,
+          "counterfactual_net_usd": -8.295935,
+          "counterfactual_inline_same_n_usd": 15.179846,
+          "breakeven_turn_ratio": 0.4535,
+          "flags": {
+            "copies": 132
+          }
+        },
+        {
+          "agent_file": "agent-ade384af23957f98f.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 59,
+          "models": {
+            "claude-opus-5": 59
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 6.172213,
+          "cost_frozen_rule_usd": 4.4002,
+          "components_usd": {
+            "input_tokens": 0.472395,
+            "output_tokens": 1.456275,
+            "cache_read_input_tokens": 3.284555,
+            "ephemeral_5m_input_tokens": 0.958988,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 94479,
+            "output_tokens": 58251,
+            "cache_read_input_tokens": 6569111,
+            "ephemeral_5m_input_tokens": 153438,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 153438
+          },
+          "cold_start_prefix_tokens": 21881,
+          "cold_start_prefix_usd": 0.136756,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 285344,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 7.772159,
+          "counterfactual_net_usd": -7.635402,
+          "counterfactual_inline_same_n_usd": 13.807615,
+          "breakeven_turn_ratio": 0.447,
+          "flags": {
+            "copies": 116,
+            "tool_errors": 2
+          }
+        },
+        {
+          "agent_file": "agent-ae0508c5ca6ef2b6e.jsonl",
+          "agent_type": "Plan",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 14,
+          "models": {
+            "claude-opus-5": 14
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 2.215457,
+          "cost_frozen_rule_usd": 1.038241,
+          "components_usd": {
+            "input_tokens": 0.411335,
+            "output_tokens": 0.72535,
+            "cache_read_input_tokens": 0.468816,
+            "ephemeral_5m_input_tokens": 0.609956,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 82267,
+            "output_tokens": 29014,
+            "cache_read_input_tokens": 937631,
+            "ephemeral_5m_input_tokens": 97593,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 97593
+          },
+          "cold_start_prefix_tokens": 20224,
+          "cold_start_prefix_usd": 0.1264,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 421335,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 2.807777,
+          "counterfactual_net_usd": -2.681377,
+          "counterfactual_inline_same_n_usd": 4.896834,
+          "breakeven_turn_ratio": 0.4524,
+          "flags": {
+            "copies": 35
+          }
+        },
+        {
+          "agent_file": "agent-aeb0ce567c0d97527.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 7,
+          "models": {
+            "claude-opus-5": 7
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 0.443183,
+          "cost_frozen_rule_usd": 0.334283,
+          "components_usd": {
+            "input_tokens": 7e-05,
+            "output_tokens": 0.111875,
+            "cache_read_input_tokens": 0.09165,
+            "ephemeral_5m_input_tokens": 0.239588,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 14,
+            "output_tokens": 4475,
+            "cache_read_input_tokens": 183300,
+            "ephemeral_5m_input_tokens": 38334,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 38334
+          },
+          "cold_start_prefix_tokens": 20884,
+          "cold_start_prefix_usd": 0.130525,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 80234,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 0.207725,
+          "counterfactual_net_usd": -0.0772,
+          "counterfactual_inline_same_n_usd": 0.520383,
+          "breakeven_turn_ratio": 0.8516,
+          "flags": {
+            "copies": 14
+          }
+        }
+      ]
+    },
+    {
+      "label": "worktree-post-pivot",
+      "project_dir": "/Users/aadharagarwal/.claude/projects/-Users-aadharagarwal-projects-JEV-experiments--claude-worktrees-jev-critical-path",
+      "pricing_version": "pricing-2026-09-20b",
+      "sessions_with_activity": 3,
+      "delegated_tasks": 9,
+      "overall": {
+        "tasks": 9,
+        "cost_usd": {
+          "n": 9,
+          "min": 1.720165,
+          "p25": 2.71151,
+          "median": 3.274106,
+          "p75": 4.605468,
+          "max": 5.847133,
+          "mean": 3.552174,
+          "sum": 31.969567
+        },
+        "requests": {
+          "n": 9,
+          "min": 16.0,
+          "p25": 18.0,
+          "median": 26.0,
+          "p75": 34.0,
+          "max": 65.0,
+          "mean": 29.777778,
+          "sum": 268.0
+        },
+        "total_usd": 31.969567,
+        "components_usd": {
+          "input_tokens": 6.297,
+          "output_tokens": 8.28275,
+          "cache_read_input_tokens": 10.883629,
+          "ephemeral_5m_input_tokens": 6.506188,
+          "ephemeral_1h_input_tokens": 0.0
+        },
+        "cache_write_share": 0.2035,
+        "cache_read_share": 0.3404,
+        "cold_start_prefix_usd_total": 1.059258,
+        "cold_start_share_of_cost": 0.0331,
+        "cold_start_prefix_tokens": {
+          "n": 9,
+          "min": 15811.0,
+          "p25": 16310.0,
+          "median": 16753.0,
+          "p75": 23267.0,
+          "max": 24228.0,
+          "mean": 18831.222222,
+          "sum": 169481.0
+        },
+        "counterfactual_net_usd": {
+          "n": 9,
+          "min": -5.811815,
+          "p25": -4.085399,
+          "median": -1.897421,
+          "p75": -1.623354,
+          "max": -1.130477,
+          "mean": -2.797193,
+          "sum": -25.174739
+        },
+        "counterfactual_resolvable": 9,
+        "inline_same_n_usd_total": 57.144302,
+        "breakeven_turn_ratio": {
+          "n": 9,
+          "min": 0.4607,
+          "p25": 0.5177,
+          "median": 0.5887,
+          "p75": 0.6331,
+          "max": 0.7022,
+          "mean": 0.576144,
+          "sum": 5.1853
+        },
+        "spawn_models": {
+          "claude-opus-5": 9
+        },
+        "ttl_of_cold_start": {
+          "5m": 9
+        },
+        "single_request_tasks": 0,
+        "tool_errors": 20,
+        "interruptions": 1,
+        "permission_denials": 1,
+        "unpriced_requests": 0
+      },
+      "by_agent_type": {
+        "general-purpose": {
+          "tasks": 9,
+          "cost_usd": {
+            "n": 9,
+            "min": 1.720165,
+            "p25": 2.71151,
+            "median": 3.274106,
+            "p75": 4.605468,
+            "max": 5.847133,
+            "mean": 3.552174,
+            "sum": 31.969567
+          },
+          "requests": {
+            "n": 9,
+            "min": 16.0,
+            "p25": 18.0,
+            "median": 26.0,
+            "p75": 34.0,
+            "max": 65.0,
+            "mean": 29.777778,
+            "sum": 268.0
+          },
+          "total_usd": 31.969567,
+          "components_usd": {
+            "input_tokens": 6.297,
+            "output_tokens": 8.28275,
+            "cache_read_input_tokens": 10.883629,
+            "ephemeral_5m_input_tokens": 6.506188,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "cache_write_share": 0.2035,
+          "cache_read_share": 0.3404,
+          "cold_start_prefix_usd_total": 1.059258,
+          "cold_start_share_of_cost": 0.0331,
+          "cold_start_prefix_tokens": {
+            "n": 9,
+            "min": 15811.0,
+            "p25": 16310.0,
+            "median": 16753.0,
+            "p75": 23267.0,
+            "max": 24228.0,
+            "mean": 18831.222222,
+            "sum": 169481.0
+          },
+          "counterfactual_net_usd": {
+            "n": 9,
+            "min": -5.811815,
+            "p25": -4.085399,
+            "median": -1.897421,
+            "p75": -1.623354,
+            "max": -1.130477,
+            "mean": -2.797193,
+            "sum": -25.174739
+          },
+          "counterfactual_resolvable": 9,
+          "inline_same_n_usd_total": 57.144302,
+          "breakeven_turn_ratio": {
+            "n": 9,
+            "min": 0.4607,
+            "p25": 0.5177,
+            "median": 0.5887,
+            "p75": 0.6331,
+            "max": 0.7022,
+            "mean": 0.576144,
+            "sum": 5.1853
+          },
+          "spawn_models": {
+            "claude-opus-5": 9
+          },
+          "ttl_of_cold_start": {
+            "5m": 9
+          },
+          "single_request_tasks": 0,
+          "tool_errors": 20,
+          "interruptions": 1,
+          "permission_denials": 1,
+          "unpriced_requests": 0
+        }
+      },
+      "frozen_vs_corrected": {
+        "delegated_cost_frozen_rule_usd": 18.148564,
+        "delegated_cost_corrected_usd": 31.969567,
+        "understatement_usd": 13.821003,
+        "understatement_pct": 43.23
+      },
+      "sessions": [
+        {
+          "session_id": "3f4c7229-fd63-4fab-aed3-bbcaf646ca09",
+          "main_requests": 1,
+          "main_cost_usd": 0.056438,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 6,
+            "output_tokens": 529,
+            "cache_read_input_tokens": 21065,
+            "ephemeral_5m_input_tokens": 5224,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.058257500000000004,
+            "computed_cost_usd": 0.056438,
+            "ratio": 0.9688
+          }
+        },
+        {
+          "session_id": "5b18f33f-e38e-4be1-a4b6-c058dc0c491e",
+          "main_requests": 145,
+          "main_cost_usd": 20.929521,
+          "main_unpriced_requests": 1,
+          "main_tokens": {
+            "input_tokens": 302839,
+            "output_tokens": 152297,
+            "cache_read_input_tokens": 23145662,
+            "ephemeral_5m_input_tokens": 5768,
+            "ephemeral_1h_input_tokens": 399902
+          },
+          "delegated_tasks": 9,
+          "delegated_cost_usd": 31.969567,
+          "delegated_cost_frozen_rule_usd": 18.148564,
+          "coverage": {
+            "reported_cost_usd": null,
+            "computed_cost_usd": 52.899088,
+            "ratio": null
+          }
+        },
+        {
+          "session_id": "d7cf8d37-d820-4eea-b808-e71fcf45ed44",
+          "main_requests": 2,
+          "main_cost_usd": 0.312478,
+          "main_unpriced_requests": 0,
+          "main_tokens": {
+            "input_tokens": 7,
+            "output_tokens": 2296,
+            "cache_read_input_tokens": 29636,
+            "ephemeral_5m_input_tokens": 38436,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "delegated_tasks": 0,
+          "delegated_cost_usd": 0,
+          "delegated_cost_frozen_rule_usd": 0,
+          "coverage": {
+            "reported_cost_usd": 0.316988,
+            "computed_cost_usd": 0.312478,
+            "ratio": 0.9858
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "agent_file": "agent-a1aa3878a1afd49e0.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 26,
+          "models": {
+            "claude-opus-5": 26
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 3.274106,
+          "cost_frozen_rule_usd": 1.757422,
+          "components_usd": {
+            "input_tokens": 0.73504,
+            "output_tokens": 1.02965,
+            "cache_read_input_tokens": 0.847385,
+            "ephemeral_5m_input_tokens": 0.662031,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 147008,
+            "output_tokens": 41186,
+            "cache_read_input_tokens": 1694769,
+            "ephemeral_5m_input_tokens": 105925,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 105925
+          },
+          "cold_start_prefix_tokens": 15882,
+          "cold_start_prefix_usd": 0.099263,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 169473,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 1.996683,
+          "counterfactual_net_usd": -1.897421,
+          "counterfactual_inline_same_n_usd": 5.171526,
+          "breakeven_turn_ratio": 0.6331,
+          "flags": {
+            "copies": 116,
+            "tool_errors": 1
+          }
+        },
+        {
+          "agent_file": "agent-a254d0298b8ddbf3e.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 19,
+          "models": {
+            "claude-opus-5": 19
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 4.037801,
+          "cost_frozen_rule_usd": 2.188868,
+          "components_usd": {
+            "input_tokens": 1.238515,
+            "output_tokens": 0.913875,
+            "cache_read_input_tokens": 0.93298,
+            "ephemeral_5m_input_tokens": 0.952431,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 247703,
+            "output_tokens": 36555,
+            "cache_read_input_tokens": 1865960,
+            "ephemeral_5m_input_tokens": 152389,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 152389
+          },
+          "cold_start_prefix_tokens": 16753,
+          "cold_start_prefix_usd": 0.104706,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 208009,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 1.816932,
+          "counterfactual_net_usd": -1.712226,
+          "counterfactual_inline_same_n_usd": 5.750027,
+          "breakeven_turn_ratio": 0.7022,
+          "flags": {
+            "copies": 57
+          }
+        },
+        {
+          "agent_file": "agent-a50c9c63a12d123fb.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 43,
+          "models": {
+            "claude-opus-5": 43
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 4.964017,
+          "cost_frozen_rule_usd": 2.893267,
+          "components_usd": {
+            "input_tokens": 0.809355,
+            "output_tokens": 1.53705,
+            "cache_read_input_tokens": 1.854437,
+            "ephemeral_5m_input_tokens": 0.763175,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 161871,
+            "output_tokens": 61482,
+            "cache_read_input_tokens": 3708875,
+            "ephemeral_5m_input_tokens": 122108,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 122108
+          },
+          "cold_start_prefix_tokens": 24228,
+          "cold_start_prefix_usd": 0.151425,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 301588,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 5.96324,
+          "counterfactual_net_usd": -5.811815,
+          "counterfactual_inline_same_n_usd": 10.775832,
+          "breakeven_turn_ratio": 0.4607,
+          "flags": {
+            "copies": 103,
+            "permission_denials": 1,
+            "interruptions": 1,
+            "tool_errors": 2
+          }
+        },
+        {
+          "agent_file": "agent-a5d15164e065e53da.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 29,
+          "models": {
+            "claude-opus-5": 29
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 2.870904,
+          "cost_frozen_rule_usd": 1.684254,
+          "components_usd": {
+            "input_tokens": 0.495405,
+            "output_tokens": 0.648475,
+            "cache_read_input_tokens": 1.034286,
+            "ephemeral_5m_input_tokens": 0.692738,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 99081,
+            "output_tokens": 25939,
+            "cache_read_input_tokens": 2068572,
+            "ephemeral_5m_input_tokens": 110838,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 110838
+          },
+          "cold_start_prefix_tokens": 16453,
+          "cold_start_prefix_usd": 0.102831,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 208009,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 2.777562,
+          "counterfactual_net_usd": -2.674731,
+          "counterfactual_inline_same_n_usd": 5.545634,
+          "breakeven_turn_ratio": 0.5177,
+          "flags": {
+            "copies": 102,
+            "tool_errors": 2
+          }
+        },
+        {
+          "agent_file": "agent-a7832027e6f590e2e.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 34,
+          "models": {
+            "claude-opus-5": 34
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 4.605468,
+          "cost_frozen_rule_usd": 2.591362,
+          "components_usd": {
+            "input_tokens": 0.4622,
+            "output_tokens": 1.55705,
+            "cache_read_input_tokens": 1.735868,
+            "ephemeral_5m_input_tokens": 0.85035,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 92440,
+            "output_tokens": 62282,
+            "cache_read_input_tokens": 3471736,
+            "ephemeral_5m_input_tokens": 136056,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 136056
+          },
+          "cold_start_prefix_tokens": 17239,
+          "cold_start_prefix_usd": 0.107744,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 301588,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 4.833933,
+          "counterfactual_net_usd": -4.726189,
+          "counterfactual_inline_same_n_usd": 9.331657,
+          "breakeven_turn_ratio": 0.4935,
+          "flags": {
+            "copies": 75,
+            "tool_errors": 4
+          }
+        },
+        {
+          "agent_file": "agent-a7954fbbc4c8a798f.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 18,
+          "models": {
+            "claude-opus-5": 18
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 1.938463,
+          "cost_frozen_rule_usd": 1.030747,
+          "components_usd": {
+            "input_tokens": 0.382565,
+            "output_tokens": 0.4972,
+            "cache_read_input_tokens": 0.517529,
+            "ephemeral_5m_input_tokens": 0.541169,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 76513,
+            "output_tokens": 19888,
+            "cache_read_input_tokens": 1035058,
+            "ephemeral_5m_input_tokens": 86587,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 86587
+          },
+          "cold_start_prefix_tokens": 16310,
+          "cold_start_prefix_usd": 0.101938,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 208009,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 1.725291,
+          "counterfactual_net_usd": -1.623354,
+          "counterfactual_inline_same_n_usd": 3.561816,
+          "breakeven_turn_ratio": 0.5442,
+          "flags": {
+            "copies": 55,
+            "tool_errors": 2
+          }
+        },
+        {
+          "agent_file": "agent-a8f5e39045c6c1e7c.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 16,
+          "models": {
+            "claude-opus-5": 16
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 1.720165,
+          "cost_frozen_rule_usd": 0.859964,
+          "components_usd": {
+            "input_tokens": 0.386095,
+            "output_tokens": 0.438275,
+            "cache_read_input_tokens": 0.41762,
+            "ephemeral_5m_input_tokens": 0.478175,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 77219,
+            "output_tokens": 17531,
+            "cache_read_input_tokens": 835239,
+            "ephemeral_5m_input_tokens": 76508,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 76508
+          },
+          "cold_start_prefix_tokens": 15811,
+          "cold_start_prefix_usd": 0.098819,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 169473,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 1.229296,
+          "counterfactual_net_usd": -1.130477,
+          "counterfactual_inline_same_n_usd": 2.850642,
+          "breakeven_turn_ratio": 0.6034,
+          "flags": {
+            "copies": 51
+          }
+        },
+        {
+          "agent_file": "agent-ab3c0ec48e5962292.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 65,
+          "models": {
+            "claude-opus-5": 65
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 5.847133,
+          "cost_frozen_rule_usd": 3.978126,
+          "components_usd": {
+            "input_tokens": 0.957895,
+            "output_tokens": 1.0263,
+            "cache_read_input_tokens": 2.930057,
+            "ephemeral_5m_input_tokens": 0.932881,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 191579,
+            "output_tokens": 41052,
+            "cache_read_input_tokens": 5860113,
+            "ephemeral_5m_input_tokens": 149261,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 149261
+          },
+          "cold_start_prefix_tokens": 23267,
+          "cold_start_prefix_usd": 0.145419,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 153446,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 4.230818,
+          "counterfactual_net_usd": -4.085399,
+          "counterfactual_inline_same_n_usd": 9.932532,
+          "breakeven_turn_ratio": 0.5887,
+          "flags": {
+            "copies": 147,
+            "tool_errors": 8
+          }
+        },
+        {
+          "agent_file": "agent-ad47ff238d7ea59a9.jsonl",
+          "agent_type": "general-purpose",
+          "spawn_depth": 1,
+          "request_shape": "background",
+          "requests": 18,
+          "models": {
+            "claude-opus-5": 18
+          },
+          "unpriced_requests": 0,
+          "unpriced_models": [],
+          "cost_usd": 2.71151,
+          "cost_frozen_rule_usd": 1.164554,
+          "components_usd": {
+            "input_tokens": 0.82993,
+            "output_tokens": 0.634875,
+            "cache_read_input_tokens": 0.613467,
+            "ephemeral_5m_input_tokens": 0.633238,
+            "ephemeral_1h_input_tokens": 0.0
+          },
+          "tokens": {
+            "input_tokens": 165986,
+            "output_tokens": 25395,
+            "cache_read_input_tokens": 1226934,
+            "ephemeral_5m_input_tokens": 101318,
+            "ephemeral_1h_input_tokens": 0,
+            "cache_creation_input_tokens": 101318
+          },
+          "cold_start_prefix_tokens": 23538,
+          "cold_start_prefix_usd": 0.147113,
+          "cold_start_ttl": "5m",
+          "main_context_at_spawn_tokens": 208009,
+          "spawn_model": "claude-opus-5",
+          "counterfactual_saving_usd": 1.660239,
+          "counterfactual_net_usd": -1.513127,
+          "counterfactual_inline_same_n_usd": 4.224636,
+          "breakeven_turn_ratio": 0.6418,
+          "flags": {
+            "copies": 58,
+            "tool_errors": 1
+          }
+        }
+      ]
+    }
+  ]
+}

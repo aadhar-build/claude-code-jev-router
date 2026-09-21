@@ -258,7 +258,7 @@ insert a Jev-free phase before everything:
 | **W1** | **The static floor — no Jev call at all.** A `PreToolUse` hook on `Agent` applying a `subagent_type → tier` map, rewriting `tool_input.model` | **The first shippable thing.** Zero classifier calls, **zero added latency**, and the prior art says it captures most of the available saving. It also builds every piece of scaffolding W4 needs and produces the "after" corpus that nothing in this repo has ever produced | low |
 | **W2** | **Safe install + teardown**, opt-in per project | Must work *before* the router is armed, not after | — |
 | **W3** | **The accuracy gate** — per-task pass/fail, blinded | Nothing in this repo has ever measured whether a routed subagent did the work correctly | — |
-| **W4** | **Jev enters, as increment two** — targeted at the **65% `general-purpose` residue** where the static rule has no signal | **Ship gate: Jev must beat the two-line rule on realised cost at equal task success.** If it cannot, we keep the rule and stop | high |
+| **W4** | **Jev enters, as increment two** — targeted at the **`general-purpose` residue (65–79%, see §10)** where the static rule has no signal | **Ship gate: Jev must beat the two-line rule on realised cost at equal task success.** If it cannot, we keep the rule and stop | high |
 | **W5** | **Context reduction** — ingestion-time trim of oversized tool results, and/or rebuilt compaction | Demoted from P1. Must clear §2c's bar: remove far more than the +337 tokens / +557ms it costs, so it fires only on large payloads | medium |
 | **W6** | **Operate** — canary on a schedule, latency SLO, weekly cost report against the frozen baseline | — | — |
 
@@ -518,8 +518,9 @@ access is not the blocker previously recorded.
 1. **`agent_route` — the entire product surface — has zero rows.** All 2,095
    run rows are `pre_bash`. `config/surfaces.json` has `agent_route` at
    `mode: "off"` and only `pre_bash` is registered. **The routing hook has never
-   fired live.** JEV-24a's 120 delegated tasks are the only "before" that
-   exists, and no instrument here has ever produced an "after".
+   fired live.** JEV-24a's frozen pre-rule baseline is the only "before" that
+   exists — and it records **7** delegated tasks, not the 120 quoted elsewhere
+   (§10), and no instrument here has ever produced an "after".
 2. **The cheapest lever may be *fewer* delegations, not smarter ones.** AqueGen
    has delegate-and-route at $1.68 against $1.36 inline. **JEV-24b — the
    standing "delegate where possible" rule — is actively harmful under the new
@@ -613,3 +614,88 @@ Three verdicts worth flagging because they **invert**:
    optimising the wrong thing. W1 proceeds in parallel because the static floor
    is needed either way and adds no cost, but **its tier map may be rewritten
    by W0's answer.**
+
+---
+
+## 10. W0's result, and a corpus-size dispute it exposed
+
+### The AqueGen threat does NOT replicate. Keep delegating.
+
+W0 asked: is delegating to subagents cheaper or dearer than working inline?
+`JEV-47` cited AqueGen's telemetry claiming delegate-and-route costs **~24%
+more** than staying inline, which would have made "route better" the wrong
+project. **It does not replicate here**, and for a mechanical reason we can
+point at.
+
+| | measured |
+|---|---|
+| Delegated vs inline at matched turn count | **$171.94 vs $357.53** — negative net on **30/30** tasks |
+| Cost per delegated task | median **$4.50** (IQR $1.72–$7.28, range $0.11–$13.35) |
+| Requests per task | median **38** (IQR 20–59, max 107) |
+| Cold-start prefix write — *AqueGen's actual mechanism* | **2.0%** of delegated cost ($3.46 of $171.94) |
+
+**Why the mechanism fails here.** The cold-start write is 2.0% of a task's cost
+and is amortised over a median 38 turns. **A 2% component cannot produce a 24%
+penalty.** And the expensive multiplier does not apply: subagent cache writes
+measured **100% 5-minute TTL (1.25×)** while main-session writes are **100%
+1-hour (2×)** — 4,431,529 / 0 tokens versus 8,798 / 2,163,568. *The
+auth-dependent 2× multiplier applies to **zero** delegated tokens.* This also
+refines `PREREGISTRATION` A8.2, whose claim that every row in the work session
+is 1-hour TTL is true of the main transcript and **false of its subagents**.
+
+**What the conclusion actually hinges on — and it is not the cache arithmetic.**
+Break-even turn ratio `k* = D / (D − penalty + saving)`: **median 0.47** (0.59
+with the main context hard-capped). Inline would have to finish the median task
+in **~47–59% of the turns** for delegation to lose — plausible for an agent
+already holding the context. **That turn ratio is unmeasured.** The highest-value
+cheap experiment now on the board is a paired inline-vs-delegated run that
+measures it.
+
+**A second reason not to "delegate less":** every task sampled is
+`requestShape: background`. Moving that work inline puts it on the **blocking**
+main thread, spending against this SPEC's own *no added felt latency*
+constraint — a cost AqueGen never prices.
+
+### ⚠️ The delegated-corpus size is disputed by a factor of 17
+
+Three sources, three answers, none reconciled:
+
+| source | count | window |
+|---|---|---|
+| `data/baseline/delegation-pre-rule-v1.json` | **7** | cut at 2026-09-20T11:11:49Z — *deliberately pre-rule only* |
+| counted on disk, 2026-09-21 | **33** | today, method: subagent transcripts |
+| `ISSUES.md` JEV-46 / `src/state_builders.py:101`, against `sessions.jsonl` | **120** | full window |
+
+Type distribution is disputed too: JEV-46 says `general-purpose` **78 (65%)**,
+today's count says **26 of 33 (79%)**.
+
+**Nothing may be fitted to these numbers until they are reconciled.** The tier
+map in W1 is therefore a **declared policy choice, explicitly not data-derived**.
+The only claim all three support — and the only one this SPEC leans on — is that
+`general-purpose` is the **large majority** of delegated tasks, so the static
+rule has no signal on most traffic and addresses **somewhere between a fifth and
+a third** of the surface. State the range, never a point.
+
+*How this got into the SPEC:* the 120/78/65% figure was propagated into §5, the
+README and the board from an audit that attributed it to the wrong file. It is
+not fabricated — JEV-46 sources it to `sessions.jsonl` — but it was quoted
+against a file containing 7. Recorded rather than quietly repaired.
+
+### New defect found by W0, needs a ticket
+
+`src/baseline.py:197` — `requests()` keeps the **first** copy of a duplicated
+request and never reads `iterations[]`, while `session_metrics.py` keeps the
+**last/COMPLETED** copy (early copies are placeholders with `input_tokens: 2`).
+All 48 growing keys are inside **subagent** transcripts. Re-running both rules
+over identical files: delegated cost **$105.09 frozen vs $171.94 corrected —
++38.9%.** So `delegation_rate_by_spend: 0.162` in the frozen baseline is
+**probably biased low** — *probably*, because the denominator moves too.
+
+### Consequences for the board
+
+- **W0 is answered. W4 is unblocked** on this axis.
+- **`JEV-47`'s acceptance criteria stay; its 24%-penalty premise must not be
+  carried into any writeup unqualified.**
+- **`JEV-24b` remains killed** — but on the grounds that it is a confound and an
+  unmeasured behaviour change, *not* on the AqueGen cost argument, which has now
+  failed to replicate.
