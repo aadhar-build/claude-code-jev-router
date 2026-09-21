@@ -1,0 +1,11 @@
+{
+  "rule_violations": [
+    "no test accompanies the change"
+  ],
+  "dimensions": {
+    "correctness": 8.0,
+    "changeability": 7.5,
+    "modularity": 7.0,
+    "tests": 6.6
+  }
+}

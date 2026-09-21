@@ -1,0 +1,710 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
+"""Spool drainer. The sole writer of data/runs/.
+
+Started manually in a visible terminal for the duration of the experiment. No
+launchd, no SessionStart self-start: when the output is a published measurement,
+"the experiment is running" should be an observable state, not an ambient one.
+
+Two properties matter more than anything else here:
+
+**Every arm runs offline, in one worker, on the same decision point.** Making Jev
+inline and the LLMs offline would confound the comparison with process spawn, TLS
+setup and time-of-day network drift that only one arm pays. Enforce-mode latency
+is measured separately, by bench_inline.py.
+
+**Every arm sees byte-identical state.** The state is built once, hashed once,
+and the hash is recorded on every row, so a serialisation drift fails loudly in
+analysis instead of silently skewing every comparison.
+
+--------------------------------------------------------------------------
+ARM DISPATCH: what `arm_order` and `arm_order_position` mean (JEV-33)
+--------------------------------------------------------------------------
+
+Until 2026-09-20 the arms were evaluated **sequentially** in a per-decision
+randomised order. The randomisation was never about the order itself; it existed
+so that no arm systematically occupied the late slots of a ~20-80s serial window
+and therefore systematically paid a slice of time-of-day network drift, nor
+systematically occupied the first slot and paid the cold-connection cost. In that
+era `arm_order` was causal: position N genuinely ran after positions 0..N-1, and
+`arm_order_position` was the control variable an analysis would condition on.
+
+Since JEV-33 the arms are dispatched **concurrently** — all of them start within
+a few hundred microseconds of one decision's t0. That does not weaken the
+protection the randomisation existed for; it removes the hazard outright. There
+are no late slots to be unlucky in, because there are no slots. Concurrency is
+the stronger version of the same guarantee, not a relaxation of it.
+
+But it changes what the two fields MEAN, and those fields are already on 750+
+committed rows, so they are not silently redefined:
+
+  arm_dispatch          NEW. "concurrent" on every row written by this code.
+                        ABSENT on every row written before the boundary, and
+                        absence is defined to mean "sequential". replay.py and
+                        canary.py rows are also sequential and also omit it.
+                        This is the era marker; condition on it, do not pool
+                        latency across it without saying so.
+  arm_order             Post-boundary: the randomised **submission** order into
+                        the thread pool. It no longer determines when a call
+                        ran, so it is NOT a latency-confound control any more.
+                        It is kept because the submission stagger is real,
+                        merely tiny, and because dropping a field mid-window is
+                        worse than narrowing one.
+  arm_order_position    Post-boundary: this arm's index in that submission
+                        order. The invariant row["arm"] ==
+                        row["arm_order"][row["arm_order_position"]] holds in
+                        both eras and is tested.
+  dispatch_offset_ms    NEW. Measured ms from the decision's t0 to the moment
+                        this arm's call actually began. This is the EMPIRICAL
+                        replacement for the order control: an analysis can now
+                        verify the stagger is negligible instead of trusting
+                        the design. Sequential-era rows do not have it.
+  dispatch_wall_ms      NEW. t0 to the last arm finishing, per decision. The
+                        direct drain-rate instrument.
+  concurrent_arms       NEW. How many arms were in flight together. Concurrent
+                        `claude -p` spawns contend for CPU, so a cc_* arm's
+                        total_ms is inflated relative to the sequential era by
+                        an amount this field lets an analysis condition on.
+                        `raw.duration_api_ms` separates API time from spawn.
+
+**The honest statement for the writeup**: pre- and post-boundary latency are
+different measurements of different things and must not be pooled. Agreement,
+answers, cost and attrition are unaffected — the arms see identical bytes and
+ask identical questions in both eras.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import re
+import signal
+import sys
+import threading
+import time
+from concurrent import futures
+from pathlib import Path
+from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import pyversion  # noqa: E402
+
+# JEV-44: the PEP-723 header above binds `uv run` only, and this is the
+# longest-lived __main__ in the project -- it daemonises.
+pyversion.require()
+
+import config_loader as cl  # noqa: E402
+import paths  # noqa: E402
+import spool_watch  # noqa: E402
+import state_builders as sb  # noqa: E402
+import store  # noqa: E402
+from arms.base import ArmConfig, Run, classify_exception  # noqa: E402
+
+# --------------------------------------------------------------------------
+# LIFECYCLE: the kill switch, the stop signal, and the claim (JEV-51, JEV-31)
+# --------------------------------------------------------------------------
+#
+# Three facts about the window between `candidate.rename(claimed/)` and
+# `spooled.unlink()` govern everything below.
+#
+# 1. THE KILL SWITCH MUST STOP SPENDING, NOT ONLY RECORDING (JEV-51).
+#    `.jev-disabled` was checked by the hooks and by `paths.killed()`, so
+#    capture stopped -- and the worker kept draining whatever was already
+#    spooled, calling every enabled arm. "Disabled" meant "stops recording new
+#    decisions", not "stops spending money". The switch is now read at the top
+#    of every cycle AND before every claim, never between the claim and the
+#    dispatch: a switch that arrived mid-dispatch must not abandon a file that
+#    has already left ready/.
+#
+# 2. A STOP SIGNAL MUST NOT LAND INSIDE THAT WINDOW (JEV-51).
+#    The worker is started as a background job by `run-collection.sh start`, so the
+#    shell sets SIGINT to SIG_IGN and the `except KeyboardInterrupt` that used
+#    to be the only graceful exit was unreachable in the way the worker is
+#    actually run. `run-collection.sh stop` sends SIGTERM, whose default
+#    disposition terminates immediately -- mid-`_dispatch`, with the file
+#    already in claimed/. That is the unnamed cause of JEV-31's stranded
+#    claims. Both signals now set a flag; the in-flight capture finishes, the
+#    claim is released, and the process exits 0. The honest cost is that a stop
+#    can take up to one dispatch, bounded by the slowest arm's timeout_s --
+#    180s for the cc_* arms, 240s for cc_fable51 -- which is why
+#    `run-collection.sh stop` waits and says so rather than appearing hung.
+#
+# 3. A CLAIM MUST RECORD ITS OWNER (JEV-31).
+#    The old claimed name was the spool name unchanged, i.e. `capture.sh`'s
+#    `$$` -- the HOOK's pid. No owning pid was ever written to disk, so "is the
+#    owner still alive?" could not be asked, and a reap keyed on pid liveness
+#    could not be built. The claim is now renamed to
+#
+#        {base}__p{worker_pid}__t{claim_epoch}__r{retries}.json
+#
+#    which every existing consumer tolerates: the surface is parsed with
+#    `split("__", 1)[0]`, non-greedy from the LEFT, so it still yields
+#    `pre_bash`; `spool_watch._count` globs `*.json`; `_quarantine` carries the
+#    whole name into dead/ so a quarantined re-claim brings its retry count
+#    with it.
+#
+# WHY THE REAP RUNS AT STARTUP ONLY, AND WHY PID LIVENESS BEATS AGE
+# -----------------------------------------------------------------
+# Reaping a claim whose owner is still working produces TWO full sets of
+# well-formed run rows, under two `decision_id`s sharing one `state_sha256`.
+# That is not attrition, it is INFLATION, and it is invisible: the section 5
+# assertion that all arms for a decision share a state hash still passes,
+# because the duplicates are legitimately identical, while the clustered
+# bootstrap counts one decision point as two and its independence assumption is
+# quietly false. Two mitigations, both cheap: a live pid is NEVER reaped at any
+# age, and the reap runs once at startup, before this process has anything in
+# flight. A drain cycle counts claimed/ read-only and reaps nothing.
+#
+# Age alone is never sufficient in the other direction either: `rename()`
+# preserves mtime, so a capture that waited in a deep ready/ backlog is claimed
+# already carrying an old mtime, and any threshold would eventually reap a file
+# that was mid-dispatch.
+#
+# RESIDUAL RISK, STATED RATHER THAN ENGINEERED AWAY: pid reuse can make a dead
+# owner look alive. Such a file is left in claimed/ and reported in the status
+# line instead of being reaped. A stranded file that is VISIBLE is a much
+# smaller problem than the one JEV-31 is about.
+
+MAX_CLAIM_RETRIES = 3
+
+_CLAIM_RE = re.compile(r"^(?P<base>.+?)__p(?P<pid>\d+)__t(?P<t>\d+)__r(?P<r>\d+)\.json$")
+_READY_RETRY_RE = re.compile(r"^(?P<base>.+?)__r(?P<r>\d+)$")
+
+_stop = threading.Event()
+_kill_switch_logged = False
+
+
+def claim_name(base_stem: str, *, pid: int, claimed_at: int, retries: int = 0) -> str:
+    """The claimed filename for a ready file's stem.
+
+    `base_stem` may already carry a `__r{n}` suffix from a previous reap; the
+    counter lives in exactly one place in the name, so it is stripped here and
+    re-emitted from `retries`.
+    """
+    m = _READY_RETRY_RE.match(base_stem)
+    if m:
+        base_stem = m.group("base")
+    return f"{base_stem}__p{pid}__t{claimed_at}__r{retries}.json"
+
+
+def parse_claim(name: str) -> dict[str, Any] | None:
+    """Ownership recorded on a claimed file, or None for a pre-JEV-31 claim."""
+    m = _CLAIM_RE.match(name)
+    if not m:
+        return None
+    return {
+        "base": m.group("base"),
+        "pid": int(m.group("pid")),
+        "claimed_at": int(m.group("t")),
+        "retries": int(m.group("r")),
+    }
+
+
+def ready_retries(name: str) -> int:
+    """How many times a file in ready/ has already been reaped."""
+    m = _READY_RETRY_RE.match(Path(name).stem)
+    return int(m.group("r")) if m else 0
+
+
+def _pid_alive(pid: int) -> bool:
+    """Signal 0 liveness. PermissionError means the pid EXISTS and is owned by
+    somebody else -- alive for our purposes, and never reaped."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def reap_claimed(*, verbose: bool = True) -> int:
+    """Return stranded claims to ready/. Startup only -- see the note above.
+
+    Returns the number of files moved out of claimed/ (to ready/ or dead/).
+    """
+    claimed_dir = paths.SPOOL_CLAIMED
+    claimed_dir.mkdir(parents=True, exist_ok=True)
+    paths.SPOOL_READY.mkdir(parents=True, exist_ok=True)
+    moved = 0
+    for f in sorted(claimed_dir.glob("*.json")):
+        marker = parse_claim(f.name)
+        if marker is None:
+            # A pre-JEV-31 claim: the number in the name is the hook's pid and
+            # means nothing. Reaped unconditionally and NOT gated on age -- the
+            # reap runs at startup, run-collection.sh pidfile-guards against a
+            # second worker, so an unparseable claim seen here is stranded by
+            # definition. Gating it on age is how this defect would survive its
+            # own fix: the legacy file created by the very restart that ships
+            # this code has a fresh mtime.
+            base, retries = Path(f.name).stem, 0
+            why = "legacy claim with no owner recorded"
+        else:
+            if marker["pid"] == os.getpid():
+                continue  # ours, in flight
+            if _pid_alive(marker["pid"]):
+                if verbose:
+                    print(f"  reap: leaving {f.name} -- pid {marker['pid']} is alive",
+                          flush=True)
+                continue
+            base, retries = marker["base"], marker["retries"]
+            why = f"owner pid {marker['pid']} is gone"
+
+        retries += 1
+        if retries >= MAX_CLAIM_RETRIES:
+            _quarantine(
+                f,
+                f"reaped {retries} times without completing "
+                f"(cap {MAX_CLAIM_RETRIES}); last reason: {why}",
+                verbose=verbose,
+            )
+            moved += 1
+            continue
+
+        target = paths.SPOOL_READY / f"{base}__r{retries}.json"
+        try:
+            f.rename(target)
+        except OSError as exc:
+            if verbose:
+                print(f"  reap: could not return {f.name}: {exc}", flush=True)
+            continue
+        moved += 1
+        if verbose:
+            print(f"  reap: {f.name} -> ready/{target.name} ({why}, attempt {retries + 1})",
+                  flush=True)
+    return moved
+
+
+def stop_requested() -> bool:
+    return _stop.is_set()
+
+
+def request_stop(signum: int | None = None, frame: Any = None) -> None:
+    """The signal handler. Sets a flag and returns -- it does no work, writes
+    no file and raises nothing, because it can run at any bytecode boundary,
+    including inside the thread pool's shutdown."""
+    _stop.set()
+
+
+def reset_stop() -> None:
+    """For tests: clear the flag so one test's stop does not end the next."""
+    _stop.clear()
+
+
+def install_signal_handlers() -> None:
+    """SIGTERM and SIGINT both map to the same graceful stop.
+
+    SIGINT gets an explicit handler rather than relying on KeyboardInterrupt
+    because under `nohup ... &` the shell sets SIGINT to SIG_IGN, and Python
+    inherits that disposition -- which is why the `except KeyboardInterrupt`
+    this replaces was unreachable in the way the worker is actually run.
+    `signal.signal` also RESETS the inherited SIG_IGN, so installing it is what
+    makes Ctrl-C work on a background job at all.
+    """
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, request_stop)
+        except (ValueError, OSError):
+            # Not the main thread (a test harness, an embedded run). The flag
+            # still works; only the automatic delivery is unavailable.
+            pass
+
+
+def load_arm_module(kind: str):
+    if kind == "fake":
+        from arms import fake
+        return fake
+    if kind == "jev":
+        from arms import jev
+        return jev
+    if kind == "anthropic":
+        from arms import claude
+        return claude
+    if kind == "claude_cli":
+        from arms import claude_cli
+        return claude_cli
+    raise ValueError(f"unknown arm kind: {kind}")
+
+
+def evaluate_one(state: str, questions: dict[str, Any], config: ArmConfig) -> Run:
+    """Call an arm, converting any failure into a Run with ok=False.
+
+    Failures are rows. Dropping them would make attrition invisible, which is
+    exactly how a latency distribution gets quietly flattered.
+    """
+    try:
+        return load_arm_module(config.kind).evaluate(state, questions, config)
+    except Exception as exc:  # noqa: BLE001 -- an arm must never kill the worker
+        # Deliberately NOT BaseException: a Ctrl-C during a live call would
+        # otherwise be recorded as an arm failure, quietly poisoning the
+        # attrition statistics with failures the arm never had.
+        kind, detail = classify_exception(exc)
+        return Run(
+            arm=config.name,
+            arm_config_id=config.arm_config_id,
+            ok=False,
+            error_kind=kind,
+            error_detail=detail[:2000],
+        )
+
+
+def _dispatch(
+    state: str,
+    questions: dict[str, Any],
+    order: list[ArmConfig],
+) -> tuple[list[Run], list[float], float]:
+    """Run every arm concurrently, returning results IN SUBMISSION ORDER.
+
+    Results are indexed by submission position rather than collected with
+    as_completed(), because the position is written onto the row: pairing a
+    future with the wrong arm would mislabel `arm_order_position` silently,
+    which is worse than being slow.
+
+    Note for whoever reads a wedged terminal: a Ctrl-C here blocks inside the
+    pool's shutdown until the in-flight `claude -p` calls return, which can be
+    up to the arm's timeout_s (180-240s). The worker is not hung.
+    """
+    if not order:
+        return [], [], 0.0
+
+    t0 = time.perf_counter()
+    offsets: list[float] = [0.0] * len(order)
+
+    def call(position: int, config: ArmConfig) -> Run:
+        offsets[position] = (time.perf_counter() - t0) * 1000.0
+        return evaluate_one(state, questions, config)
+
+    with futures.ThreadPoolExecutor(max_workers=len(order)) as pool:
+        pending = [pool.submit(call, i, c) for i, c in enumerate(order)]
+        results = [f.result() for f in pending]
+
+    return results, offsets, (time.perf_counter() - t0) * 1000.0
+
+
+def process_capture(
+    payload: dict[str, Any],
+    surface: str,
+    arms: list[ArmConfig],
+    *,
+    run_context: str = "live",
+    version: str | None = None,
+    phrasing: str | None = None,
+    rng: random.Random | None = None,
+    dry_run: bool = False,
+) -> tuple[str, list[Run]]:
+    rng = rng or random.Random()
+    decision_id = store.ulid()
+    picked_at = store.utcnow()
+
+    state = sb.build(surface, payload)
+    state_sha = sb.sha256(state)
+    # Resolved once, then passed to both calls. Taking the config default twice
+    # would let the questions actually asked and the question_set_id recorded
+    # beside them drift apart, which is unreconstructable after the fact.
+    version = version or cl.surface_question_version(surface)
+    questions = cl.questions_for(surface, version=version, phrasing=phrasing)
+    qsid = cl.question_set_id(surface, version=version, phrasing=phrasing)
+    # JEV-30. Resolved ONCE, here, and stamped on both row streams. It is read
+    # before `_dispatch` on purpose: `config_fingerprint()` calls
+    # `assert_config_fresh()`, so reading it per row would let a config edit
+    # landing during a dispatch raise inside the row-writing loop, be swallowed
+    # by `drain_once`'s `except Exception`, and quarantine a perfectly good
+    # capture to dead/ -- after every arm call had already been paid for. Read
+    # here, a row honestly carries the config that was in force when it ran.
+    config_fp = cl.config_fingerprint()["config_sha256"]
+
+    capture_row = {
+        "decision_id": decision_id,
+        "picked_at": picked_at,
+        "surface": surface,
+        "session_id": payload.get("session_id"),
+        "prompt_id": payload.get("prompt_id"),
+        "tool_use_id": payload.get("tool_use_id"),
+        "agent_type": payload.get("agent_type"),
+        "is_sidechain": bool(payload.get("agent_id")),
+        "permission_mode": payload.get("permission_mode"),
+        "cwd": payload.get("cwd"),
+        "state_sha256": state_sha,
+        "state_chars": len(state),
+        "state_builder_version": sb.STATE_BUILDER_VERSION,
+        "state_source": sb.STATE_SOURCE[surface],
+        "run_context": run_context,
+        # JEV-30. The identity of the config this row was produced under,
+        # derived from the BYTES rather than from a human-maintained version
+        # string. Two rows with the same value ran on byte-identical config;
+        # two that differ did not, whatever their version strings claim.
+        "config_fingerprint": config_fp,
+    }
+
+    # Randomised submission order per decision point, then CONCURRENT dispatch.
+    # See the module docstring: the randomisation existed so no arm
+    # systematically paid a late slot in a serial window; concurrency removes
+    # the slots entirely. The shuffle is kept so that the residual sub-
+    # millisecond submission stagger is still randomised rather than fixed.
+    order = list(arms)
+    rng.shuffle(order)
+
+    results, offsets, dispatch_wall_ms = _dispatch(state, questions, order)
+
+    if dry_run:
+        return decision_id, results
+
+    store.write_state(state, state_sha)
+    store.append_capture(capture_row)
+
+    for position, run in enumerate(results):
+        row = run.to_dict()
+        usage = row["usage"]
+        row.update(
+            {
+                "decision_id": decision_id,
+                "surface": surface,
+                "session_id": payload.get("session_id"),
+                "question_set_id": qsid,
+                "state_sha256": state_sha,
+                "run_context": run_context,
+                # See the module docstring for what these four mean now that
+                # the calls overlap. `arm_dispatch` is the era marker; its
+                # ABSENCE on a row means the sequential era.
+                "arm_dispatch": "concurrent",
+                "arm_order_position": position,
+                "arm_order": [c.name for c in order],
+                "concurrent_arms": len(order),
+                "dispatch_offset_ms": round(offsets[position], 3),
+                "dispatch_wall_ms": round(dispatch_wall_ms, 1),
+                "evaluated_at": store.utcnow(),
+                "pricing_version": cl.pricing()["version"],
+                "config_fingerprint": config_fp,
+                "cost_usd": cl.cost_usd(run.response_model or "", usage) if run.ok else None,
+            }
+        )
+        store.append_run(row)
+
+    return decision_id, results
+
+
+def _quiescent(*, verbose: bool) -> bool:
+    """True if the kill switch is set. Logs the TRANSITION, not every poll.
+
+    A line per 30s cycle would bury the log; a line printed once at 04:00
+    scrolls out of a multi-day one. Both edges are logged, so the log says when
+    the worker went quiet and when it resumed.
+    """
+    global _kill_switch_logged
+    killed = paths.killed()
+    if killed and not _kill_switch_logged:
+        if verbose:
+            print(f"worker: QUIESCENT -- kill switch present at {paths.KILL_SWITCH}; "
+                  "draining nothing and calling no arms until it is removed",
+                  flush=True)
+        _kill_switch_logged = True
+    elif not killed and _kill_switch_logged:
+        if verbose:
+            print("worker: kill switch removed; resuming drain", flush=True)
+        _kill_switch_logged = False
+    return killed
+
+
+def drain_once(arms: list[ArmConfig], *, verbose: bool = True) -> int:
+    # JEV-51. The switch is read here and again before every claim. A worker
+    # that is "disabled" must call nothing, claim nothing and quarantine
+    # nothing: the spool is left exactly as it was found, so removing the
+    # switch resumes rather than recovers.
+    if _quiescent(verbose=verbose):
+        return 0
+
+    # JEV-30. Config is pinned for the life of a process on purpose; an edit
+    # underneath a running worker makes rows either side of it silently
+    # incomparable. This refuses rather than reloading, and it sits HERE --
+    # before the first claim of the cycle -- so the refusal costs nothing:
+    # nothing has left ready/, so nothing is stranded in claimed/. It is
+    # deliberately allowed to propagate out of the poll loop and end the
+    # process, which is the restart the error message asks for.
+    cl.assert_config_fresh()
+
+    ready = sorted(paths.SPOOL_READY.glob("*.json"))
+    processed = 0
+    claimed_dir = paths.SPOOL_CLAIMED
+    claimed_dir.mkdir(parents=True, exist_ok=True)
+
+    for candidate in ready:
+        # Re-read before EVERY claim, not once per cycle. With a 30s poll the
+        # cycle-top check alone would keep spending for up to 30s after the
+        # operator set the switch, and a full drain of a deep backlog is far
+        # longer than that. Checked BEFORE the rename and never after it: a
+        # file that has left ready/ is finished, not abandoned.
+        if _quiescent(verbose=verbose) or stop_requested():
+            break
+
+        # Sample the depth on every claim, not once per poll cycle: the backlog
+        # peaks while the worker is mid-capture and a 30s poll steps over the
+        # peak it exists to catch (JEV-33).
+        spool_watch.sample()
+
+        # Claim the file by renaming it out of ready/ before doing any work.
+        # rename is atomic, so exactly one worker wins and the loser moves on.
+        # Without this, two workers evaluate the same capture against the live
+        # arms and we pay twice for a duplicate row.
+        # Resolve the surface and its mode BEFORE the claim, not after.
+        #
+        # `cl.surface_mode` reaches `surfaces()`, which calls
+        # `assert_config_fresh()` -- so a config edit underneath a running
+        # worker raises here. That refusal is deliberate (config is pinned per
+        # process; see JEV-30), but it used to fire from AFTER the rename and
+        # OUTSIDE the try below, so it propagated past the poll loop and killed
+        # the process with a file stranded in claimed/. A refusal must cost
+        # nothing. Parsing from `candidate.name` is identical to parsing from
+        # the claimed name: `claim_name` only ever appends.
+        surface = candidate.name.split("__", 1)[0]
+        mode = cl.surface_mode(surface)
+        if mode == "off":
+            _quarantine(candidate, "surface is off", verbose=verbose)
+            continue
+
+        # JEV-31: the claim records OUR pid and the time, so a later worker can
+        # ask whether the owner is still alive. The old name was the hook's pid
+        # and told a reaper nothing.
+        spooled = claimed_dir / claim_name(
+            candidate.stem,
+            pid=os.getpid(),
+            claimed_at=int(time.time()),
+            retries=ready_retries(candidate.name),
+        )
+        try:
+            candidate.rename(spooled)
+        except (FileNotFoundError, OSError):
+            continue
+
+        try:
+            payload = json.loads(spooled.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            _quarantine(spooled, f"unreadable: {exc}", verbose=verbose)
+            continue
+
+        active = [] if mode == "capture_only" else arms
+        try:
+            decision_id, results = process_capture(payload, surface, active)
+        except sb.StateBuildError as exc:
+            _quarantine(spooled, f"state build failed: {exc}", verbose=verbose)
+            continue
+        except Exception as exc:  # noqa: BLE001
+            _quarantine(spooled, f"unexpected: {exc}", verbose=verbose)
+            continue
+
+        spooled.unlink(missing_ok=True)
+        processed += 1
+        if verbose:
+            ok = sum(1 for r in results if r.ok)
+            print(f"  {surface} {decision_id} -> {ok}/{len(results)} arms ok", flush=True)
+    return processed
+
+
+def _quarantine(spooled: Path, reason: str, *, verbose: bool) -> None:
+    """Never silently delete a capture we failed to process.
+
+    Tolerant of the file having already gone. Two workers draining the same
+    spool will race: one processes and unlinks a file while the other is still
+    deciding to quarantine it. An unguarded rename raises FileNotFoundError,
+    which killed a live collection run and stopped capture accumulating without
+    any visible signal. Losing one duplicate record is fine; losing the worker
+    is not.
+    """
+    dead = paths.SPOOL_DEAD
+    dead.mkdir(parents=True, exist_ok=True)
+    try:
+        spooled.rename(dead / spooled.name)
+    except FileNotFoundError:
+        if verbose:
+            print(f"  {spooled.name} vanished before quarantine (another worker took it)",
+                  flush=True)
+        return
+    (dead / f"{spooled.name}.reason").write_text(reason, encoding="utf-8")
+    if verbose:
+        print(f"  quarantined {spooled.name}: {reason}", flush=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Drain the capture spool.")
+    parser.add_argument("--once", action="store_true", help="drain and exit")
+    parser.add_argument("--interval", type=float, default=2.0, help="poll seconds")
+    parser.add_argument("--arms", help="comma-separated arm names (default: config enabled)")
+    args = parser.parse_args()
+
+    # Installed before anything is claimed, so there is no window in which a
+    # stop signal lands on the default disposition (JEV-51).
+    install_signal_handlers()
+
+    paths.ensure_dirs()
+    # Validate every surface's pinned question set BEFORE claiming any spool
+    # file. surface_mode() would load the config anyway, but by then a capture
+    # has already been renamed into claimed/ and a bad pin would orphan it.
+    cl.surfaces()
+    names = args.arms.split(",") if args.arms else cl.arms_config()["enabled"]
+    arms = [cl.arm(n.strip()) for n in names]
+
+    # JEV-30. An operator should be able to read off what this process actually
+    # loaded, not what the files say now. Printed BEFORE anything is claimed.
+    cl.assert_config_fresh()
+    fp = cl.config_fingerprint()
+    print(f"worker: arms={[(a.name, a.arm_config_id) for a in arms]}", flush=True)
+    print(f"worker: config_sha256={fp['config_sha256']} "
+          f"(surfaces={fp['surfaces_version']} arms={fp['arms_version']} "
+          f"pricing={fp['pricing_version']}); config is PINNED for the life of "
+          "this process -- an edit underneath it refuses and asks for a restart",
+          flush=True)
+    print(f"worker: arms={[a.name for a in arms]} spool={paths.SPOOL_READY}", flush=True)
+    print(f"worker: dispatch=concurrent ({len(arms)} arms in flight per decision); "
+          "rows carry arm_dispatch='concurrent' -- see the module docstring "
+          "for what arm_order means now", flush=True)
+    print(spool_watch.report(), flush=True)
+
+    # JEV-31. Before the first claim of this process, and never again: see the
+    # inflation argument in the lifecycle note at the top of this module.
+    reaped = reap_claimed(verbose=True)
+    print(f"worker: reap at startup returned {reaped} stranded claim(s)", flush=True)
+
+    if paths.killed():
+        print(f"worker: kill switch present at {paths.KILL_SWITCH} -- starting QUIESCENT. "
+              "No arm will be called until it is removed.", flush=True)
+
+    if args.once:
+        n = drain_once(arms)
+        print(f"drained {n} capture(s)")
+        return 0
+
+    print("polling; SIGTERM or ctrl-c to stop gracefully", flush=True)
+    try:
+        while not _stop.is_set():
+            drain_once(arms, verbose=True)
+            spool_watch.sample()  # keep the mark live even on an idle cycle
+            # NOT time.sleep(): PEP 475 retries an interrupted sleep once the
+            # handler returns without raising, so a stop arriving one second
+            # into an idle 30s poll would wait out the remaining 29.
+            if _stop.wait(args.interval):
+                break
+    except KeyboardInterrupt:
+        # Belt and braces. Reachable only where install_signal_handlers()
+        # could not take (not the main thread); the signal path is the one
+        # that actually runs in production.
+        _stop.set()
+
+    ready, claimed = spool_watch.depth()
+    print(f"\nstopped cleanly: spool ready={ready} claimed={claimed}", flush=True)
+    if claimed:
+        print("worker: WARNING -- claimed/ is not empty at exit; "
+              "the next start will reap it (JEV-31)", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

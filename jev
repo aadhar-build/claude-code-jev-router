@@ -1,0 +1,94 @@
+#!/bin/bash
+# W2. The `jev` CLI -- the only user-facing surface.
+#
+#   ./jev status                 what is installed in this repo, and the switches
+#   ./jev install  DIR --dry-run show exactly what would change
+#   ./jev install  DIR --yes     register jev's hooks in DIR
+#   ./jev uninstall DIR --yes    remove them, and restore DIR's settings file
+#
+# DIR is the repo you want routed. jev itself stays where it is. Nothing is ever
+# written to ~/.claude/settings.json -- opt-in per project is the whole design,
+# and `src/install.py` explains why the global alternative is dangerous.
+#
+# This wrapper exists to do ONE thing that matters: resolve $JEV_HOME from its
+# own location and export it, so that every reader below -- `src/install.py`,
+# `src/paths.py`, and any hook it spawns -- agrees about where jev lives without
+# each one working it out again. It is the same two-line rule the hooks use.
+#
+# `set -u` and no `set -e`: this is a wrapper, and the exit code that matters is
+# Python's.
+set -u
+
+JEV_HOME="${JEV_HOME:-}"
+
+# W5. A RELATIVE $JEV_HOME IS REJECTED HERE, not normalised and not ignored.
+# `src/paths.py` calls `.resolve()` on it; every bash reader uses it VERBATIM
+# after an `is_dir` test. So `JEV_HOME=.` means two different directories to
+# the two halves, and in bash it makes every jev asset cwd-relative --
+# including $JEV_HOME/.jev-disabled, the global kill switch. A switch whose
+# path depends on where the caller was standing is the exact failure the switch
+# block's own comment says must never happen.
+case "${JEV_HOME}" in
+  "" | /*) : ;;
+  *)
+    echo "jev: JEV_HOME must be an ABSOLUTE path, and it is '$JEV_HOME'." >&2
+    echo "     A relative JEV_HOME makes every jev asset resolve against the" >&2
+    echo "     current directory -- including the kill switch at" >&2
+    echo "     \$JEV_HOME/.jev-disabled, which then names a different file in" >&2
+    echo "     every directory you run from. Fix it with:" >&2
+    echo "       export JEV_HOME=\"\$(cd '$JEV_HOME' && pwd -P)\"" >&2
+    exit 1 ;;
+esac
+
+# W5. SELF-DERIVATION THROUGH A SYMLINK. `${BASH_SOURCE[0]}` is the path the
+# caller used, which for `jev` on $PATH is the SYMLINK; `pwd -P` then resolves
+# the directory the link sits in (/usr/local/bin) and not the link itself, so
+# JEV_HOME came out as /usr/local/bin and python3 failed with a raw
+# "No such file or directory" that named neither JEV_HOME nor the fix. Walk the
+# link chain first, then take the directory.
+_jev_self="${BASH_SOURCE[0]:-$0}"
+_jev_hops=0
+while [ -L "$_jev_self" ] && [ "$_jev_hops" -lt 40 ]; do
+  _jev_link="$(readlink "$_jev_self")"
+  case "$_jev_link" in
+    /*) _jev_self="$_jev_link" ;;
+    *)  _jev_self="$(dirname "$_jev_self")/$_jev_link" ;;
+  esac
+  _jev_hops=$((_jev_hops + 1))
+done
+
+[ -d "$JEV_HOME" ] || JEV_HOME="$(cd "$(dirname "$_jev_self")" 2>/dev/null && pwd -P)"
+export JEV_HOME
+
+if [ ! -d "$JEV_HOME" ]; then
+  echo "jev: cannot resolve JEV_HOME (tried \$JEV_HOME, then the directory of $_jev_self)" >&2
+  exit 1
+fi
+
+# Fail HELPFULLY rather than letting python3 print a bare "No such file". The
+# two ways to get here are a $JEV_HOME pointed at the wrong directory, and a
+# copy of this script separated from the install it belongs to.
+if [ ! -r "$JEV_HOME/src/install.py" ]; then
+  echo "jev: JEV_HOME is '$JEV_HOME', but there is no src/install.py there," >&2
+  echo "     so this is not a jev install." >&2
+  echo >&2
+  echo "     JEV_HOME is where JEV ITSELF LIVES. It is taken from the" >&2
+  echo "     environment if it names a directory, otherwise from the directory" >&2
+  echo "     holding this script (following symlinks)." >&2
+  echo >&2
+  echo "     If you want jev on \$PATH, point JEV_HOME at the checkout:" >&2
+  echo "       export JEV_HOME=/path/to/jev            # in your shell rc" >&2
+  echo "     or install a one-line wrapper instead of copying this file:" >&2
+  echo "       printf '#!/bin/sh\\nexec /path/to/jev/jev \"\$@\"\\n' > /usr/local/bin/jev" >&2
+  echo "       chmod +x /usr/local/bin/jev" >&2
+  exit 1
+fi
+
+# The interpreter floor is the repo's, not this script's guess at one (JEV-44).
+if [ -r "$JEV_HOME/tests/lib/require_python.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$JEV_HOME/tests/lib/require_python.sh" >/dev/null 2>&1 || true
+fi
+PY="${JEV_PY:-python3}"
+
+exec "$PY" "$JEV_HOME/src/install.py" "$@"

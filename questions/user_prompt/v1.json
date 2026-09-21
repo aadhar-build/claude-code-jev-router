@@ -1,0 +1,26 @@
+{
+  "question_set_id": "user_prompt/v1",
+  "surface": "user_prompt",
+  "primary_phrasing": "a",
+  "_comment": "Routing is genuinely ambiguous. A low kappa here is pre-committed to be published as a finding about task ambiguity, not buried.",
+  "questions": {
+    "route": {
+      "type": "choice",
+      "options": {
+        "code_edit": "Write or modify code",
+        "debug": "Diagnose why something is broken",
+        "explain": "Explain existing code or a concept",
+        "plan": "Design an approach before implementing",
+        "shell": "Run a command or perform an operational task",
+        "search": "Find something in the codebase or externally",
+        "review": "Assess the quality or correctness of existing work",
+        "other": "None of the above"
+      },
+      "phrasings": {
+        "a": "What kind of work is the user asking for?",
+        "b": "Which single category best describes this request?",
+        "c": "If you had to route this prompt to one specialist, which one?"
+      }
+    }
+  }
+}

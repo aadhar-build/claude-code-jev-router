@@ -1,0 +1,46 @@
+{
+  "question_set_id": "agent_route/v1",
+  "surface": "agent_route",
+  "primary_phrasing": "a",
+  "_new_set_not_an_edit": "PREREGISTRATION.md section 8 freezes `questions/*/v1.json` for the surfaces that have already collected rows. This is a NEW set for a NEW surface with zero rows; no frozen file is edited by its existence. If this file is ever changed after the first `agent_route` row is written, it becomes v2 -- the version is the replay key.",
+  "_comment": "Two questions, deliberately the same pair `questions/user_prompt/v2.json` settled on: an ordered score optimised for ranking, and a boolean optimised for catching the one case that must not be downgraded. Both travel in one call, so the marginal cost of the second is near zero against the fixed scaffolding. A third question about how far the task description under-determines the work (the SWE-Router Bayes-floor idea) was considered and deferred to v2: it is untested, and the SWE-Router finding is an argument about what the STATE should carry, which this surface already acts on.",
+  "_why_a_score_not_a_model_choice": "Identical reasoning to user_prompt/v2 and it is the reason this set can outlive the choice set. A direct 'which model' question bakes one policy into the measurement: you could evaluate that policy and no other, and every row would be void the day JEV-28 resolves Fable in or out. A 1-5 score plus thresholds partitions into as many tiers as the policy wants, and lets policies invented after collection ends be evaluated offline from the same rows. Anchors therefore describe the WORK and never name a model -- `tests/test_agent_route.py` lints that.",
+  "_what_this_surface_sees": "One delegated task at the moment it is spawned: its description and full prompt, the requested agent type, whether it runs in the background, and the invoking context (delegating agent, nesting, permission mode, effort level, cwd). It does NOT see the parent's trajectory, and it never sees anything that happened after the spawn. See `state_builders.build_agent_route`.",
+  "_tier_mapping": {
+    "_comment": "NOT part of the question. This is the POLICY applied in analysis, kept here so it is versioned alongside the question it consumes. Nothing in the shadow phase applies it; JEV-35 is the first code that would, and the choice set is its ticket's to pre-register (A3.2: haiku45 / sonnet5 / opus5 / fable51, Fable blocked on JEV-28).",
+    "rule": "score <= tau_low -> cheapest tier;  tau_low < score <= tau_high -> middle tier;  score > tau_high -> frontier tier",
+    "tau_low_initial": 2.0,
+    "tau_high_initial": 3.5,
+    "tau_frontier_initial": 0.65,
+    "uplift_on_low_confidence": "If confidence < 0.5 OR needs_frontier >= tau_frontier, route UP one tier. This is an UPLIFT, not an escalation (CONTEXT.md): nothing has run, so nothing is wasted. tau_frontier is 0.65 rather than 0.5 for the reason recorded in user_prompt/v2 -- Jev ranks well and calibrates high, and a 0.5 threshold routes nearly everything to the frontier tier.",
+    "thresholds_are_starting_values": "Every number here is a STARTING VALUE to be replaced by a rule selected on training data (JEV-17), never a fitted constant memorised from the results.",
+    "asymmetry": "Misrouting easy work to a strong tier wastes money once. Misrouting hard work to a weak tier burns the subagent's whole run, produces an answer someone has to notice is wrong, and then pays again for the re-delegation. Thresholds are conservative; this is a decision-curve question over the FN:FP cost ratio, not a Youden question."
+  },
+  "questions": {
+    "complexity": {
+      "type": "score",
+      "_comment": "Ordered low to high, and written for DELEGATED work rather than for a user's request -- a delegated task arrives with an objective already stated by another agent, so the anchors turn on how much of the approach is still open rather than on how clearly the human expressed themselves.",
+      "anchors": [
+        "Mechanical: fetch, list or restate something with one right answer already determined",
+        "Bounded lookup: find a known thing in a known place, or apply a change whose shape is fully specified",
+        "Ordinary engineering: several files or several steps, but the approach is given and the work is following it",
+        "Diagnosis: the objective is stated, the cause or the correct approach is not, and it has to be worked out from evidence",
+        "Open-ended: real trade-offs to weigh, no stated approach, and consequences that outlast this task"
+      ],
+      "phrasings": {
+        "a": "How much reasoning does carrying out this delegated task require?",
+        "b": "How hard would this task be to complete correctly and completely?",
+        "c": "How much judgement, as opposed to following instructions, does this task demand?"
+      }
+    },
+    "needs_frontier": {
+      "type": "boolean",
+      "_comment": "The safety-critical half of the pair, and a cross-check on the score rather than a restatement of it: the score is optimised for ranking, this for catching the one task that must not be downgraded. A score of 2 beside a 0.9 here is the disagreement that carries the signal -- the same pairing that worked on pre_bash's destructive/needs_review.",
+      "phrasings": {
+        "a": "Would a weaker, cheaper worker plausibly complete this task in a way that looks finished but is wrong?",
+        "b": "Does this task need the strongest worker available?",
+        "c": "Is there a real risk of a confident, incorrect result here that nobody would catch?"
+      }
+    }
+  }
+}

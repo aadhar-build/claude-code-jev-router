@@ -1,0 +1,62 @@
+{
+  "question_set_id": "user_prompt/v2",
+  "surface": "user_prompt",
+  "primary_phrasing": "a",
+  "_supersedes": "user_prompt/v1 is FROZEN by PREREGISTRATION.md section 8 and is not edited. v2 adds `complexity` alongside the original `route`; both travel in one Jev call, so the marginal cost of the second question is near zero against ~278 tokens of fixed scaffolding.",
+  "_why_a_score_not_a_model_choice": "With three tiers (haiku / sonnet / opus) a direct 'which model' question would bake one policy into the measurement: you could evaluate exactly that policy and no other. A 1-5 complexity score plus TWO thresholds partitions into three tiers, and lets every routing policy be evaluated offline from one set of rows -- including policies invented after collection ends. The day-0 probe also found the score question outperformed the choice question (FINDINGS 5.3).",
+  "_tier_mapping": {
+    "_comment": "NOT part of the question. This is the POLICY applied in analysis, kept here so it is versioned alongside the question it consumes. Two thresholds, both to be selected by a rule on training data rather than memorised -- see JEV-17 and FINDINGS 4d.",
+    "rule": "score <= tau_low -> haiku;  tau_low < score <= tau_high -> sonnet;  score > tau_high -> opus",
+    "tau_low_initial": 2.0,
+    "tau_high_initial": 3.5,
+    "escalate_on_low_confidence": "If confidence < 0.5 OR needs_frontier >= tau_frontier, route UP one tier. tau_frontier is 0.65, NOT 0.5: on a 7-prompt check Jev's needs_frontier ran 0.47-0.50 on trivial and simple prompts and 0.70-0.78 on moderate and hard ones -- clean separation, but not at the default. At 0.5 it escalated 5 of 7 including a simple test-writing prompt, which would route nearly everything to opus and destroy the economics. This is the same ceiling-hugging inflation found on pre_bash.needs_review: Jev ranks well and calibrates badly. Like every other threshold here, 0.65 is a STARTING VALUE to be replaced by a rule selected on training data -- see JEV-17.",
+    "asymmetry": "Misrouting easy->strong wastes money. Misrouting hard->weak burns turns, produces a wrong answer, and you pay for the rework AND the escalation. Thresholds must be conservative; this is a decision-curve question over the FN:FP cost ratio, not a Youden question.",
+    "tau_frontier_initial": 0.65
+  },
+  "questions": {
+    "complexity": {
+      "type": "score",
+      "_comment": "Ordered low to high. Anchors describe the WORK, never the model -- naming models in the anchors would leak the policy into the measurement and make the score unusable if the tier lineup changes.",
+      "anchors": [
+        "Mechanical: a rename, a format, a lookup with one right answer",
+        "Localised: a single file, an obvious approach, nothing to weigh up",
+        "Ordinary engineering: several files, but the approach is already specified",
+        "Diagnosis: the cause is not stated and must be inferred from symptoms",
+        "Open-ended design: real trade-offs, no stated approach, consequences beyond this change"
+      ],
+      "phrasings": {
+        "a": "How much reasoning does this request require?",
+        "b": "How hard is this to get right?",
+        "c": "How much would a weaker engineer struggle with this request?"
+      }
+    },
+    "needs_frontier": {
+      "type": "boolean",
+      "_comment": "A deliberate cross-check on the score, and the safety-critical half of the pair. The score is optimised for ranking; this is optimised for catching the one case that must not be downgraded. If the score says 2 and this says 0.9, that disagreement is the signal -- exactly the destructive/needs_review pairing that worked on pre_bash.",
+      "phrasings": {
+        "a": "Would a smaller, faster model plausibly get this wrong in a way the user would notice?",
+        "b": "Does this request need the strongest available model?",
+        "c": "Is there a real risk that a cheap model answers this confidently and incorrectly?"
+      }
+    },
+    "route": {
+      "type": "choice",
+      "_comment": "Carried forward unchanged from v1 so the two versions remain comparable and the choice-type machinery (option-order sensitivity, categorical kappa) keeps being exercised.",
+      "options": {
+        "code_edit": "Write or modify code",
+        "debug": "Diagnose why something is broken",
+        "explain": "Explain existing code or a concept",
+        "plan": "Design an approach before implementing",
+        "shell": "Run a command or perform an operational task",
+        "search": "Find something in the codebase or externally",
+        "review": "Assess the quality or correctness of existing work",
+        "other": "None of the above"
+      },
+      "phrasings": {
+        "a": "What kind of work is the user asking for?",
+        "b": "Which single category best describes this request?",
+        "c": "If you had to route this prompt to one specialist, which one?"
+      }
+    }
+  }
+}

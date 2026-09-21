@@ -1,0 +1,142 @@
+{
+  "_comment": "W1, the static floor (JEV-35). A subagent_type -> tier map, applied by hooks/agent_route_actuator.sh with ZERO Jev calls and zero network. This file is the rule: the hook contains no tier literal. Changing routing policy is editing this file, not editing a script.",
+
+  "_why_this_and_not_a_classifier": "Five independent sources (LLMRouterBench, 400K instances/21 datasets; RouterArena's routing plateau; kNN beating MLP/GNN routers; RouteLLM near-random on MMLU) find learned routers frequently fail to beat a trivial static rule, while published static heuristics deliver 46% and 28% cost savings. The static floor ships first and is the baseline Jev must later beat.",
+
+  "_THIS_MAP_IS_A_POLICY_CHOICE_AND_IS_NOT_DATA_DERIVED": "Stated first because it is the thing most likely to be misread. The per-type cells are n=2, n=2 and n=3 in this project's own corpus. Those are anecdotes, not distributions, and NOTHING below is fitted to them. The tier for each type is a hand-chosen policy with a written rationale, to be revised the moment outcome data exists. Do not cite the counts below as evidence FOR the assignments; they are evidence only about COVERAGE.",
+
+  "_provenance_note_2026-09-21": "FOUR counts of 'delegated tasks' circulate for this project and they differ by a factor of 17. They are not in conflict: they count different things over different windows. Nobody should quote one without its rule. All four are recorded here so the next reader does not have to re-derive them. Reproduce with .scratch/pivot/count_reconcile.py.",
+
+  "_counts_and_their_rules": [
+    {
+      "n": 120,
+      "source": "data/baseline/sessions.jsonl (29 sessions), fields `delegated_tasks` and `source.subagent_files` -- both independently sum to 120. This is the figure ISSUES.md JEV-46 and src/state_builders.py:101 cite.",
+      "rule": "One SUBAGENT TRANSCRIPT FILE on disk per delegated task.",
+      "window": "Full window, frozen as a snapshot on 2026-09-20.",
+      "note": "BEST SOURCED of the four: largest window, two independent fields agree, and it was frozen BEFORE transcript reaping. data/baseline is the one directory committed to git precisely because transcripts live outside the repo under a retention policy we do not control (see paths.py)."
+    },
+    {
+      "n": 7,
+      "source": "data/baseline/delegation-pre-rule-v1.json",
+      "rule": "Delegated tasks per billable request, PRE-RULE ONLY -- cut at 2026-09-20T11:11:49Z.",
+      "window": "15 sessions, pre-cut only. A deliberate SUBSET: the 'delegate where possible' rule was adopted mid-session, so the baseline had to be cut per-request to exclude post-rule behaviour.",
+      "note": "This file carries NO agent-type breakdown at all. It is not, and was never meant to be, the source of the type mix."
+    },
+    {
+      "n": 42,
+      "source": "Measured here 2026-09-21 against ~/.claude/projects.",
+      "rule": "Distinct `tool_use` blocks with name=='Agent', deduplicated by block id (transcripts replay blocks, so an undeduplicated count over-reports), JEV-experiments project dir plus its worktrees.",
+      "window": "Whatever is still on disk today.",
+      "mix": {"general-purpose": 23, "NO_subagent_type_field": 12, "claude-code-guide": 3, "Explore": 2, "Plan": 2},
+      "note": "A LOWER BOUND on a shrinking corpus, which is why it is far below 120: transcripts have been reaped since the 2026-09-20 snapshot. Counting tool_use blocks also differs from counting subagent files."
+    },
+    {
+      "n": 33,
+      "source": "A second agent, counting on disk 2026-09-21.",
+      "rule": "Not fully stated; reported as general-purpose 26 / claude-code-guide 3 / Plan 2 / Explore 2.",
+      "note": "Closest to the 42 above and probably the same corpus with the project's worktree excluded and untyped spawns folded into general-purpose. Recorded, not adopted."
+    }
+  ],
+
+  "_measured_type_mix": {
+    "full_window_snapshot_2026-09-20": {
+      "source": "data/baseline/sessions.jsonl, field `delegated_task_agent_types`, aggregated over 29 sessions",
+      "total": 120,
+      "general-purpose": 78,
+      "claude-code-guide": 18,
+      "Plan": 12,
+      "Explore": 12,
+      "routable_by_this_map": 42,
+      "share_routable": 0.35
+    },
+    "on_disk_today_2026-09-21": {
+      "source": "distinct Agent tool_use blocks, JEV project dir incl. worktrees",
+      "total": 42,
+      "general-purpose": 23,
+      "NO_subagent_type_field": 12,
+      "claude-code-guide": 3,
+      "Explore": 2,
+      "Plan": 2,
+      "routable_by_this_map": 7,
+      "share_routable": 0.167
+    },
+    "whole_corpus_all_projects_today": {
+      "total": 208,
+      "general-purpose": 155,
+      "Explore": 19,
+      "NO_subagent_type_field": 12,
+      "routable_by_this_map": 26,
+      "share_routable": 0.125
+    }
+  },
+
+  "_the_ceiling_is_in_this_file_on_purpose": "THE STATIC FLOOR COVERS SOMEWHERE BETWEEN AN EIGHTH AND A THIRD OF DELEGATED WORK: 35% by the best-sourced full-window snapshot, 12-17% by what is countable on disk today. A RANGE, not a point -- the corpus size is disputed by a factor of 17 and quoting a single number would be false precision. What every source agrees on is the only thing leaned on here: `general-purpose` is the large majority (65% full-window, 55-79% today), it is the catch-all type, and the type name therefore says nothing about the work. It is mapped to tier null and left untouched. A further category appears only in today's count: 12 spawns carry NO `subagent_type` field at all, and they are unroutable for the same reason. Any saving claimed for W1 must be quoted against this denominator, never against total spend and never against total delegated spend.",
+
+  "_relation_to_ISSUES_md_2348": "ISSUES.md line ~2348 REJECTED a subagent-type->tier map and asked that it not be re-proposed. It was rejected as an EXPERIMENTAL ARM competing for a fixed run budget, where degenerating to a constant on the majority of traffic would have burned a third of the budget reproducing the `default` arm. The 2026-09-21 pivot retired that study. As a PRODUCTION FLOOR the same majority is a stated coverage limit rather than a confound, it costs no run budget because it makes no calls, and the arm-budget objection no longer applies. The measured coverage is WORSE than the figure that rejection was argued against, which strengthens the rejection as an arm and does not change the case for a free floor. See .scratch/pivot/w1-static-floor.md.",
+
+  "version": "tiers-w1-2026-09-21",
+
+  "_tiers_comment": "`alias` is what goes into tool_input.model. It MUST be one of the Agent tool's accepted model aliases, NOT a full model ID. Two independent sources say so. (1) The Agent tool schema itself: `model` is enum [\"sonnet\",\"opus\",\"haiku\",\"fable\"] -- a primary source, and the ONLY evidence for `haiku`, which no observed spawn happens to use. (2) Observed traffic: of 208 distinct Agent spawns (deduplicated by tool_use block id), 29 carry model:\"sonnet\", 2 carry \"opus\", 2 carry \"inherit\" and 177 carry none. No observed spawn carries a dated ID. `resolved_prefix` is what the VERIFIER compares resolvedModel against -- resolvedModel is a full, sometimes dated, sometimes suffixed ID (claude-haiku-4-5-20251001, claude-opus-5[1m]), so the comparison is a prefix match and never equality. Asking for a model and getting it are different events.",
+  "tiers": {
+    "haiku45": {
+      "alias": "haiku",
+      "resolved_prefix": "claude-haiku-4-5",
+      "rank": 0
+    },
+    "sonnet5": {
+      "alias": "sonnet",
+      "resolved_prefix": "claude-sonnet-5",
+      "rank": 1
+    },
+    "opus5": {
+      "alias": "opus",
+      "resolved_prefix": "claude-opus-5",
+      "rank": 2
+    }
+  },
+
+  "_frontier_tier_comment": "The fail-to-frontier target. Operator decision 2026-09-21, overriding the default recommendation: when the router cannot decide, quality is protected and cost is not. fable51 is deliberately absent from `tiers` -- JEV-28 has not cleared it, and a choice set is not something to widen by accident.",
+  "frontier_tier": "opus5",
+
+  "_rules_comment": "Exact match on tool_input.subagent_type, case-sensitive, no regex, no keyword matching of the task description. Keyword-matching the description is a worse hand-written classifier and is explicitly out of scope for the static floor. A type absent from this table is `unmapped` and is governed by unmapped_action below -- absence is a MISS, not an ERROR, and misses never fail to frontier.",
+  "rules": {
+    "general-purpose": {
+      "tier": null,
+      "why": "THE CEILING. The large majority of delegated work by every source that has counted it (78/120 = 65% full-window; 23/42 = 55% on disk today; 26/33 = 79% by a third count). It is the catch-all type, used for everything from a one-line grep to a multi-file refactor, so the type name carries no information about the work. Mapped to null -- left untouched -- rather than guessed. This is the one row where the DATA, rather than a policy judgement, decides: every source agrees the majority sits here and that the type is uninformative.",
+      "basis": "data (coverage only, not tier choice)"
+    },
+    "Explore": {
+      "tier": "haiku45",
+      "why": "POLICY, not fitted. Read-only search agent, tool-restricted (no Edit/Write/Agent), and its own description says it returns the conclusion rather than reviewing or auditing. Retrieval-shaped work with a checkable output is where the published cheap-tier evidence is strongest. The observed count for this type is n=12 full-window and n=2 on disk today -- an anecdote, and NOT the reason for the assignment.",
+      "basis": "policy judgement about the agent's job description"
+    },
+    "claude-code-guide": {
+      "tier": "haiku45",
+      "why": "POLICY, not fitted. Documentation lookup over Claude Code / SDK / API surface area: bounded question, bounded answer, and the answer is checkable against the docs it cites. Observed n=18 full-window, n=3 today. Not fitted to either.",
+      "basis": "policy judgement about the agent's job description"
+    },
+    "Plan": {
+      "tier": "sonnet5",
+      "why": "POLICY, and the weakest row in the table. Architecture and trade-off reasoning is genuinely harder than retrieval, so NOT haiku -- but it is read-only and produces a plan a human reads before anything is executed, so a mid-tier error is caught before it costs anything. One step down from frontier, not two. Observed n=12 full-window, n=2 today. This is the first row to revisit once outcome data exists, and the first to revert if quality moves.",
+      "basis": "policy judgement, lowest confidence"
+    }
+  },
+
+  "_unmapped_action_comment": "What to do for a subagent_type with no rule (including every plugin-namespaced type such as `impeccable:impeccable-documenter`, and the newer `fork` and `claude` types). `leave` = emit no rewrite at all, which IS the control arm. The alternative, `frontier`, is deliberately NOT the default: routing an unknown type upward is a cost decision made on no information, and it would make the no-signal 65% majority more expensive than doing nothing.",
+  "unmapped_action": "leave",
+
+  "_explicit_model_comment": "What to do when the CALLER already put a model in tool_input. 15% of observed spawns do (29 sonnet, 2 opus, 2 inherit of 208 deduplicated). `keep` respects the caller and records the fact; `override` lets the map win. Default is `keep`: clobbering a deliberate human choice with a static table is the one way this hook can make quality worse on purpose, and the ledger row makes the kept choice attributable either way.",
+  "explicit_model_action": "keep",
+
+  "_explicit_model_ignored_values_comment": "Values that appear in tool_input.model but are NOT a tier choice, and so must not suppress routing. `inherit` means 'use the parent's model' -- it expresses no preference about tier at all, and treating it as a deliberate choice would silently exclude those spawns from routing forever while looking like deference to the caller. The original value is still recorded on the ledger row either way. Empty string is handled separately, as absent.",
+  "explicit_model_ignored_values": ["inherit"],
+
+  "_breaker_comment": "Fail-to-frontier without a breaker means a sustained outage silently bills frontier rates for as long as it lasts. After `max_consecutive_failures` router failures with the newest inside `ttl_s`, the hook STOPS REWRITING ENTIRELY, leaves the input untouched, and says so in a systemMessage. State is an append-only outcome log (data/agent_route/breaker.jsonl) rather than a counter file, because parallel Agent spawns are the normal case and a read-modify-write counter races; one short O_APPEND line per outcome is the discipline hooks/capture.sh already relies on. Half-open falls out for free: past the TTL the newest failure is stale, one attempt is allowed, and its own outcome line decides.",
+  "breaker": {
+    "max_consecutive_failures": 3,
+    "ttl_s": 900
+  },
+
+  "_latency_budget_comment": "Non-negotiable 5: a hard budget on the synchronous path, enforced by a test rather than by intention. This hook makes no network call, so the budget is process spawn + one jq + one openssl. hook_ms travels on every ledger row and tests/test_agent_actuator.sh asserts the median over 20 invocations.",
+  "latency_budget_ms": 250
+}
