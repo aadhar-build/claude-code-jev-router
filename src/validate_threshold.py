@@ -37,8 +37,22 @@ a benign one, and Youden's J assumes it is.
 
 Deliberately does NOT modify `src/stats.py`: PREREGISTRATION.md section 8 freezes
 that file, so the threshold-selection helpers that are specific to this analysis
-live here, and the frozen primitives (`auc`, `roc_curve`, `youden_threshold`,
+live here, and the primitives (`auc`, `roc_curve`, `youden_threshold`,
 `quantiles`, `clustered_bootstrap`) are imported and used as they stand.
+
+**Update 2026-09-21 (W5 cleanup).** The §8 freeze on `src/stats.py` has since
+been broken once, deliberately: the agreement half of that module was removed
+when `src/analyze.py`, its only non-test caller, was deleted with KILLed
+JEV-05/JEV-12. **None of the five primitives this file imports was touched** --
+the removal was confined to the boolean-agreement functions, which this file
+never used. The rule above still stands for anything new.
+
+⚠️ **On `clustered_bootstrap` specifically (JEV-55).** On the collected corpus
+the clustering unit collapses to a **single cluster**, so the interval
+`_auc_interval` computes comes back nan-width and `Interval.inconclusive_reason`
+says so. Read the reason before quoting the bound: a threshold justified by that
+interval is justified by nothing. The point estimate is still usable; the
+interval is not.
 
 Usage:
     uv run src/validate_threshold.py

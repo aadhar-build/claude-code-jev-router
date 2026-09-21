@@ -40,7 +40,6 @@ import pyversion  # noqa: E402
 pyversion.require()
 
 
-import analyze  # noqa: E402
 import config_loader as cl  # noqa: E402
 import paths  # noqa: E402
 import state_builders as sb  # noqa: E402
@@ -643,50 +642,25 @@ class TestLiveArmWireFormats(unittest.TestCase):
 
 
 class TestStatistics(unittest.TestCase):
-    """Known answers, worked out by hand."""
+    """Known answers, worked out by hand.
 
-    def test_perfect_and_chance_agreement(self):
-        a = [True, False, True, False]
-        self.assertEqual(stats.cohens_kappa(a, a), 1.0)
-        self.assertEqual(stats.raw_agreement(a, a), 1.0)
-        # 2x2 with both raters 50/50 and half the cells: po = pe = 0.5, kappa = 0
-        self.assertAlmostEqual(
-            stats.cohens_kappa([True, True, False, False], [True, False, True, False]), 0.0
-        )
+    W5 cleanup: the agreement half of src/stats.py is gone (raw_agreement,
+    cohens_kappa, pabak, majority_baseline, confusion, categorical_agreement,
+    categorical_kappa, quadratic_weighted_kappa) and so are the seven tests that
+    covered it: perfect_and_chance_agreement, total_disagreement_is_negative_kappa,
+    pabak_is_two_po_minus_one, skewed_base_rate_splits_kappa_from_raw_agreement,
+    both_raters_constant_makes_kappa_undefined_not_perfect,
+    confusion_counts_sum_to_n, quadratic_weighted_kappa_penalises_distance.
 
-    def test_total_disagreement_is_negative_kappa(self):
-        self.assertLess(stats.cohens_kappa([True, False], [False, True]), 0.0)
+    Their only non-test caller was src/analyze.py, across two KILLed tickets.
+    src/accuracy_gate.py deliberately re-implements kappa rather than importing
+    it (see its own note at accuracy_gate.py:179), so the live kappa on the
+    product path is cohens_kappa_bool there, tested in test_accuracy_gate.py --
+    chance-corrected agreement is NOT untested after this removal.
 
-    def test_pabak_is_two_po_minus_one(self):
-        a = [True] * 8 + [False] * 2
-        b = [True] * 10
-        self.assertAlmostEqual(stats.pabak(a, b), 2 * 0.8 - 1)
-
-    def test_skewed_base_rate_splits_kappa_from_raw_agreement(self):
-        """The exact failure mode the report is built to expose."""
-        a = [False] * 97 + [True] * 3
-        b = [False] * 100
-        self.assertAlmostEqual(stats.raw_agreement(a, b), 0.97)
-        self.assertEqual(stats.majority_baseline(b), 1.0)   # a constant 'no' beats the arm
-        self.assertLessEqual(stats.cohens_kappa(a, b), 0.0)
-
-    def test_both_raters_constant_makes_kappa_undefined_not_perfect(self):
-        self.assertTrue(math.isnan(stats.cohens_kappa([True] * 10, [True] * 10)))
-        self.assertEqual(stats.pabak([True] * 10, [True] * 10), 1.0)
-
-    def test_confusion_counts_sum_to_n(self):
-        a = [True, True, False, False, True]
-        b = [True, False, False, False, True]
-        cm = stats.confusion(a, b)
-        self.assertEqual(sum(cm.values()), 5)
-        self.assertEqual(cm["tt"], 2)
-        self.assertEqual(cm["ff"], 2)
-        self.assertEqual(cm["tf"], 1)
-
-    def test_quadratic_weighted_kappa_penalises_distance(self):
-        near = stats.quadratic_weighted_kappa([1, 2, 3, 4, 5], [1, 2, 3, 4, 4], 5)
-        far = stats.quadratic_weighted_kappa([1, 2, 3, 4, 5], [1, 2, 3, 4, 1], 5)
-        self.assertGreater(near, far)
+    What survives below is the half with live callers: quantiles, entropy_bits,
+    spearman_rho, auc, roc_curve, youden_threshold and the bootstraps.
+    """
 
     def test_spearman_endpoints(self):
         self.assertEqual(stats.spearman_rho([1, 2, 3, 4], [1, 2, 3, 4]), 1.0)
@@ -714,8 +688,14 @@ class TestStatistics(unittest.TestCase):
                 b.append(agree)
                 clusters.append(f"session-{session}")
 
+        # Raw agreement, inline. This used to call stats.pabak, which W5 removed
+        # with the rest of the agreement half. pabak is 2*po-1 -- an affine
+        # transform of what this computes -- so both assertions below mean
+        # exactly what they meant before: the point estimates still coincide,
+        # and the width comparison is unaffected because an affine map scales
+        # both intervals by the same factor.
         def stat(idx):
-            return stats.pabak([a[i] for i in idx], [b[i] for i in idx])
+            return sum(1 for i in idx if a[i] == b[i]) / len(idx)
 
         clustered = stats.clustered_bootstrap(clusters, stat, n_resamples=500)
         naive = stats.naive_bootstrap(len(a), stat, n_resamples=500)
@@ -802,43 +782,20 @@ class TestSyntheticSet(unittest.TestCase):
                 self.assertTrue(sb.build("pre_bash", json.loads(line)["payload"]))
 
 
-class TestReport(TempStorage):
-    def populate(self, n=12):
-        for i in range(n):
-            worker.process_capture(
-                payload(f"command number {i}", session=f"s{i % 3}"),
-                "pre_bash",
-                [cl.arm("fake"), cl.arm("fake_b")],
-            )
-
-    def test_report_runs_end_to_end(self):
-        self.populate()
-        text = analyze.report(reference="fake")
-        self.assertIn("SURFACE: pre_bash", text)
-        self.assertIn("majority-class baseline", text)
-        self.assertIn("PABAK", text)
-
-    def test_report_never_says_accuracy(self):
-        self.populate()
-        lowered = analyze.report(reference="fake").lower()
-        for banned in analyze.BANNED:
-            self.assertNotIn(banned, lowered)
-
-    def test_report_prints_the_base_rate_beside_agreement(self):
-        self.populate()
-        text = analyze.report(reference="fake")
-        self.assertIn("base rate of", text)
-
-    def test_state_identity_violation_is_reported_loudly(self):
-        self.populate(2)
-        rogue = next(iter(store.runs()))
-        rogue["state_sha256"] = "0" * 64
-        store.append_run(rogue)
-        text = analyze.report(reference="fake")
-        self.assertIn("STATE IDENTITY VIOLATED", text)
-
-    def test_report_survives_an_empty_dataset(self):
-        self.assertIn("JEV SHADOW-MODE REPORT", analyze.report(reference="fake"))
+# W5 cleanup: TestReport is gone with src/analyze.py -- the report-v1 path for
+# JEV-05 and JEV-12, both KILLed by the pivot. Five tests went with it:
+# report_runs_end_to_end, report_never_says_accuracy,
+# report_prints_the_base_rate_beside_agreement,
+# state_identity_violation_is_reported_loudly, report_survives_an_empty_dataset.
+#
+# ONE OF THEM GUARDED SOMETHING THAT STILL MATTERS. The state-identity check
+# ("every arm for a decision must have seen the same bytes") lived in
+# analyze.py:Joined._check_state_identity, and its only test was here. The
+# worker-side half of that invariant is still covered:
+# TestWorkerOrchestration.test_all_arms_see_byte_identical_state and
+# test_state_hash_matches_the_stored_blob assert it at the point of writing,
+# which is where it is actually enforced. What is gone is the read-side
+# detector, and with no report to read the rows there is nothing to detect into.
 
 
 class TestSpoolWatch(TempStorage):
@@ -1134,6 +1091,19 @@ class TestConfigAgreesWithTheThingsItDescribes(unittest.TestCase):
         cap = json.loads((paths.CONFIG / "surfaces.json").read_text())[
             "spool_backpressure_max_files"]
         text = (ROOT / "hooks" / "capture.sh").read_text()
+        # STRICT ON PURPOSE -- the bare form only. W5's JEV-60 drop-record
+        # refactor briefly wrote this literal as \"cap\":500 inside double
+        # quotes. That is valid bash and emits the right JSON, but it is
+        # invisible to a text grep, and a text grep is the ONLY thing holding
+        # this literal to config/surfaces.json -- capture.sh is a fork-free
+        # bash 3.2 hot path that cannot read JSON at runtime.
+        #
+        # Widening this regex to tolerate the escaped form was considered and
+        # REJECTED: it would buy a passing suite by giving up the property the
+        # assertion exists for. The `len(literals) == 2` check below is what
+        # makes the strictness safe -- an unreadable literal fails loudly here
+        # rather than quietly dropping out of the comparison. Keep it bare, and
+        # keep the shell quoting greppable.
         literals = re.findall(r'\[ "\$#" -gt (\d+) \]', text) + \
             re.findall(r'"cap":(\d+)', text)
         self.assertEqual(len(literals), 2, "capture.sh no longer has both literals")

@@ -1,28 +1,48 @@
-"""Agreement statistics. Pure functions, no I/O -- tested against known answers.
+"""Discrimination and resampling statistics. Pure functions, no I/O.
 
-Three commitments are encoded here rather than left to the person writing the
-report:
+**The agreement half of this module was removed on 2026-09-21 (W5 cleanup).**
+`raw_agreement`, `cohens_kappa`, `pabak`, `majority_baseline`, `confusion`,
+`categorical_agreement`, `categorical_kappa` and `quadratic_weighted_kappa`
+existed to produce the publishable agreement statistic. The pivot retired that
+question; their only non-test caller was `src/analyze.py`, serving JEV-05 and
+JEV-12, both KILLed, and it went with them.
 
-**Cohen's kappa and PABAK are always returned together.** Kappa collapses under
-a skewed base rate while raw agreement stays high; reporting whichever flatters
-the result is the easiest way to mislead with a real statistic. Both, with the
-base rate, is the honest presentation.
+This was the FIRST edit to a file frozen by `PREREGISTRATION.md` §8. The freeze
+did its job -- it is why the removal is a deliberate, recorded act rather than
+drift. `PREREGISTRATION.md` stays on disk: deleting a pre-registration once its
+result stops being wanted is the exact behaviour pre-registration exists to
+prevent.
 
-**The majority-class baseline comes back in the same structure as the score.**
-If a constant "no" scores 97% and an arm scores 97.5%, those two numbers belong
-in the same sentence.
+Chance-corrected agreement did NOT leave the codebase. `src/accuracy_gate.py`
+carries `cohens_kappa_bool`, re-implemented there on purpose (see its note) and
+tested in `tests/test_accuracy_gate.py`. That is the live one, on the product
+path.
+
+**What remains, and who needs it:**
 
 **Bootstrap resampling is clustered on session_id.** Decision points within a
 session are massively correlated -- the same `npm test` eleven times. Naive
 row-level intervals would be five to eight times too narrow, which is the first
-thing a stats-literate reader would attack.
+thing a stats-literate reader would attack. `clustered_bootstrap` is live:
+`src/validate_threshold.py` calls it for **JEV-17**, a KEEP ticket that W4's
+tier thresholds depend on.
+
+⚠️ **But read `MIN_CLUSTERS_FOR_INFERENCE` below before quoting any interval
+from it.** JEV-55 established that on the collected corpus the clustered
+bootstrap has **one cluster**, so the primary interval is uncomputable and comes
+back nan-width by rule. The guard is not decoration; it is the finding.
+
+**ROC / AUC / Youden.** `auc`, `roc_curve` and `youden_threshold` serve
+`validate_threshold.py`, `verdict.py` and `accuracy_gate.py`. `quantiles` is the
+most-used function here (`bench_inline`, `determinism`, `validate_threshold`,
+`verdict`): a bare mean latency hides everything that matters.
 """
 
 from __future__ import annotations
 
 import math
 import random
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, Hashable, Sequence
 
@@ -75,90 +95,10 @@ class Interval:
         return base if reason is None else f"{base}  INCONCLUSIVE BY RULE: {reason}"
 
 
-def raw_agreement(a: Sequence[bool], b: Sequence[bool]) -> float:
-    if not a:
-        return float("nan")
-    return sum(1 for x, y in zip(a, b) if x == y) / len(a)
-
-
-def cohens_kappa(a: Sequence[bool], b: Sequence[bool]) -> float:
-    """Chance-corrected agreement. Returns nan for fewer than 2 observations."""
-    n = len(a)
-    if n < 2:
-        return float("nan")
-    po = raw_agreement(a, b)
-    pa, pb = sum(a) / n, sum(b) / n
-    pe = pa * pb + (1 - pa) * (1 - pb)
-    if math.isclose(pe, 1.0):
-        # Both raters constant and identical: chance agreement is total, so
-        # kappa is undefined. PABAK is the statistic that still says something.
-        return float("nan")
-    return (po - pe) / (1 - pe)
-
-
-def pabak(a: Sequence[bool], b: Sequence[bool]) -> float:
-    """Prevalence-adjusted bias-adjusted kappa: 2 * po - 1. Stable under skew."""
-    if not a:
-        return float("nan")
-    return 2 * raw_agreement(a, b) - 1
-
-
-def majority_baseline(reference: Sequence[bool]) -> float:
-    """What a constant predictor of the most common class would score."""
-    if not reference:
-        return float("nan")
-    counts = Counter(reference)
-    return max(counts.values()) / len(reference)
-
-
 def base_rate(reference: Sequence[bool]) -> float:
     if not reference:
         return float("nan")
     return sum(reference) / len(reference)
-
-
-def confusion(a: Sequence[bool], b: Sequence[bool]) -> dict[str, int]:
-    """Rows = arm under test (a), columns = reference (b)."""
-    out = {"tt": 0, "tf": 0, "ft": 0, "ff": 0}
-    for x, y in zip(a, b):
-        out[("t" if x else "f") + ("t" if y else "f")] += 1
-    return out
-
-
-def categorical_agreement(a: Sequence[str], b: Sequence[str]) -> float:
-    if not a:
-        return float("nan")
-    return sum(1 for x, y in zip(a, b) if x == y) / len(a)
-
-
-def categorical_kappa(a: Sequence[str], b: Sequence[str]) -> float:
-    n = len(a)
-    if n < 2:
-        return float("nan")
-    po = categorical_agreement(a, b)
-    ca, cb = Counter(a), Counter(b)
-    pe = sum((ca[k] / n) * (cb[k] / n) for k in set(ca) | set(cb))
-    if math.isclose(pe, 1.0):
-        return float("nan")
-    return (po - pe) / (1 - pe)
-
-
-def quadratic_weighted_kappa(a: Sequence[int], b: Sequence[int], k: int) -> float:
-    """For ordered scores: disagreeing by 3 is worse than disagreeing by 1."""
-    n = len(a)
-    if n < 2:
-        return float("nan")
-    denom = (k - 1) ** 2
-    observed = sum((x - y) ** 2 for x, y in zip(a, b)) / (n * denom)
-    ca, cb = Counter(a), Counter(b)
-    expected = sum(
-        (ca[i] / n) * (cb[j] / n) * ((i - j) ** 2) / denom
-        for i in range(1, k + 1)
-        for j in range(1, k + 1)
-    )
-    if math.isclose(expected, 0.0):
-        return float("nan")
-    return 1 - observed / expected
 
 
 def spearman_rho(a: Sequence[float], b: Sequence[float]) -> float:
@@ -239,7 +179,22 @@ def naive_bootstrap(
     seed: int = 20260920,
 ) -> Interval:
     """Row-level resampling. Computed ONCE, published beside the clustered
-    interval, purely to show the reader how much clustering matters."""
+    interval, purely to show the reader how much clustering matters.
+
+    ⚠️ KEPT DELIBERATELY, AND IT IS NOW TEST-ONLY. The W5 brief asserted this
+    function was live via `validate_threshold.py`. That is wrong on the
+    evidence: `validate_threshold.py:398` calls `clustered_bootstrap` and
+    nothing else. After `analyze.py` was deleted this function's only remaining
+    caller is `tests/test_pipeline.py`.
+
+    It stays anyway. It is a five-line wrapper over `clustered_bootstrap` with
+    no independent logic to rot, and the test it serves --
+    `test_clustered_intervals_are_wider_than_naive_ones` -- is the only place
+    the project demonstrates *why* clustering is mandatory. That demonstration
+    is load-bearing for JEV-17's thresholds, which read a clustered interval.
+    Deleting the contrast would leave the live function's justification
+    unexercised to save five lines.
+    """
     return clustered_bootstrap(
         list(range(n_rows)), statistic, n_resamples=n_resamples, alpha=alpha, seed=seed
     )
