@@ -115,6 +115,37 @@ reset
 (cd /tmp && echo "$PAYLOAD" | CLAUDE_PROJECT_DIR="$TESTROOT" "$HOOK" pre_bash); rc=$?
 [ "$rc" -eq 0 ]      && ok "cwd guard: exits 0" || bad "cwd guard exit $rc"
 [ "$(count)" = "0" ] && ok "cwd guard: nothing captured outside the folder" || bad "captured from outside cwd"
+# JEV-60. Refusing is right; refusing INVISIBLY is not. A capture the guard
+# drops has to reach the attrition count exactly as a backpressure drop does,
+# or "the guard fired 900 times" is indistinguishable from "nothing happened".
+if cat "$TESTROOT"/data/drops/*.jsonl 2>/dev/null | grep -q '"reason":"cwd_outside_project"'; then
+  ok "cwd guard: the drop is recorded durably"
+else
+  bad "cwd guard: dropped a capture with no record"
+fi
+
+# --- JEV-60: a symlinked or trailing-slash project dir still captures -------
+# The guard's byte comparison of "$PWD/" against "$ROOT"/* called a session
+# squarely inside the project "outside" it, and dropped EVERY capture with no
+# record at all. Both shapes are ordinary rather than exotic: a trailing slash
+# survives any shell completion, and on macOS /tmp IS a symlink to /private/tmp,
+# so any project under it takes the second path on every single invocation.
+reset
+(cd "$TESTROOT" && echo "$PAYLOAD" | CLAUDE_PROJECT_DIR="$TESTROOT/" "$HOOK" pre_bash); rc=$?
+[ "$rc" -eq 0 ]      && ok "trailing-slash project dir: exits 0" || bad "trailing slash exit $rc"
+[ "$(count)" = "1" ] && ok "trailing-slash project dir: still captures" \
+  || bad "trailing slash dropped the capture ($(count) spooled)"
+
+reset
+# A symlink to the sandbox, inside the sandbox: CLAUDE_PROJECT_DIR arrives as
+# the symlinked path while the session's cwd is the physical one, which is the
+# /tmp -> /private/tmp shape exactly.
+ln -sfn "$TESTROOT" "$TESTROOT/self" 2>/dev/null
+(cd "$TESTROOT" && echo "$PAYLOAD" | CLAUDE_PROJECT_DIR="$TESTROOT/self" "$HOOK" pre_bash); rc=$?
+[ "$rc" -eq 0 ]      && ok "symlinked project dir: exits 0" || bad "symlinked project dir exit $rc"
+[ "$(count)" = "1" ] && ok "symlinked project dir: still captures" \
+  || bad "symlinked project dir dropped the capture ($(count) spooled)"
+rm -f "$TESTROOT/self"
 
 # --- missing CLAUDE_PROJECT_DIR --------------------------------------------
 reset

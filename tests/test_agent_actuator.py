@@ -47,6 +47,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
@@ -926,6 +927,107 @@ class TestScopeDisciplineForTheActuator(unittest.TestCase):
         for line in home_lines:
             self.assertTrue(line.lstrip().startswith("[") or line.lstrip().startswith("{"),
                             f"a $HOME reference that is not a bare test: {line}")
+
+
+class TestDoctorSeesTheInertMarker(unittest.TestCase):
+    """JEV-61. `doctor` is the one command whose job is to report the tool's
+    state. W5 gave the actuator a sticky `INERT` marker for the paths that can
+    neither route nor record; doctor read `BREAKER-OPEN` and knew nothing about
+    it, so the report said "healthy" while the hook was a permanent no-op.
+
+    The check runs against a patched `paths.AGENT_ROUTE` rather than a
+    subprocess `doctor.py`: every OTHER check would fail against a tmpdir, and
+    the assertion would be a grep through that noise.
+    """
+
+    def setUp(self):
+        import doctor
+
+        self.doctor = doctor
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.route = Path(self.tmp.name) / "agent_route"
+        self.route.mkdir()
+        p = mock.patch.object(doctor.paths, "AGENT_ROUTE", self.route)
+        p.start()
+        self.addCleanup(p.stop)
+        doctor.results.clear()
+        self.addCleanup(doctor.results.clear)
+
+    def write_marker(self, when: str = "2026-09-20T12:00:00Z",
+                     reason: str = "no_jq") -> Path:
+        path = self.route / "INERT"
+        path.write_text(
+            f"{when} jev agent_route is INERT: {reason}\n"
+            "jq is not on PATH, so no byte-faithful updatedInput can be built\n"
+            "The hook is registered and is routing nothing.\n")
+        return path
+
+    def result(self, name: str) -> tuple[str, str, str]:
+        rows = [r for r in self.doctor.results if r[1] == name]
+        self.assertEqual(len(rows), 1, f"expected exactly one {name} result: "
+                                       f"{self.doctor.results}")
+        return rows[0]
+
+    def test_no_marker_is_a_pass(self):
+        self.doctor.check_routing_inert()
+        status, _, detail = self.result("routing-inert")
+        self.assertEqual(status, "PASS")
+        self.assertIn("INERT", detail)
+
+    def test_a_marker_is_reported_with_its_age_and_its_cause(self):
+        self.write_marker(reason="ledger_write_failed")
+        self.doctor.check_routing_inert()
+        status, _, detail = self.result("routing-inert")
+        self.assertEqual(status, "WARN")
+        self.assertIn("INERT", detail)
+        # The cause, because "inert" without it is a report nobody can act on.
+        self.assertIn("ledger_write_failed", detail)
+        # The age, because a marker with no date cannot be told from a stale one.
+        self.assertIn("2026-09-20T12:00:00Z", detail)
+        self.assertIn("ago", detail)
+
+    def test_an_undated_marker_still_reports_an_age_from_the_file(self):
+        (self.route / "INERT").write_text("jev agent_route is INERT: no_jq\n")
+        self.doctor.check_routing_inert()
+        status, _, detail = self.result("routing-inert")
+        self.assertEqual(status, "WARN")
+        self.assertIn("ago", detail)
+        self.assertIn("no_jq", detail)
+
+    def test_inert_is_distinguishable_from_breaker_open(self):
+        """Different conditions, different remedies. A reader who cannot tell
+        them apart will apply the wrong one."""
+        self.write_marker()
+        (self.route / "BREAKER-OPEN").write_text(
+            "2026-09-20T12:00:00Z breaker OPEN after 5 consecutive failures\n")
+        self.doctor.check_routing_breaker()
+        self.doctor.check_routing_inert()
+        _, breaker_name, breaker_detail = self.result("routing-breaker")
+        _, inert_name, inert_detail = self.result("routing-inert")
+        self.assertNotEqual(breaker_name, inert_name)
+        self.assertNotIn("INERT", breaker_detail)
+        self.assertNotIn("BREAKER", inert_detail.upper().replace("BREAKER-OPEN", "X"))
+        # The remedy is the distinguishing fact: the breaker's state is derived
+        # from a log that keeps being written and clears itself; this one is
+        # sticky by design and needs a hand.
+        self.assertIn("rm", inert_detail)
+
+    def test_the_check_does_not_clear_the_marker(self):
+        """W5's decision, deliberately asymmetric with the breaker: an inert
+        hook writes no decisions, so no later event could honestly clear it.
+        A stale false alarm beats a false negative."""
+        marker = self.write_marker()
+        self.doctor.check_routing_inert()
+        self.assertTrue(marker.is_file())
+        self.assertIn("does not self-clear", self.result("routing-inert")[2])
+
+    def test_doctor_runs_the_check(self):
+        """A check that main() never calls is a check that reports nothing."""
+        import inspect
+
+        self.assertIn("check_routing_inert()",
+                      inspect.getsource(self.doctor.main))
 
 
 if __name__ == "__main__":

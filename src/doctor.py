@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -272,6 +273,77 @@ def check_routing_breaker() -> None:
            f"tier. {first[0] if first else ''}")
 
 
+def _age_since(stamp: str, fallback: Path) -> tuple[str, str]:
+    """(printable timestamp, printable age). Falls back to the file's mtime.
+
+    The marker's first token is the UTC stamp the hook wrote. A marker whose
+    first line has been edited or truncated still has an mtime, and an age from
+    the filesystem is worth more than no age at all -- it is labelled as such.
+    """
+    origin = None
+    try:
+        origin = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc)
+        shown = stamp
+    except ValueError:
+        try:
+            origin = datetime.fromtimestamp(fallback.stat().st_mtime, timezone.utc)
+        except OSError:
+            return ("timestamp unrecorded", "unknown")
+        shown = origin.strftime("%Y-%m-%dT%H:%M:%SZ") + " (file mtime)"
+    seconds = max(0, int((datetime.now(timezone.utc) - origin).total_seconds()))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        age = f"{days}d {hours}h"
+    elif hours:
+        age = f"{hours}h {minutes}m"
+    else:
+        age = f"{minutes}m"
+    return (shown, age)
+
+
+def check_routing_inert() -> None:
+    """JEV-61: is the actuator INERT -- registered, and routing nothing?
+
+    A DIFFERENT CONDITION FROM BREAKER-OPEN, WITH A DIFFERENT REMEDY, WHICH IS
+    WHY IT IS A SEPARATE CHECK RATHER THAN A BRANCH INSIDE THE BREAKER'S.
+
+      BREAKER-OPEN  the router works, and has deliberately stopped rewriting
+                    because the provider kept failing. It is self-limiting: the
+                    breaker's state is derived from a log that keeps being
+                    written, so a later success clears it without anyone acting.
+
+      INERT         the hook cannot route AND cannot record -- no jq, an
+                    unwritable ledger, a cwd outside the project. It writes no
+                    decisions, so NO LATER EVENT COULD HONESTLY CLEAR IT. That
+                    asymmetry is W5's decision, not an omission: a stale false
+                    alarm beats a false negative, because an inert hook is
+                    byte-identical to the control arm while appearing installed
+                    -- the exact state this repo has now shipped five times.
+                    Someone fixes the cause and removes the marker by hand.
+    """
+    marker = paths.AGENT_ROUTE / "INERT"
+    if not marker.exists():
+        record("PASS", "routing-inert", "no INERT marker — the actuator is "
+                                        "recording its decisions")
+        return
+    lines = marker.read_text(errors="replace").splitlines()
+    first = lines[0] if lines else ""
+    stamp = first.split(" ", 1)[0]
+    cause = (first.split("INERT:", 1)[1].strip() if "INERT:" in first else "")
+    cause = cause or "cause unrecorded"
+    detail = lines[1].strip() if len(lines) > 1 else ""
+    shown, age = _age_since(stamp, marker)
+    record("WARN", "routing-inert",
+           f"INERT since {shown} ({age} ago) — cause: {cause}."
+           + (f" {detail}" if detail else "")
+           + " The actuator is registered and routes nothing, so no assignment "
+             "is being recorded. This marker does not self-clear (an inert hook "
+             f"writes no decisions that could): fix the cause, then `rm {marker}`.")
+
+
 def check_hook_registration() -> None:
     if not PROJECT_LOCAL_SETTINGS.exists():
         record("PASS", "hook-registration", "not yet registered (expected until ticket 8)")
@@ -297,6 +369,7 @@ def main() -> int:
     check_no_outside_writes_in_source()
     check_kill_switch()
     check_routing_breaker()
+    check_routing_inert()
     check_hook_registration()
     check_switch_on_every_hook()
 

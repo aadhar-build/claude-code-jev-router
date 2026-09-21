@@ -15,6 +15,15 @@
 # shipped twice. A couple of milliseconds is the price of the switch being
 # true. Export $JEV_HOME and even that is gone.
 #
+# AND THE CWD GUARD ADDS NOTHING TO IT (JEV-60). The guard used to drop
+# every capture on a symlinked or trailing-slash $CLAUDE_PROJECT_DIR, silently.
+# It is now two-stage: the byte match first, at zero forks, and `pwd -P` on both
+# sides only when that misses. Measured the way the switch was: 6.54/6.84ms on
+# the byte-match path against 6.71/6.85ms before the fix -- unchanged, it is the
+# same instructions -- and 7.78/8.26ms when the resolution is actually needed,
+# inside the 10ms budget. A capture the guard still refuses now leaves a row in
+# data/drops. The full table is at the guard itself.
+#
 # Fail-open is absolute: every path exits 0. A measurement harness must never be
 # able to wedge an editing session. stdout stays empty -- Claude Code parses it,
 # and a stray byte there is a permission decision we never intended to make.
@@ -133,14 +142,101 @@ case "$JEV_HOME" in ""|/*) ;; *) exit 0 ;; esac
 { [ -e "$ROOT/.jev-disabled" ] || [ -L "$ROOT/.jev-disabled" ]; } && exit 0
 # --- end jev kill switch ----------------------------------------------------
 
+# SURFACE is read HERE, above the cwd guard rather than below it, because the
+# guard now has to be able to write down that it fired, and a drop row that
+# cannot name its surface is half an attrition record.
+SURFACE="${1:-unknown}"
+
+# --- the drop record: attrition is never silent (JEV-33, JEV-60) ------------
+# One writer for every capture this hook refuses, so a new refusal cannot be
+# added without a row. Durably under data/ rather than logs/, because attrition
+# has to outlive a log rotation.
+#
+# Cost: a shell function DEFINITION is parsed, not executed -- it costs the
+# happy path nothing. The two forks (date, mkdir) are paid only on a path that
+# has already decided to drop the capture. bash 3.2 has no EPOCHREALTIME and no
+# printf %()T, so `date` is the only clock there is; whole seconds are plenty
+# for counting drops.
+#
+# Concurrency: several hooks can fire at once. One short line appended with >>
+# is a single O_APPEND write well under PIPE_BUF, so parallel writers interleave
+# cleanly rather than corrupting each other -- the same property store.py relies
+# on. Nothing is read, locked or rewritten.
+#
+# $2 is a pre-built JSON fragment with a LEADING comma, or empty. Callers escape
+# any path they put in it with parameter expansion rather than a fork.
+drop() { # reason, extra-fields
+  _dts=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) || return 0
+  # `[ -d ]` is a builtin; the mkdir fork is paid once, on the first drop of a
+  # fresh checkout, and never again.
+  [ -d "$ROOT/data/drops" ] || mkdir -p "$ROOT/data/drops" 2>/dev/null || return 0
+  printf '{"at":"%s","surface":"%s","reason":"%s"%s,"pid":%s}\n' \
+    "$_dts" "$SURFACE" "$1" "$2" "$$" \
+    >> "$ROOT/data/drops/${_dts%%T*}.jsonl" 2>/dev/null
+}
+
 # Defensive cwd guard. settings.local.json should never load outside this repo,
 # but the isolation requirement is hard enough to be worth enforcing twice.
+#
+# TWO-STAGE, AND THE STAGING IS THE WHOLE POINT (JEV-60).
+#
+# It was a BYTE comparison of two paths that are only semantically equal.
+# `CLAUDE_PROJECT_DIR=/repo/` (a trailing slash) or a checkout reached through a
+# symlink -- which is the NORMAL case for anything under /tmp on macOS, where
+# /tmp is a symlink to /private/tmp -- made "$PWD/" fail to match "$ROOT"/* for a
+# session squarely inside the project, and the hook exited here on every single
+# invocation. Every capture dropped, with no record that anything had happened.
+#
+# `hooks/agent_route_actuator.sh` fixed the same defect by resolving BOTH sides
+# with `pwd -P` unconditionally. This hook does not copy that, because this is
+# the only hook on a genuinely hot critical path (10ms, and 5.37 -> 6.48ms of it
+# was already spent on the global kill switch). Instead:
+#
+#   stage 1  the byte match, which is what a real session under /Users/... hits,
+#            and it still costs ZERO forks -- exactly what it cost before;
+#   stage 2  only when stage 1 misses, resolve both sides with `pwd -P` (two
+#            subshells) and decide on the resolved paths;
+#   stage 3  a genuine miss is RECORDED, not silent.
+#
+# MEASURED, with the method tests/test_hook.sh uses (best of three windows, 30
+# spawns each, wall clock INCLUDING the process spawn), two runs on 2026-09-21:
+#
+#   pre-fix,  byte-match path      6.71 / 6.85 ms   30 of 30 captured
+#   post-fix, byte-match path      6.54 / 6.84 ms   30 of 30 captured
+#   post-fix, resolved (symlink)   7.78 / 8.00 ms   30 of 30 captured
+#   post-fix, trailing slash       7.99 / 8.26 ms   30 of 30 captured
+#   pre-fix,  symlinked root       3.54 ms          0 of 30 captured
+#
+# The hot path costs what it cost -- the difference is inside the noise, because
+# it executes exactly the same instructions as before. Correctness costs about
+# 1.2ms and only where the byte match misses, leaving ~1.7ms of the 10ms budget.
+# The last row is the defect: it was the FASTEST configuration precisely because
+# it did nothing, and said nothing about doing nothing.
 case "$PWD/" in
   "$ROOT"/*) ;;
-  *) exit 0 ;;
+  *)
+    # An unresolvable $CLAUDE_PROJECT_DIR is its own drop reason: it passed
+    # `[ -d ]` above, so "cannot cd into it" is a permissions story, not a
+    # missing-directory one, and the two want different fixes.
+    ROOT_P=$(cd "$ROOT" 2>/dev/null && pwd -P) || ROOT_P=""
+    PWD_P=$(pwd -P 2>/dev/null) || PWD_P="$PWD"
+    if [ -z "$ROOT_P" ]; then
+      _dp="$ROOT"; _dp="${_dp//\\/\\\\}"; _dp="${_dp//\"/\\\"}"
+      drop "project_dir_unresolvable" ",\"project_dir\":\"$_dp\""
+      exit 0
+    fi
+    case "$PWD_P/" in
+      "$ROOT_P"/*) ;;
+      *)
+        _dc="$PWD_P"; _dc="${_dc//\\/\\\\}"; _dc="${_dc//\"/\\\"}"
+        _dp="$ROOT_P"; _dp="${_dp//\\/\\\\}"; _dp="${_dp//\"/\\\"}"
+        drop "cwd_outside_project" ",\"cwd\":\"$_dc\",\"project_dir\":\"$_dp\""
+        exit 0
+        ;;
+    esac
+    ;;
 esac
 
-SURFACE="${1:-unknown}"
 TMP="$ROOT/spool/tmp"
 READY="$ROOT/spool/ready"
 [ -d "$TMP" ] || exit 0
@@ -153,25 +249,21 @@ if [ "$#" -gt 500 ]; then
   # JEV-33. A refusal here used to be SILENT: no capture row, no run row, and
   # therefore no entry in the attrition count the pre-registration commits to
   # reporting -- a loss invisible to the measurement built to catch it. So
-  # record it. Durably, under data/ rather than logs/, because attrition has to
-  # outlive a log rotation.
+  # record it, through the one `drop` writer above, which is now shared with the
+  # cwd guard so that no refusal can be added without a row.
   #
-  # Cost is paid ONLY on this path, which is the rare one: two forks (mkdir,
-  # date). The happy path below is untouched and still fork-free. bash 3.2 has
-  # no EPOCHREALTIME and no printf %()T, so `date` is the only clock there is;
-  # whole seconds are plenty for counting drops.
-  #
-  # Concurrency: several hooks can fire at once. One short line appended with
-  # >> is a single O_APPEND write well under PIPE_BUF, so parallel writers
-  # interleave cleanly rather than corrupting each other -- the same property
-  # store.py relies on. Nothing is read, locked or rewritten.
-  DROPS="$ROOT/data/drops"
-  # `[ -d ]` is a builtin; the mkdir fork is paid once, on the first drop of a
-  # fresh checkout, and never again.
-  [ -d "$DROPS" ] || mkdir -p "$DROPS" 2>/dev/null || exit 0
-  TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) || exit 0
-  printf '{"at":"%s","surface":"%s","reason":"spool_backpressure","ready_files":%s,"cap":500,"pid":%s}\n' \
-    "$TS" "$SURFACE" "$#" "$$" >> "$DROPS/${TS%%T*}.jsonl" 2>/dev/null
+  # The `cap` literal stays a literal: this is a fork-free bash 3.2 hot path and
+  # cannot read config/surfaces.json, so tests/test_pipeline.py asserts the two
+  # numbers here match `spool_backpressure_max_files` instead.
+  # Single-quoted around the expansion, NOT escaped inside double quotes: the
+  # cap literal below has to survive as those exact bytes, because
+  # tests/test_pipeline.py greps this file's TEXT for it and asserts it matches
+  # config/surfaces.json. Backslash-escaping it inside double quotes reads the
+  # same to bash and is invisible to that regex -- which is how the one
+  # assertion protecting this literal stops biting without anything going red.
+  # For the same reason the literal appears exactly twice in this file, so it
+  # is not written out again in any comment.
+  drop "spool_backpressure" ',"ready_files":'"$#"',"cap":500'
   exit 0
 fi
 

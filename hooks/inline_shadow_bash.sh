@@ -137,13 +137,60 @@ case "$JEV_HOME" in ""|/*) ;; *) exit 0 ;; esac
 { [ -e "$ROOT/.jev-disabled" ] || [ -L "$ROOT/.jev-disabled" ]; } && exit 0
 # --- end jev kill switch ----------------------------------------------------
 
-# Defensive cwd guard, as capture.sh.
+SURFACE="pre_bash"
+
+# --- the drop record: attrition is never silent (JEV-60) --------------------
+# The row writer at the bottom of this script cannot serve here: it describes a
+# decision (probabilities, timings, error_kind from timed_http's vocabulary),
+# and a guard that refused to run took no decision to describe. A refusal is
+# still attrition, so it goes where capture.sh's refusals already go --
+# `data/drops`, the one stream the attrition count reads -- rather than
+# inventing a new error_kind in data/inline for a call that never happened.
+#
+# Anchored on $ROOT and not on $JEV_INLINE_LOG_DIR: the drop stream is the
+# project's attrition record, and the log dir is an override this script's own
+# tests point elsewhere.
+drop() { # reason, extra-fields
+  _dts=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) || return 0
+  [ -d "$ROOT/data/drops" ] || mkdir -p "$ROOT/data/drops" 2>/dev/null || return 0
+  printf '{"at":"%s","surface":"%s","reason":"%s"%s,"pid":%s}\n' \
+    "$_dts" "$SURFACE" "$1" "$2" "$$" \
+    >> "$ROOT/data/drops/${_dts%%T*}.jsonl" 2>/dev/null
+}
+
+# Defensive cwd guard, as capture.sh -- including its two stages and for the
+# same reason (JEV-60). A trailing slash on CLAUDE_PROJECT_DIR, or a checkout
+# reached through a symlink (/tmp is /private/tmp on macOS), made the byte
+# comparison fail for a session squarely inside the project and silently
+# disabled this hook: no call, no row, no record that anything had happened.
+#
+# The byte match stays the first stage even though this script is not on a hot
+# path -- it spawns four jqs and an openssl below, so two more subshells would
+# be noise here. It is kept identical to capture.sh's because these two guards
+# are read together, and a difference between them would be read as meaning
+# something.
 case "$PWD/" in
   "$ROOT"/*) ;;
-  *) exit 0 ;;
+  *)
+    ROOT_P=$(cd "$ROOT" 2>/dev/null && pwd -P) || ROOT_P=""
+    PWD_P=$(pwd -P 2>/dev/null) || PWD_P="$PWD"
+    if [ -z "$ROOT_P" ]; then
+      _dp="$ROOT"; _dp="${_dp//\\/\\\\}"; _dp="${_dp//\"/\\\"}"
+      drop "project_dir_unresolvable" ",\"project_dir\":\"$_dp\""
+      exit 0
+    fi
+    case "$PWD_P/" in
+      "$ROOT_P"/*) ;;
+      *)
+        _dc="$PWD_P"; _dc="${_dc//\\/\\\\}"; _dc="${_dc//\"/\\\"}"
+        _dp="$ROOT_P"; _dp="${_dp//\\/\\\\}"; _dp="${_dp//\"/\\\"}"
+        drop "cwd_outside_project" ",\"cwd\":\"$_dc\",\"project_dir\":\"$_dp\""
+        exit 0
+        ;;
+    esac
+    ;;
 esac
 
-SURFACE="pre_bash"
 ENDPOINT="${JEV_INLINE_ENDPOINT:-https://ai-gateway.vercel.sh/v1/evaluate}"
 MODEL="${JEV_INLINE_MODEL:-typesafe-ai/jev}"
 MAX_TIME="${JEV_INLINE_MAX_TIME:-2.0}"

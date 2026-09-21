@@ -250,6 +250,34 @@ out=$(cd /usr && printf '%s' "$PAYLOAD" | CLAUDE_PROJECT_DIR="$SANDBOX" \
 [ "$rc" -eq 0 ]      && ok "cwd guard: exits 0" || bad "cwd guard: exit $rc"
 [ "$(nrows)" = "0" ] && ok "cwd guard: nothing logged from outside the folder" \
   || bad "cwd guard: logged $(nrows) rows"
+# JEV-60. No inline row -- the hook made no call and has nothing to say about a
+# decision it never took -- but the refusal itself is attrition and lands in the
+# same data/drops stream capture.sh writes, where the attrition count reads it.
+if cat "$SANDBOX"/data/drops/*.jsonl 2>/dev/null | grep -q '"reason":"cwd_outside_project"'; then
+  ok "cwd guard: the drop is recorded durably"
+else
+  bad "cwd guard: dropped the invocation with no record"
+fi
+
+# --- JEV-60: a symlinked or trailing-slash project dir still runs -----------
+# The guard compared "$PWD/" against "$ROOT"/* byte for byte, so a trailing
+# slash on CLAUDE_PROJECT_DIR -- or a checkout reached through a symlink, which
+# is what anything under /tmp is on macOS -- silently disabled this hook
+# entirely. Not one row, and nothing to say it had happened.
+reset
+out=$(run_hook env CLAUDE_PROJECT_DIR="$SANDBOX/"); rc=$?
+[ "$rc" -eq 0 ]      && ok "trailing-slash project dir: exits 0" || bad "trailing slash: exit $rc"
+[ -z "$out" ]        && ok "trailing-slash project dir: stdout is empty" || bad "trailing slash: stdout was [$out]"
+[ "$(nrows)" = "1" ] && ok "trailing-slash project dir: still logs a row" \
+  || bad "trailing slash: logged $(nrows) rows"
+
+reset
+ln -sfn "$SANDBOX" "$SANDBOX/self" 2>/dev/null
+out=$(run_hook env CLAUDE_PROJECT_DIR="$SANDBOX/self"); rc=$?
+rm -f "$SANDBOX/self"
+[ "$rc" -eq 0 ]      && ok "symlinked project dir: exits 0" || bad "symlinked project dir: exit $rc"
+[ "$(nrows)" = "1" ] && ok "symlinked project dir: still logs a row" \
+  || bad "symlinked project dir: logged $(nrows) rows"
 
 # --- malformed payload ------------------------------------------------------
 reset
