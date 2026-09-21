@@ -1,0 +1,38 @@
+#!/bin/bash
+# W2. The `jev` CLI -- the only user-facing surface.
+#
+#   ./jev status                 what is installed in this repo, and the switches
+#   ./jev install  DIR --dry-run show exactly what would change
+#   ./jev install  DIR --yes     register jev's hooks in DIR
+#   ./jev uninstall DIR --yes    remove them, and restore DIR's settings file
+#
+# DIR is the repo you want routed. jev itself stays where it is. Nothing is ever
+# written to ~/.claude/settings.json -- opt-in per project is the whole design,
+# and `src/install.py` explains why the global alternative is dangerous.
+#
+# This wrapper exists to do ONE thing that matters: resolve $JEV_HOME from its
+# own location and export it, so that every reader below -- `src/install.py`,
+# `src/paths.py`, and any hook it spawns -- agrees about where jev lives without
+# each one working it out again. It is the same two-line rule the hooks use.
+#
+# `set -u` and no `set -e`: this is a wrapper, and the exit code that matters is
+# Python's.
+set -u
+
+JEV_HOME="${JEV_HOME:-}"
+[ -d "$JEV_HOME" ] || JEV_HOME="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd -P)"
+export JEV_HOME
+
+if [ ! -d "$JEV_HOME" ]; then
+  echo "jev: cannot resolve JEV_HOME" >&2
+  exit 1
+fi
+
+# The interpreter floor is the repo's, not this script's guess at one (JEV-44).
+if [ -r "$JEV_HOME/tests/lib/require_python.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$JEV_HOME/tests/lib/require_python.sh" >/dev/null 2>&1 || true
+fi
+PY="${JEV_PY:-python3}"
+
+exec "$PY" "$JEV_HOME/src/install.py" "$@"

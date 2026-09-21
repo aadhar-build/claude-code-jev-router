@@ -10,7 +10,54 @@ import os
 import stat
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# --- jev home: the Python half of the canonical block ------------------------
+# W2. ONE MECHANISM, BOTH READERS.
+#
+# Before this, `paths.py` derived its root from `__file__` while every bash hook
+# derived its root from `$CLAUDE_PROJECT_DIR`. Two mechanisms, and in any install
+# shape where the project being routed is not jev's own repo they disagree --
+# silently, because neither one can see the other. The pivot audit found the
+# sharp end of that: with jev's root taken from the session's project directory,
+# the kill switch names a path that will never exist, so the switch is
+# permanently off and there is no way to stop the tool.
+#
+# The rule, identical here and in `hooks/agent_route_actuator.sh`:
+#
+#     $JEV_HOME if it is set and names a directory,
+#     otherwise the directory two levels above this file.
+#
+# Validation is `is_dir()` and nothing more, deliberately. A richer rule (look
+# for config/tiers.json, look for hooks/) is a rule two implementations have to
+# keep in step, and the failure it would catch is already handled downstream by
+# fail-to-frontier plus the circuit breaker.
+#
+# `tests/test_jev_home.sh` runs both halves and asserts they print the same
+# absolute path, under an env var and without one.
+
+
+def resolve_jev_home(environ: dict[str, str] | None = None) -> tuple[Path, str]:
+    """(home, which arm fired). The canonical JEV_HOME rule, in Python."""
+    env = os.environ if environ is None else environ
+    declared = env.get("JEV_HOME") or ""
+    if declared:
+        p = Path(declared)
+        if p.is_dir():
+            return p.resolve(), "env"
+    return Path(__file__).resolve().parent.parent, "self"
+
+
+JEV_HOME, JEV_HOME_SOURCE = resolve_jev_home()
+
+# ROOT is JEV_HOME. Kept as a name because every path below and most of the
+# repo already reads it, and because "the root of the jev install" is exactly
+# what it has always meant -- it is only the derivation that changed.
+ROOT = JEV_HOME
+
+
+def jev_home_source() -> str:
+    """Which arm of the rule produced JEV_HOME: "env" or "self"."""
+    return JEV_HOME_SOURCE
+
 
 ENV_FILE = ROOT / ".env"
 KILL_SWITCH = ROOT / ".jev-disabled"
@@ -151,3 +198,48 @@ def killed() -> bool:
     operator; these two are the only places it is encoded outside the hooks.
     """
     return KILL_SWITCH.exists() or KILL_SWITCH.is_symlink()
+
+
+# W2. The two switches, named, because "the switch" stopped being one thing the
+# moment jev could be installed into a repo it does not live in.
+#
+#   GLOBAL         $JEV_HOME/.jev-disabled   -- stops jev everywhere at once.
+#                  $HOME/.claude/jev-disabled -- machine-wide, honoured even if
+#                  the install itself is unreachable. Read-only; never written.
+#   PER-PROJECT    $CLAUDE_PROJECT_DIR/.jev-disabled -- an opt-out for ONE repo.
+#
+# When jev runs in its own repo the first and the third are the same file, which
+# is why this distinction did not exist before and why it has to now.
+GLOBAL_KILL_SWITCH = KILL_SWITCH
+HOME_KILL_SWITCH = Path.home() / ".claude" / "jev-disabled"
+
+
+def _switch_set(p: Path) -> bool:
+    """The hooks' own fail-safe test: ANY entry at the path means OFF.
+
+    `-e` or `-L`, never `-f`. A directory, a dangling symlink and an unreadable
+    file all read as SET, because a switch whose state cannot be established is
+    never given the benefit of the doubt.
+    """
+    return p.exists() or p.is_symlink()
+
+
+def project_opt_out(project_dir: Path | str) -> Path:
+    """The per-project opt-out path for a given project directory."""
+    return Path(project_dir) / ".jev-disabled"
+
+
+def routing_disabled(project_dir: Path | str | None = None) -> tuple[bool, str]:
+    """(disabled, which switch). Mirrors the actuator's order exactly.
+
+    The actuator tests the global switches first and the per-project opt-out
+    second, so a report that claims to describe the hook has to test them in
+    the same order or it will name the wrong file.
+    """
+    if _switch_set(GLOBAL_KILL_SWITCH):
+        return True, f"global: {GLOBAL_KILL_SWITCH}"
+    if _switch_set(HOME_KILL_SWITCH):
+        return True, f"machine-wide: {HOME_KILL_SWITCH}"
+    if project_dir is not None and _switch_set(project_opt_out(project_dir)):
+        return True, f"per-project: {project_opt_out(project_dir)}"
+    return False, "no switch is set"

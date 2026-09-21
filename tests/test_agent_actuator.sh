@@ -57,7 +57,7 @@ mkpayload() { # <subagent_type> [extra json fragment]
 # project, CLAUDE_PROJECT_DIR set. Captures stdout verbatim into $OUT.
 run() { # <payload> [env assignments...]
   local p="$1"; shift
-  OUT="$(cd "$SANDBOX" && printf '%s' "$p" | env CLAUDE_PROJECT_DIR="$SANDBOX" HOME="$SANDBOX" "$@" "$HOOK")"
+  OUT="$(cd "$SANDBOX" && printf '%s' "$p" | env CLAUDE_PROJECT_DIR="$SANDBOX" JEV_HOME="$SANDBOX" HOME="$SANDBOX" "$@" "$HOOK")"
   RC=$?
 }
 
@@ -399,7 +399,7 @@ for shape in file dir danglingsymlink; do
 done
 
 reset
-OUT="$(cd "$SANDBOX" && printf '%s' "$(mkpayload Explore)" | env -u HOME CLAUDE_PROJECT_DIR="$SANDBOX" "$HOOK")"
+OUT="$(cd "$SANDBOX" && printf '%s' "$(mkpayload Explore)" | env -u HOME CLAUDE_PROJECT_DIR="$SANDBOX" JEV_HOME="$SANDBOX" "$HOOK")"
 [ -z "$OUT" ] \
   && ok "an unset HOME reads as OFF -- a switch whose state cannot be established is never given the benefit of the doubt" \
   || bad "unset HOME still routed: [$OUT]"
@@ -418,7 +418,7 @@ run "$(mkpayload Explore)" JEV_GRADER=1
               || bad "grader guard failed: [$OUT]"
 
 reset
-OUT="$(cd "$ROOT" && printf '%s' "$(mkpayload Explore)" | env CLAUDE_PROJECT_DIR="$SANDBOX" HOME="$SANDBOX" "$HOOK")"
+OUT="$(cd "$ROOT" && printf '%s' "$(mkpayload Explore)" | env CLAUDE_PROJECT_DIR="$SANDBOX" JEV_HOME="$SANDBOX" HOME="$SANDBOX" "$HOOK")"
 [ -z "$OUT" ] && ok "cwd guard: a session running outside the project root is left alone" \
               || bad "cwd guard failed: [$OUT]"
 

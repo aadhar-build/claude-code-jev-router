@@ -9,17 +9,68 @@ for the gate that keeps every claim below true.
 
 ---
 
-## The switch
+## The switches — there are two, and `JEV_HOME`
 
-`touch .jev-disabled` in the repo root. Every hook tests it before doing
-anything else, `$CLAUDE_PROJECT_DIR`-anchored, in a block that is byte-identical
-across every hook script:
+**Updated 2026-09-21 (W2).** There used to be one switch, because there was one
+place jev could run: its own repo. `jev install` changes that, and one switch
+anchored on a root that meant two things at once no longer answers both
+questions. So:
+
+| switch | path | stops | set by |
+|---|---|---|---|
+| **global** | `$JEV_HOME/.jev-disabled` | jev, **everywhere at once** | `touch`, `./teardown.sh` |
+| **machine-wide** | `~/.claude/jev-disabled` | the same, honoured even if the install itself is unreachable | `touch`. Read-only to us; nothing here ever writes it |
+| **per-project opt-out** | `<repo>/.jev-disabled` | jev **in that one repo** | `touch`, `jev uninstall` |
+
+Every hook tests them before doing anything else, in blocks that are
+byte-identical across every hook script:
 
 ```bash
+# global
+{ [ -e "$JEV_HOME/.jev-disabled" ] || [ -L "$JEV_HOME/.jev-disabled" ]; } && exit 0
+{ [ -e "$HOME/.claude/jev-disabled" ] || [ -L "$HOME/.claude/jev-disabled" ]; } && exit 0
+# per-project ($ROOT is $CLAUDE_PROJECT_DIR)
 { [ -e "$ROOT/.jev-disabled" ] || [ -L "$ROOT/.jev-disabled" ]; } && exit 0
 ```
 
-`rm .jev-disabled` resumes.
+`rm` the file resumes. In jev's own repo the global and the per-project switch
+are the **same file**, which is why the distinction did not exist before and why
+it has to now.
+
+### `JEV_HOME`, and the install shape that killed the switch
+
+The pivot audit found that resolving jev's root from `$CLAUDE_PROJECT_DIR` is
+fragile: in the wrong install shape the kill switch names a file that **cannot
+exist**, so the switch is permanently off and there is no way to stop the tool.
+The rule table is looked for in the wrong repo too, and the stderr log never
+resolves, so the failures are invisible as well.
+
+`$JEV_HOME` is **where jev itself lives**, resolved without reference to the
+project being routed, by one rule written twice:
+
+> **`$JEV_HOME` if it is set and names a directory; otherwise the directory two
+> levels above this file.**
+
+`hooks/agent_route_actuator.sh` has it as a canonical block; `src/paths.py` has
+it as `resolve_jev_home()`, and `paths.ROOT` **is** `JEV_HOME`. Before W2 these
+two derived their roots by two different mechanisms which agreed only by
+coincidence. `tests/test_jev_home.sh` runs both halves — the bash one extracted
+from the shipped hook at test time — and requires the same absolute path from
+each, under an env var, without one, and with a bogus one.
+
+Everything that belongs to jev now hangs off `$JEV_HOME`: `config/tiers.json`,
+the assignment ledger, the breaker log, the stderr log. **Nothing is written
+into the repo being routed.** That is asserted, not assumed
+(`tests/test_jev_home.sh` §2).
+
+### A switch stops the hook DECIDING. It does not make jev quiescent
+
+JEV-51 is the reason this sentence is here. With a switch set, the hook is still
+registered: a process is still spawned on every matching tool call, exits on
+line one, writes nothing, and leaves the tool input untouched. That is **off**.
+**Quiescent** — no process at all — is a different act, and only unregistering
+reaches it: `./teardown.sh --yes` for jev's own repo, `jev uninstall <repo>` for
+any other. Asserted in `tests/test_jev_home.sh` §5.
 
 ### It fails safe
 
@@ -215,6 +266,44 @@ The whole gate runs inside a throwaway sandbox project directory, with
 sha256 at the end — that file is the registration a collection window is
 currently running on.
 
+### What the proof is actually made against (JEV-56, resolved 2026-09-21)
+
+This matters and was previously overstated. `OFF IS PROVEN EQUAL TO VANILLA` is
+a claim about **a** registration, and there are two possible ones. §0 of the
+gate now names which it used, every run:
+
+| §0 says | the registration is | what the claim covers |
+|---|---|---|
+| **LIVE** | this machine's own `.claude/settings.local.json` | the hooks a collection window here is actually running on. **The operator's file — not the one a reader cloning this repo would get** |
+| **FIXTURE** | materialised into the sandbox by `jev install` | the registration the **installer writes**, which *is* what a clone gets |
+
+`.claude/settings.local.json` is gitignored **by design**, so a clean checkout
+has none — and four gates used to fail there. They were failing *correctly*:
+each guards against passing vacuously on an empty set. The defect was that
+"is a registration present and correct?" and "does OFF equal vanilla?" were
+being answered by the same four assertions. They are now separate: the first
+needs a real file and is reported as not applicable without one; the second
+needs only *a* registration, and an **empty** registration is still always a
+failure.
+
+The fixture is **materialised by the real installer**, never hand-copied — the
+same discipline as the actuator fixture above, and for the same reason: a
+second copy of the thing it stands in for is a copy that will rot. The
+registration's content comes from `config/registration.json`, which is
+committed and is the single description `jev install` itself reads.
+
+Two smaller things resolved in the same pass. The sandbox build's
+`cp ... 2>/dev/null` is gone: on a clean checkout that copy failed **silently**
+and the failures surfaced three sections later instead of at the missing input.
+And §3's "the hook demonstrably ran" oracle is now **chosen from what is
+registered** — a spool capture for an observer on `Bash`, a changed tool input
+for an actuator on `Agent` — rather than hardcoded to the first of those. If
+neither applies the gate fails, because then nothing has been shown to run.
+
+`tests/test_clean_checkout.sh` builds an actual clean checkout — every tracked
+file, nothing ignored — and runs the whole gate inside it. That is what keeps
+this true rather than merely fixed once.
+
 `tests/reversibility.sh` §3 runs four arms over an `Agent`-shaped payload —
 `prompt`, `description`, `subagent_type`, and no `model` key, the case where a
 routing hook *adds* a field:
@@ -259,11 +348,17 @@ each command to its script, and fails if any of them:
 
 - is not `$CLAUDE_PROJECT_DIR`-anchored,
 - does not resolve to a script that exists,
-- lacks the canonical switch block,
+- lacks the canonical per-project switch block,
+- is **installable** (named in `config/registration.json`, so `jev install` can
+  put it in a repo it does not live in) and lacks either the canonical
+  **GLOBAL** switch block or the canonical **`JEV_HOME`** block — without the
+  first there is no way to stop it everywhere at once, and without the second
+  it would resolve jev's own assets out of the routed repo,
+- carries the global block but never derives `$JEV_HOME` before it,
 - carries the block but never derives `$ROOT` from `$CLAUDE_PROJECT_DIR`
   before it — a copy-paste that tests `/.jev-disabled` is a switch that is
   structurally dead, and a negative fixture asserts the checker rejects it,
-- mentions `.jev-disabled` anywhere outside that block (a second, drifting copy),
+- mentions `.jev-disabled` anywhere outside those blocks (a second, drifting copy),
 - has anything effectful before it — a network call, a write, a `jq`, an emitted
   decision. Comments, the fail-open `trap`, stderr redirection, locale pinning
   and plain assignments are allowed; everything else is not.
@@ -273,6 +368,70 @@ and the block has to be there on the day it is written. And it fails loudly if
 the settings file is absent, rather than passing by enumerating an empty set.
 
 `uv run src/doctor.py` carries the same check as `switch-coverage`.
+
+---
+
+## Install and uninstall — opt-in, one repo at a time (W2)
+
+```
+./jev status                       what is installed here, and the switches
+./jev install  <repo> --dry-run    print exactly what would change
+./jev install  <repo> --yes        register jev's hooks in <repo>
+./jev uninstall <repo> --yes       remove them, and restore <repo>'s settings
+```
+
+`<repo>` is the repo you want routed. jev stays where it is. **Nothing is ever
+written to `~/.claude/settings.json`** — the audit found that a global install
+silently disables the kill switch (see `JEV_HOME` above), and
+`coldteadotai/abide`, which we harvest from, installs itself exactly that way.
+We take its code, not its installer.
+
+`--yes` or `--dry-run` is required, for `teardown.sh`'s reason: a change that
+can happen by accident is its own hazard. Both commands are idempotent, and
+both refuse **whole** rather than half-succeeding — an unparseable settings
+file, a symlinked one, a `"hooks"` key that is not an object, or a target that
+does not exist all stop before anything is written.
+
+### What uninstall can and cannot guarantee
+
+`teardown.sh` is byte-reversible because it **never edits — it moves**. A
+per-project install cannot always do that: the file may hold settings that are
+not ours. So uninstall works in tiers, and **says which one it achieved**:
+
+| tier | when | guarantee |
+|---|---|---|
+| **A — byte-reversible** | the file has not changed since `jev install` ran | the install-time bytes are **restored**, not edited, and the sha256 is verified. `teardown.sh`'s guarantee, intact |
+| **B — structurally verified** | the file changed after install (you added a hook, edited `permissions`) | our entries are edited out and the result is checked three ways against the file re-read from disk. **Weaker: your original formatting is not restored**, 2-space JSON is |
+
+Tier B's three checks, all computed from the written file rather than from the
+function that wrote it: nothing outside `"hooks"` moved; every handler that
+disappeared is one of ours and no handler appeared; and re-applying `install`
+to the result reproduces the pre-uninstall document exactly, so nothing was
+*lost* rather than merely moved. Any failure restores the backup and stops
+loudly. `tests/test_install.sh` §5 feeds the verifier four kinds of damage and
+requires it to catch every one — a verifier that has never been shown catching
+anything is not evidence.
+
+Tier B exists because `install` re-serialises the file the moment it merges
+into it. That is the honest weakness, it is printed every time, and the
+**verbatim backup** is what makes it reversible anyway.
+
+Two more things, both deliberate:
+
+- **The switch goes on first.** `uninstall` creates `<repo>/.jev-disabled`
+  before it touches the settings file — the same ordering, for the same reason,
+  as `teardown.sh`: unregistration relies on a file watcher the docs describe
+  as picking changes up *"normally"*, and "normally" is not a guarantee. The
+  switch is **left in place** and the `rm` is printed.
+- **A verbatim backup is taken at install and again at uninstall**, under
+  distinct names. (They used to be able to collide: the timestamp is
+  second-resolution, and an install followed immediately by an uninstall
+  overwrote the install-time bytes, silently downgrading tier A to tier B. The
+  test suite found that.)
+
+`teardown.sh` reaches quiescence for **jev's own repo only**. It does not walk
+foreign installs and does not know about them; each is removed with
+`jev uninstall <that repo>`.
 
 ---
 

@@ -41,7 +41,12 @@ USER_SETTINGS = Path.home() / ".claude" / "settings.json"
 PROJECT_LOCAL_SETTINGS = paths.ROOT / ".claude" / "settings.local.json"
 
 # Paths that source code is allowed to reference outside ROOT, read-only.
-ALLOWED_OUTSIDE_READS = {"CLAUDE_PROJECTS", "CLAUDE_HISTORY"}
+# W2 adds a third: HOME_KILL_SWITCH, `~/.claude/jev-disabled`. It is the
+# machine-wide kill switch, and it is READ-ONLY in exactly the sense the other
+# two are -- the hooks `[ -e ]` it and nothing in this repo ever creates it. It
+# has to live outside the folder to do its job: a switch that stops jev in every
+# project cannot be anchored inside one project.
+ALLOWED_OUTSIDE_READS = {"CLAUDE_PROJECTS", "CLAUDE_HISTORY", "HOME_KILL_SWITCH"}
 
 # The only paths under data/ that may be tracked by git, listed exactly rather
 # than by prefix so that a new file cannot join the list by accident. Each is

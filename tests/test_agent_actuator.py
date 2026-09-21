@@ -129,6 +129,11 @@ class SandboxHook:
     def run(self, obj, **env_extra) -> tuple[int, str]:
         env = dict(os.environ)
         env["CLAUDE_PROJECT_DIR"] = str(self.root)
+        # W2: $JEV_HOME is where jev lives and is resolved WITHOUT reference to
+        # $CLAUDE_PROJECT_DIR. Point it at the sandbox too, or the hook resolves
+        # it from its own path -- the real repo -- and reads the real repo's
+        # config, the real repo's kill switch and the real repo's data/.
+        env["JEV_HOME"] = str(self.root)
         env["HOME"] = str(self.root)
         env.pop("JEV_ARM_SUBPROCESS", None)
         env.pop("JEV_GRADER", None)

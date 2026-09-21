@@ -1,0 +1,15 @@
+{
+  "_comment": "W2. THE ONE DESCRIPTION OF WHAT `jev install` REGISTERS. Read by src/install.py (which writes it into a target repo's ./.claude/settings.local.json) and by tests/reversibility.sh (which materialises a fixture registration from it when no live one exists, and which requires every script named here to carry BOTH canonical kill-switch blocks). A second, hand-written copy of this list is exactly the drift the actuator fixture in reversibility.sh was written to avoid, so there is one copy and both readers use it.",
+  "_marker": "How an entry of ours is recognised in somebody else's settings file at uninstall time: its command mentions the script path below. Structural, not a magic key inside the hooks array -- Claude Code parses that array and an unknown key there is not ours to add.",
+  "_not_armed": "Listing an entry here does NOT arm it. `config/surfaces.json` keeps agent_route at mode: off, and nothing is registered in this repo's own .claude/settings.local.json. Arming is a separate deliberate act (JEV-52).",
+  "version": 1,
+  "entries": [
+    {
+      "event": "PreToolUse",
+      "matcher": "Agent",
+      "script": "hooks/agent_route_actuator.sh",
+      "timeout": 10,
+      "why": "JEV-35 / W1, the static floor: rewrites tool_input.model from the subagent_type -> tier map in config/tiers.json. No network call, no Jev call, nothing that can time out."
+    }
+  ]
+}

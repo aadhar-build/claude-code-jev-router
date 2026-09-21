@@ -1,0 +1,201 @@
+=== JEV-42 guard: no test may write to the live collection window ===
+audit: live-window writes in shell tests
+  scanned: gates.sh, reversibility.sh, run_all.sh, test_agent_actuator.sh, test_collection_control.sh, test_hook.sh, test_hook_mutations.sh, test_inline_shadow.sh
+  ok    no shell test writes to the live spool/, data/, logs/ or kill switch
+  -> 8 files clean, 0 declared exemption(s)
+
+=== seam 1: hook process boundary ===
+seam 1: hook process boundary
+  sandbox root: logs/hooktest.xWJk45
+  ok    exits 0
+  ok    stdout is empty
+  ok    one record spooled
+  ok    surface encoded in filename
+  ok    staging dir left clean
+  ok    payload stored verbatim
+  ok    kill switch: exits 0
+  ok    kill switch: nothing captured
+  ok    cwd guard: exits 0
+  ok    cwd guard: nothing captured outside the folder
+  ok    no project dir: exits 0
+  ok    no project dir: nothing captured
+  ok    unwritable spool: still exits 0 (fails open)
+  ok    empty stdin: exits 0
+  ok    empty stdin: no empty record spooled
+  ok    200KB payload: exits 0
+  ok    200KB payload: spooled whole
+  ok    backpressure: exits 0
+  ok    backpressure: stops writing past the cap
+  ok    backpressure: the drop is recorded durably
+  ok    backpressure: drop row names its reason and surface
+  ok    arm subprocess: exits 0
+  ok    arm subprocess: captures nothing (no feedback loop)
+  ok    no logs/ dir: still exits 0
+  ok    no logs/ dir: still captures
+  ok    under 10ms budget (8.29ms incl. process spawn, best of 1)
+  ok    ran entirely in its sandbox: no trace in the live spool or captures
+  -> 27 passed, 0 failed
+
+=== JEV-42: the sandboxed hook test still catches a broken hook ===
+JEV-42: mutation proof -- the sandboxed test must still go red
+  ok    control: an unmutated copy passes (27 assertions)
+  ok    kill switch removed -> caught by: captured despite kill switch
+  ok    cwd guard removed -> caught by: captured from outside cwd
+  ok    recursion guard removed -> caught by: captured from an arm subprocess
+  ok    empty-record check removed -> caught by: spooled an empty record
+  ok    backpressure cap raised to 999999 -> caught by: wrote past cap
+  ok    atomic move becomes a copy (staging left dirty) -> caught by: staging dir not clean
+  ok    a stray byte on stdout -> caught by: stdout was
+  ok    fail-open broken: the hook exits nonzero -> caught by: exit code was 1
+  ok    the live-window detector finds a planted capture (expression is not vacuous)
+
+  --- audit_live_writes.sh against the pre-fix test_hook.sh ---
+  ok    the scanner REJECTS the pre-fix test_hook.sh
+  ok      names test_hook.sh:18
+  ok      names test_hook.sh:38
+  ok      names test_hook.sh:58
+  ok      names test_hook.sh:85
+  ok      names test_hook.sh:121
+  ok    the scanner ACCEPTS a read-only grep of the live spool and a logs/ sandbox
+
+  -> 17 passed, 0 failed
+
+=== seam 1: inline shadow hook (loopback fake, no spend) ===
+seam 1: inline shadow hook process boundary
+  ok    loopback fake listening on http://127.0.0.1:49380/v1/evaluate
+  ok    happy: exits 0
+  ok    happy: stdout is empty
+  ok    happy: one row logged
+  ok    happy: ok=true
+  ok    happy: probabilities recorded
+  ok    happy: would-be decision recorded
+  ok    happy: curl timing decomposed
+  ok    happy: join key carried
+  ok    happy: state_sha256 matches state_builders.build_pre_bash
+  ok    truncated state hashes identically to the Python builder
+  ok    bogus key: exits 0
+  ok    bogus key: stdout is empty
+  ok    bogus key: failure logged as a row
+  ok    bogus key: error_kind=auth
+  ok    bogus key: ok=false
+  ok    unreachable: exits 0
+  ok    unreachable: stdout is empty
+  ok    unreachable: failure logged as a row
+  ok    unreachable: error_kind=connection
+  ok    timeout: exits 0
+  ok    timeout: stdout is empty
+  ok    timeout: error_kind=timeout
+  ok    timeout: returned in 1.10s, inside --max-time + slack
+  ok    no jq: exits 0
+  ok    no jq: stdout is empty
+  ok    no jq: still logged a row
+  ok    no jq: error_kind=no_jq
+  ok    kill switch: exits 0
+  ok    kill switch: stdout is empty
+  ok    kill switch: no call, no row
+  ok    arm subprocess: exits 0
+  ok    arm subprocess: stdout is empty
+  ok    arm subprocess: no call, no row
+  ok    cwd guard: exits 0
+  ok    cwd guard: nothing logged from outside the folder
+  ok    bad payload: exits 0
+  ok    bad payload: stdout is empty
+  ok    bad payload: logged a row
+  ok    no curl temp files left behind
+  skip  LIVE round trip (set JEV_TEST_LIVE=1 to spend ~$0.000013)
+  -> 40 passed, 0 failed
+
+=== JEV-44: the interpreter floor is asserted, not assumed ===
+----------------------------------------------------------------------
+Ran 14 tests in 0.279s
+
+[32mOK[0m
+
+=== seam 2 + 3: pipeline, statistics, report ===
+----------------------------------------------------------------------
+Ran 104 tests in 0.671s
+
+[32mOK[0m
+
+=== the board: the wave plan and the tickets' own blockers must agree ===
+----------------------------------------------------------------------
+Ran 7 tests in 0.004s
+
+[32mOK[0m
+
+=== JEV-34: the agent_route surface -- payload-only state, and NOT armed ===
+----------------------------------------------------------------------
+Ran 24 tests in 0.002s
+
+[32mOK[0m
+
+=== JEV-35 / W1: the static floor -- the rule, the ledger, the breaker, the check ===
+----------------------------------------------------------------------
+Ran 40 tests in 1.232s
+
+[32mOK[0m
+
+=== JEV-35 / W1: the actuator at the hook's process boundary (no network, no spend) ===
+  ok    no write verb in the hook is aimed at $HOME or an absolute system path
+
+  61 passed, 0 failed
+
+=== JEV-32: analysis joins rows to the config THEY ran under, and never pools ===
+----------------------------------------------------------------------
+Ran 7 tests in 0.146s
+
+[32mOK[0m
+
+=== JEV-51 + JEV-31: kill switch, graceful stop, and the claim reap ===
+----------------------------------------------------------------------
+Ran 22 tests in 9.543s
+
+[32mOK[0m
+=== JEV-51: run-collection.sh stop waits, and status separates the two facts ===
+  ok    stop is idempotent
+
+run-collection control: all checks passed
+
+=== seam 3b: threshold validation and determinism ===
+----------------------------------------------------------------------
+Ran 33 tests in 0.061s
+
+[32mOK[0m
+=== JEV-16: sweep selection, and the two things a repeat group must not pool ===
+----------------------------------------------------------------------
+Ran 13 tests in 0.034s
+
+[32mOK[0m
+=== JEV-43: wall-clock decomposition, and the contamination cut ===
+----------------------------------------------------------------------
+Ran 19 tests in 0.000s
+
+[32mOK[0m
+=== baseline: known answers from a real transcript ===
+----------------------------------------------------------------------
+Ran 36 tests in 1.005s
+
+[32mOK[0m
+=== baseline: the persisted 'before' record is append-only and idempotent ===
+----------------------------------------------------------------------
+Ran 20 tests in 0.011s
+
+[32mOK[0m ([33mskipped=2[0m)
+--- canary: frozen set stability, drift flags, row-schema identity ---
+  [ok ] the all-failed sweep is on disk
+  [ok ] but is not usable as a reference
+
+all offline checks passed
+
+=== JEV-40: reversibility -- one switch, and OFF proven equal to vanilla ===
+ 43 passed, 0 failed
+ OFF IS PROVEN EQUAL TO VANILLA -- JEV-35 may proceed
+==============================================================
+
+=== doctor ===
+
+14 passed, 1 warned, 0 failed
+
+
+=== live window untouched by the full suite ===
+  ok    spool, data/ and logs/ are as the suite found them

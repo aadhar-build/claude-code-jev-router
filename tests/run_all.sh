@@ -110,6 +110,11 @@ echo
 echo "=== JEV-35 / W1: the actuator at the hook's process boundary (no network, no spend) ==="
 guarded "test_agent_actuator.sh" bash -c "set -o pipefail; '$ROOT/tests/test_agent_actuator.sh' | tail -3" || exit 1
 echo
+echo "=== W2: JEV_HOME -- one rule, both readers; two switches, proven on the actuator ==="
+guarded "test_jev_home.sh" bash -c "set -o pipefail; '$ROOT/tests/test_jev_home.sh' | tail -3" || exit 1
+echo "=== W2: jev install / uninstall -- opt-in per project, byte-reversible when it can be ==="
+guarded "test_install.sh" bash -c "set -o pipefail; '$ROOT/tests/test_install.sh' | tail -3" || exit 1
+echo
 echo "=== JEV-29 + JEV-36 / W3: the accuracy gate -- both classes, and 1 never reads as 0 ==="
 guarded "test_accuracy_gate.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_accuracy_gate.py' 2>&1 | tail -4" || exit 1
 echo
@@ -138,6 +143,8 @@ guarded "test_canary.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test
 echo
 echo "=== JEV-40: reversibility -- one switch, and OFF proven equal to vanilla ==="
 guarded "reversibility.sh" bash -c "set -o pipefail; '$ROOT/tests/reversibility.sh' | tail -4" || exit 1
+echo "=== JEV-56: the reversibility gate goes green on a CLEAN CHECKOUT ==="
+guarded "test_clean_checkout.sh" bash -c "set -o pipefail; '$ROOT/tests/test_clean_checkout.sh' | tail -3" || exit 1
 echo "=== doctor ==="
 guarded "doctor.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/src/doctor.py' | tail -3"
 

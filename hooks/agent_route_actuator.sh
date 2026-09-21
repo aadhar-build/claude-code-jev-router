@@ -83,9 +83,40 @@ exec 3>&1 >/dev/null
 # not a JSON number.
 export LC_ALL=C
 
+# $ROOT is THE PROJECT the session is running in. It is what the per-project
+# opt-out and the cwd guard are anchored on, and nothing else.
 ROOT="${CLAUDE_PROJECT_DIR:-}"
-if [ -n "$ROOT" ] && [ -d "$ROOT/logs" ]; then
-  exec 2>>"$ROOT/logs/agent_route.err"
+
+# --- jev home: canonical block, byte-identical in every installable hook -----
+# W2/JEV-56. $JEV_HOME is WHERE JEV ITSELF LIVES, resolved WITHOUT reference to
+# $CLAUDE_PROJECT_DIR. The two are the same directory only when jev is running
+# in its own repo; once `jev install` registers this hook in somebody else's
+# repo they are different, and every asset below -- config/tiers.json, the
+# assignment ledger, the breaker log, the stderr log -- belongs to jev, not to
+# the project being routed.
+#
+# The pivot audit found the failure this prevents: resolve jev's root from
+# $CLAUDE_PROJECT_DIR and, in the wrong install shape, `config/tiers.json`
+# names a file that does not exist (so every delegation fails to frontier),
+# the ledger is written into somebody else's working tree, and the kill switch
+# names a path that will never exist -- a switch that is permanently off.
+#
+# ONE MECHANISM, BOTH READERS. `src/paths.py` resolves JEV_HOME with the same
+# two-line rule -- the environment variable if it names a directory, otherwise
+# the directory two levels above this file -- so the bash half and the Python
+# half cannot disagree. `tests/test_jev_home.sh` asserts they return the same
+# absolute path, and `paths.jev_home_source()` reports which arm fired.
+#
+# FAIL SAFE, like everything else here: a $JEV_HOME that cannot be established
+# is not guessed at, it is an exit.
+JEV_HOME="${JEV_HOME:-}"
+[ -d "$JEV_HOME" ] || JEV_HOME="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd -P)"
+[ -n "$JEV_HOME" ] || exit 0
+[ -d "$JEV_HOME" ] || exit 0
+# --- end jev home -----------------------------------------------------------
+
+if [ -d "$JEV_HOME/logs" ]; then
+  exec 2>>"$JEV_HOME/logs/agent_route.err"
 else
   exec 2>/dev/null
 fi
@@ -103,15 +134,29 @@ fi
 [ -n "$ROOT" ] || exit 0
 [ -d "$ROOT" ] || exit 0
 
-# --- jev GLOBAL kill switch -------------------------------------------------
-# Switch one of two. This one is machine-wide: it stops routing in EVERY project
-# at once, which is what you want at 3am when you do not yet know which repo is
-# misbehaving. Read-only; nothing in this repo ever writes here.
+# --- jev GLOBAL kill switch: canonical block, byte-identical in every hook ---
+# SWITCH ONE OF TWO, and the one that does not depend on which repo you are in.
+# It stops routing in EVERY project at once, which is what you want at 3am when
+# you do not yet know which repo is misbehaving. The per-project block below is
+# the other one: an opt-out for a single repo, which is a different question.
 #
-# Same fail-safe rule as the per-project switch below: ANY entry at the path
+# Two paths, either of which is enough:
+#
+#   $JEV_HOME/.jev-disabled        what `./teardown.sh` and `jev uninstall`
+#                                  set. JEV_HOME-anchored, NOT project-anchored,
+#                                  so it is a real path in every install shape.
+#                                  Under the rejected global install this is
+#                                  precisely the switch that would have named a
+#                                  file that can never exist.
+#   $HOME/.claude/jev-disabled     machine-wide, set by hand, honoured even if
+#                                  the jev install itself is unreachable.
+#                                  Read-only; nothing in this repo writes here.
+#
+# Same fail-safe rule as the per-project switch below: ANY entry at either path
 # means OFF, and a state that cannot be established ALSO means OFF -- hence the
 # unset-HOME case. A switch is never given the benefit of the doubt.
 [ -n "$HOME" ] || exit 0
+{ [ -e "$JEV_HOME/.jev-disabled" ] || [ -L "$JEV_HOME/.jev-disabled" ]; } && exit 0
 { [ -e "$HOME/.claude/jev-disabled" ] || [ -L "$HOME/.claude/jev-disabled" ]; } && exit 0
 # --- end jev GLOBAL kill switch ---------------------------------------------
 
@@ -146,8 +191,11 @@ esac
 # rather than guessing -- see the fail-safe/fail-to-frontier note above.
 command -v jq >/dev/null 2>&1 || exit 0
 
-CFG="$ROOT/config/tiers.json"
-DIR="$ROOT/data/agent_route"
+# Jev's own assets, under $JEV_HOME and never under the routed project. The
+# rule table is jev's, the ledger is jev's, and an install into somebody else's
+# repo must not put either of them in their working tree.
+CFG="$JEV_HOME/config/tiers.json"
+DIR="$JEV_HOME/data/agent_route"
 LEDGER_DIR="$DIR/assignments"
 BREAKER="$DIR/breaker.jsonl"
 MARKER="$DIR/BREAKER-OPEN"

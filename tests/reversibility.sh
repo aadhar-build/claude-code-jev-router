@@ -16,9 +16,11 @@
 # PreToolUse dispatch.
 #
 # Six sections, numbered 0-5:
-#   0. PRECONDITION -- there IS a live registration, so nothing below is vacuous
-#   1. ENUMERATION  -- every registered hook carries the canonical switch block,
-#                      so a new surface cannot be added without it
+#   0. THE REGISTRATION UNDER TEST -- live, or a fixture the real installer
+#                      materialises. Named out loud, because it bounds what
+#                      every section below is entitled to claim (JEV-56)
+#   1. ENUMERATION  -- every registered hook carries the canonical switch
+#                      blocks, so a new surface cannot be added without them
 #   2. FAIL SAFE    -- a switch whose state cannot be established reads as ON
 #   3. OFF = VANILLA-- byte-identity of the resolved tool input, with a positive
 #                      control that proves the comparison can see a rewrite
@@ -26,9 +28,17 @@
 #   5. LIVE SESSION -- the switch is evaluated per invocation, not cached
 #
 # Everything runs in a sandbox project directory. The live
-# `.claude/settings.local.json` is READ and never written; section 0 and the
-# final check assert its bytes are unchanged, because it is the registration a
-# collection window is currently running on.
+# `.claude/settings.local.json` is READ and never written; the final check
+# asserts its bytes are unchanged, because it is the registration a collection
+# window would be running on.
+#
+# JEV-56: THIS FILE IS GREEN ON A CLEAN CHECKOUT, and `tests/test_clean_checkout.sh`
+# proves it by running this file in one. A registration is gitignored by design,
+# so on a fresh clone there is none; the gate then materialises one with
+# `jev install` rather than failing, and says which it used. "Is a registration
+# present and correct?" and "does OFF equal vanilla?" are now separate
+# questions: the first needs a real file and is skipped without one; the second
+# needs only A registration, and never passes on an empty set.
 #
 # Offline. No network, no spend, nothing written to data/ or spool/.
 
@@ -59,14 +69,104 @@ echo " REVERSIBILITY -- one switch, and a proof that OFF is vanilla"
 echo "=============================================================="
 
 # ---------------------------------------------------------------------------
-# 0. The live registration is present and readable. Without it, section 1 would
-#    pass by enumerating nothing, which is the exact failure the gate exists to
-#    prevent.
+# Build the sandbox project, BEFORE section 0 -- because section 0 is now a
+# question about which registration everything below is measured against, and
+# that question cannot be answered until the sandbox exists.
+# ---------------------------------------------------------------------------
+mkdir -p "$SANDBOX/hooks" "$SANDBOX/spool/tmp" "$SANDBOX/spool/ready" \
+         "$SANDBOX/.claude" "$SANDBOX/data" "$SANDBOX/logs" "$SANDBOX/config" || {
+  echo "    FAIL  could not build the sandbox project at $SANDBOX"; exit 1; }
+cp "$ROOT"/hooks/*.sh "$SANDBOX/hooks/" || {
+  echo "    FAIL  could not copy hooks/ into the sandbox"; exit 1; }
+cp "$ROOT/teardown.sh" "$SANDBOX/teardown.sh" || {
+  echo "    FAIL  could not copy teardown.sh into the sandbox"; exit 1; }
+# The sandbox is a COMPLETE jev install, not just a hooks directory: config and
+# src as well. That is what lets `jev install --into $SANDBOX` below run with
+# JEV_HOME pointed here, which is what makes the fixture registration name the
+# SANDBOX's hooks rather than the live repo's.
+cp "$ROOT"/config/*.json "$SANDBOX/config/" || {
+  echo "    FAIL  could not copy config/ into the sandbox"; exit 1; }
+mkdir -p "$SANDBOX/src"
+cp "$ROOT"/src/*.py "$SANDBOX/src/" || {
+  echo "    FAIL  could not copy src/ into the sandbox"; exit 1; }
+chmod +x "$SANDBOX"/hooks/*.sh "$SANDBOX/teardown.sh" || {
+  echo "    FAIL  could not make the sandboxed hooks executable"; exit 1; }
+
+SANDBOX_SETTINGS="$SANDBOX/.claude/settings.local.json"
+
+# ---------------------------------------------------------------------------
+# JEV-56. WHICH REGISTRATION IS THE PROOF MADE AGAINST?
+#
+# `.claude/settings.local.json` is gitignored BY DESIGN -- a live registration
+# must never travel to a clone or a cloud session. So on a clean checkout there
+# is no registration to test, and four gates here used to fail: correctly, since
+# each guards against passing vacuously on an empty set, but for a reason that
+# makes the suite impossible to go green from a fresh clone. You cannot
+# distribute a tool whose suite cannot go green on a clean checkout.
+#
+# The fix separates two questions this file used to conflate:
+#
+#   "is a registration PRESENT AND CORRECT?"   needs a real file, and is
+#                                              reported as NOT APPLICABLE when
+#                                              there is none. Absence is not a
+#                                              failure; an EMPTY one always is.
+#   "does OFF equal VANILLA?"                  needs only A registration --
+#                                              real or fixture.
+#
+# And the fixture is MATERIALISED BY THE REAL INSTALLER (`jev install`), not
+# hand-copied. That is the idiom this file already uses for the actuator
+# fixture below -- "extracted from the real hook at test time, so the fixture
+# and the shipped hooks cannot drift apart" -- applied to the one input that
+# was missed. It tests the installer inside this gate for free, and the
+# registration under test is a KNOWN one rather than whatever the operator
+# happens to have lying around.
+#
+# The old `cp ... 2>/dev/null` here is gone. On a clean checkout that copy
+# failed SILENTLY and sections 2-5 then ran against a sandbox with no
+# registration at all, which is why the failures surfaced three sections later
+# instead of at the missing input.
 # ---------------------------------------------------------------------------
 if [ -f "$LIVE_SETTINGS" ]; then
-  ok "live registration present at .claude/settings.local.json"
+  REG_MODE="live"
+  cp "$LIVE_SETTINGS" "$SANDBOX_SETTINGS" || {
+    echo "    FAIL  a live registration exists at $LIVE_SETTINGS but could not be"
+    echo "          copied into the sandbox. Stopping HERE, at the missing input,"
+    echo "          rather than three sections later."
+    exit 1; }
 else
-  bad "no .claude/settings.local.json -- the enumeration gate would pass vacuously"
+  REG_MODE="fixture"
+  # JEV_HOME points at the sandbox, so the fixture registers the SANDBOX's copy
+  # of each hook. Registering the real ones would make every arm below resolve
+  # jev's assets -- and jev's kill switch -- out of the live repo.
+  if ! JEV_HOME="$SANDBOX" "$ROOT/jev" install "$SANDBOX" --yes > "$SANDBOX/install.log" 2>&1; then
+    echo "    FAIL  no live registration, and 'jev install' could not materialise a"
+    echo "          fixture one into the sandbox. See $SANDBOX/install.log"
+    sed 's/^/          /' "$SANDBOX/install.log"
+    exit 1
+  fi
+  if [ ! -f "$SANDBOX_SETTINGS" ]; then
+    echo "    FAIL  the installer reported success and wrote no registration"
+    exit 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# 0. WHAT THIS PROOF IS MADE AGAINST. Stated first, and out loud, because the
+#    answer changes what the sections below are entitled to claim.
+# ---------------------------------------------------------------------------
+echo
+echo "  0. THE REGISTRATION UNDER TEST"
+echo
+if [ "$REG_MODE" = "live" ]; then
+  ok "LIVE registration: this machine's own .claude/settings.local.json"
+  echo "          the hooks a collection window here is actually running on"
+else
+  ok "FIXTURE registration: materialised by \`jev install\` into the sandbox"
+  echo "          there is no .claude/settings.local.json on this checkout -- it is"
+  echo "          gitignored by design -- so the proof below is made against the"
+  echo "          registration the installer WRITES, which is the one a reader"
+  echo "          cloning this repo would get. That is a different claim from the"
+  echo "          live one, and it is the one stated in docs/REVERSIBILITY.md."
 fi
 
 # ---------------------------------------------------------------------------
@@ -76,30 +176,59 @@ echo
 echo "  1. ENUMERATION -- every hook checks the switch, before anything else"
 echo
 
-ENUM=$(python3 - "$ROOT" <<'PY'
+ENUM=$(python3 - "$ROOT" "$SANDBOX_SETTINGS" "$REG_MODE" <<'PY'
 import json, re, shlex, sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-settings_path = root / ".claude" / "settings.local.json"
+# The registration under test -- live or fixture, decided above and passed in.
+# NOT hardcoded to root/.claude/settings.local.json any more: that path is
+# gitignored by design, and hardcoding it is what made this gate impossible to
+# pass on a clean checkout (JEV-56).
+settings_path = Path(sys.argv[2])
+reg_mode = sys.argv[3]
 
 sys.path.insert(0, str(root / "src"))
 from hook_dispatch import registered_handlers  # noqa: E402
 
+# TWO canonical blocks now, because there are two switches.
+#
+#   the PER-PROJECT block   $ROOT/.jev-disabled, $CLAUDE_PROJECT_DIR-anchored.
+#                           The opt-out for one repo. Every hook carries it.
+#   the GLOBAL block        $JEV_HOME/.jev-disabled and ~/.claude/jev-disabled.
+#                           JEV_HOME-anchored, so it is a real path in EVERY
+#                           install shape -- including the one the audit found,
+#                           where a project-anchored switch names a file that
+#                           can never exist and is therefore permanently off.
+#
+# The global block is required of every INSTALLABLE hook -- the ones
+# `config/registration.json` says `jev install` can put in somebody else's repo
+# -- and that list is read from the installer's own config rather than written
+# out here, so a new installable surface cannot be added without it.
 BEGIN = "# --- jev kill switch: canonical block, byte-identical in every hook"
 END = "# --- end jev kill switch"
+GBEGIN = "# --- jev GLOBAL kill switch: canonical block, byte-identical in every hook"
+GEND = "# --- end jev GLOBAL kill switch"
+HBEGIN = "# --- jev home: canonical block, byte-identical in every installable hook"
+HEND = "# --- end jev home"
+
+try:
+    REG = json.loads((root / "config" / "registration.json").read_text())
+    INSTALLABLE = {str((root / e["script"]).resolve()) for e in REG["entries"]}
+except (OSError, json.JSONDecodeError, KeyError):
+    REG, INSTALLABLE = None, set()
 
 
-def block_of(text):
-    """Extract the canonical switch block, or None."""
+def block_of(text, begin=BEGIN, end=END):
+    """Extract a canonical block, or None."""
     lines = text.splitlines()
-    start = next((i for i, l in enumerate(lines) if l.startswith(BEGIN)), None)
+    start = next((i for i, l in enumerate(lines) if l.startswith(begin)), None)
     if start is None:
         return None, None
-    end = next((i for i, l in enumerate(lines[start:], start) if l.startswith(END)), None)
-    if end is None:
+    stop = next((i for i, l in enumerate(lines[start:], start) if l.startswith(end)), None)
+    if stop is None:
         return None, None
-    return "\n".join(lines[start:end + 1]), start
+    return "\n".join(lines[start:stop + 1]), start
 
 
 # Anything before the switch that could touch the world, or emit a decision.
@@ -129,7 +258,17 @@ ALLOWED = re.compile(
     r"|^\s*(if|fi|else|elif|then)\b"
     r"|^\s*[A-Za-z_][A-Za-z0-9_]*=\S*\s*$"
     r"|^\s*\[\s*-[nd]\s"
+    # The JEV_HOME derivation, named explicitly rather than tolerated by
+    # accident. It runs `cd`/`dirname`/`pwd` in a subshell, none of which are in
+    # EFFECTFUL today -- so it would pass silently, and the day someone adds
+    # `dirname` to EFFECTFUL it would start failing for no reason anybody could
+    # reconstruct. It touches nothing and emits nothing; it is allowed on
+    # purpose.
+    r"|^\s*JEV_HOME=|JEV_HOME=\"\$\(cd "
 )
+# The one line of the JEV_HOME block that is a fallback assignment, matched
+# whole so a future edit to it has to come back through this gate.
+JEV_HOME_DERIVED = re.compile(r"JEV_HOME=.*(BASH_SOURCE|\$0)")
 
 out = {"scripts": {}, "registered": [], "errors": []}
 
@@ -147,8 +286,19 @@ if settings_path.exists():
                                  f"-- the switch cannot be asserted on it")
             continue
         cmd = h["command"] or ""
-        if "$CLAUDE_PROJECT_DIR" not in cmd and "${CLAUDE_PROJECT_DIR}" not in cmd:
-            out["errors"].append(f"{h['event']}: command is not $CLAUDE_PROJECT_DIR-anchored: {cmd}")
+        # TWO legal shapes, and no third.
+        #
+        #   $CLAUDE_PROJECT_DIR-anchored  the in-repo registration, where the
+        #                                 project IS jev.
+        #   an absolute path under a jev  what `jev install` writes into
+        #   install                       somebody else's repo, which cannot
+        #                                 anchor on their project dir because
+        #                                 the script does not live there.
+        #
+        # Anything else -- a bare name, a relative path, a path outside any jev
+        # install -- is a command whose meaning depends on the session's cwd,
+        # which is exactly the class of bug the anchoring rule exists to stop.
+        anchored = ("$CLAUDE_PROJECT_DIR" in cmd or "${CLAUDE_PROJECT_DIR}" in cmd)
         expanded = cmd.replace("${CLAUDE_PROJECT_DIR}", str(root)).replace("$CLAUDE_PROJECT_DIR", str(root))
         try:
             argv = shlex.split(expanded)
@@ -160,6 +310,10 @@ if settings_path.exists():
             out["errors"].append(f"{h['event']}: no script found in command {cmd}")
             continue
         p = Path(target)
+        if not anchored and not p.is_absolute():
+            out["errors"].append(
+                f"{h['event']}: command is neither $CLAUDE_PROJECT_DIR-anchored nor "
+                f"an absolute path into a jev install: {cmd}")
         if not p.exists():
             out["errors"].append(f"{h['event']}: registered script does not exist: {p}")
             continue
@@ -173,23 +327,59 @@ for s in sorted(scripts):
     p = Path(s)
     text = p.read_text()
     blk, line = block_of(text)
+    gblk, gline = block_of(text, GBEGIN, GEND)
+    hblk, hline = block_of(text, HBEGIN, HEND)
+    installable = str(p.resolve()) in INSTALLABLE
     rel = str(p.relative_to(root)) if root in p.parents else str(p)
     if blk is None:
         out["scripts"][rel] = {"ok": False, "why": "canonical switch block absent"}
         continue
-    if ".jev-disabled" in text.replace(blk, ""):
-        out["scripts"][rel] = {"ok": False, "why": "references .jev-disabled outside the canonical block"}
+    # An installable hook -- one `jev install` can put in a repo it does not
+    # live in -- MUST carry the global block too. Without it the only switch is
+    # anchored on the routed project, and there is no way to stop jev
+    # everywhere at once.
+    if installable and gblk is None:
+        out["scripts"][rel] = {"ok": False, "block": blk,
+                               "why": "INSTALLABLE and has no GLOBAL kill-switch block -- "
+                                      "there would be no way to stop it everywhere at once"}
         continue
-    preceding = text.splitlines()[:line]
+    if installable and hblk is None:
+        out["scripts"][rel] = {"ok": False, "block": blk,
+                               "why": "INSTALLABLE and has no canonical JEV_HOME block -- "
+                                      "it would resolve jev's own assets from the routed repo"}
+        continue
+    # A second, drifting copy of the switch test anywhere outside the blocks
+    # that own it is the thing that rots. Either block is fine; a third is not.
+    residue = text.replace(blk, "")
+    if gblk:
+        residue = residue.replace(gblk, "")
+    if hblk:
+        residue = residue.replace(hblk, "")
+    if ".jev-disabled" in residue:
+        out["scripts"][rel] = {"ok": False, "block": blk,
+                               "why": "references .jev-disabled outside the canonical blocks"}
+        continue
+    # Effectful-before is measured from the FIRST switch block, whichever it is:
+    # the global one comes first in the actuator, and anything effectful ahead
+    # of it is ahead of every switch this script has.
+    first = min(x for x in (line, gline) if x is not None)
+    preceding = text.splitlines()[:first]
     offenders = [f"effectful before the switch at line {i+1}: {l.strip()[:60]}"
                  for i, l in enumerate(preceding)
                  if not ALLOWED.search(l) and EFFECTFUL.search(l)]
-    if not any(ROOT_DERIVED.search(l) for l in preceding):
+    before_project = text.splitlines()[:line]
+    if not any(ROOT_DERIVED.search(l) for l in before_project):
         offenders.append("$ROOT is not derived from $CLAUDE_PROJECT_DIR before the block "
                          "-- the switch would test /.jev-disabled")
-    if not any(ROOT_GUARDED.search(l) for l in preceding):
+    if not any(ROOT_GUARDED.search(l) for l in before_project):
         offenders.append('missing `[ -n "$ROOT" ]` before the block')
-    out["scripts"][rel] = {"ok": not offenders, "block": blk, "line": line + 1,
+    if gblk is not None:
+        before_global = text.splitlines()[:gline]
+        if not any(JEV_HOME_DERIVED.search(l) for l in before_global):
+            offenders.append("the GLOBAL block is present but $JEV_HOME is never derived "
+                             "before it -- the switch would test /.jev-disabled")
+    out["scripts"][rel] = {"ok": not offenders, "block": blk, "gblock": gblk,
+                           "installable": installable, "line": line + 1,
                            "why": "; ".join(offenders)}
 
 print(json.dumps(out))
@@ -214,7 +404,7 @@ for e in json.load(sys.stdin)["errors"]: print(e)' | while read -r line; do
   done
   n_err=$(printf '%s' "$ENUM" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["errors"]))')
   if [ "$n_err" = "0" ]; then
-    ok "every registered command is \$CLAUDE_PROJECT_DIR-anchored and resolves to a script"
+    ok "every registered command is \$CLAUDE_PROJECT_DIR-anchored or absolute into a jev install, and resolves to a script"
   else
     fail=$((fail+n_err))
   fi
@@ -239,23 +429,32 @@ EOF
 d=json.load(sys.stdin)["scripts"]
 print(len({v.get("block") for v in d.values()}))')
   if [ "$n_distinct" = "1" ] && [ "$n_scripts" -gt 1 ]; then
-    ok "the switch block is byte-identical across all $n_scripts hook scripts"
+    ok "the per-project switch block is byte-identical across all $n_scripts hook scripts"
   elif [ "$n_scripts" -le 1 ]; then
     bad "only $n_scripts hook script found -- expected at least two"
   else
     bad "$n_distinct different switch blocks across $n_scripts hook scripts -- they have drifted"
   fi
-fi
 
-# ---------------------------------------------------------------------------
-# Build the sandbox project used by sections 2-5.
-# ---------------------------------------------------------------------------
-mkdir -p "$SANDBOX/hooks" "$SANDBOX/spool/tmp" "$SANDBOX/spool/ready" \
-         "$SANDBOX/.claude" "$SANDBOX/data" "$SANDBOX/logs" "$SANDBOX/config" 2>/dev/null
-cp "$ROOT"/hooks/*.sh "$SANDBOX/hooks/" 2>/dev/null
-cp "$ROOT/teardown.sh" "$SANDBOX/teardown.sh" 2>/dev/null
-cp "$LIVE_SETTINGS" "$SANDBOX/.claude/settings.local.json" 2>/dev/null
-chmod +x "$SANDBOX"/hooks/*.sh "$SANDBOX/teardown.sh" 2>/dev/null
+  # And the GLOBAL block, across every script that carries one. Same rule, same
+  # reason: two copies of a switch test are two copies that can drift.
+  g=$(printf '%s' "$ENUM" | python3 -c 'import json,sys
+d=json.load(sys.stdin)["scripts"]
+blocks={v.get("gblock") for v in d.values() if v.get("gblock")}
+have=[k for k,v in d.items() if v.get("gblock")]
+inst=[k for k,v in d.items() if v.get("installable")]
+print("%d|%d|%d" % (len(blocks), len(have), len(inst)))')
+  n_gblocks="${g%%|*}"; rest="${g#*|}"; n_have="${rest%%|*}"; n_inst="${rest##*|}"
+  if [ "$n_inst" = "0" ]; then
+    bad "config/registration.json names no installable hook -- this gate would pass on an empty set"
+  elif [ "$n_have" -lt "$n_inst" ]; then
+    bad "$n_have of $n_inst installable hook(s) carry the GLOBAL switch block"
+  elif [ "$n_gblocks" = "1" ]; then
+    ok "the GLOBAL switch block is byte-identical across all $n_have hook script(s) that carry it"
+  else
+    bad "$n_gblocks different GLOBAL switch blocks -- they have drifted"
+  fi
+fi
 
 SWITCH="$SANDBOX/.jev-disabled"
 BASH_PAYLOAD="$SANDBOX/payload-bash.json"
@@ -382,7 +581,14 @@ VANILLA_SETTINGS="$SANDBOX/.claude/settings.vanilla.json"
 printf '{"hooks":{}}\n' > "$VANILLA_SETTINGS"
 
 resolve() { # resolve <settings> <payload>
-  python3 "$DISPATCH" --settings "$1" --project-dir "$SANDBOX" --payload "$2" 2>/dev/null
+  # HOME is pinned at the sandbox. `hook_dispatch.py` passes the process
+  # environment through to the hook, and the actuator's MACHINE-WIDE kill switch
+  # is `$HOME/.claude/jev-disabled`. Without this pin, an operator who had set
+  # that switch -- the switch this repo now tells them to use -- would find this
+  # gate red, with a message about byte-identity that has nothing to do with the
+  # cause. tests/test_agent_actuator.py pins HOME for exactly this reason; the
+  # fix did not travel here on its own.
+  HOME="$SANDBOX" python3 "$DISPATCH" --settings "$1" --project-dir "$SANDBOX" --payload "$2" 2>/dev/null
 }
 
 # The control arm: hooks unregistered ENTIRELY. This is what "vanilla" means --
@@ -435,17 +641,50 @@ A_AGENT=$(resolve "$SANDBOX/.claude/settings.local.json" "$AGENT_PAYLOAD")
 [ "$(sandbox_count)" = "0" ] && ok "live registration + switch ON: nothing recorded either" \
   || bad "switch ON still recorded $(sandbox_count)"
 
-# 3b. The LIVE registration, switch OFF. Byte-identical too -- capture.sh is an
-#     observer -- but this arm must also PROVE the hook actually ran, or 3a
-#     proves nothing.
+# 3b. The registration under test, switch OFF -- and this arm must PROVE the
+#     hook actually ran, or 3a proves nothing at all.
+#
+#     JEV-56. THE ORACLE FOR "IT RAN" DEPENDS ON WHAT IS REGISTERED, and until
+#     now it was hardcoded to one of them: a spool file appearing. That is the
+#     right oracle for an OBSERVER on `Bash` (capture.sh), and the WRONG one for
+#     an ACTUATOR on `Agent` -- which writes no spool file, so the count is zero
+#     and this gate fails for a reason that has nothing to do with the claim.
+#     The fixture registration is exactly that shape. So the oracle is chosen
+#     from the registration rather than assumed, and if NEITHER applies this
+#     gate fails, because then nothing here has been shown to run.
+REG_SCRIPTS=$(printf '%s' "$ENUM" | python3 -c 'import json,sys
+d = json.load(sys.stdin)["registered"]
+print(" ".join(sorted({(r.get("script") or "").rsplit("/", 1)[-1] for r in d})))')
+
 rm -rf "$SWITCH"; sandbox_clean
 B_BASH=$(resolve "$SANDBOX/.claude/settings.local.json" "$BASH_PAYLOAD")
 [ "$B_BASH" = "$VAN_BASH" ] \
-  && ok "live registration + switch OFF: still byte-identical (today's hooks only observe)" \
-  || bad "live registration + switch OFF DIFFERS from vanilla: [$B_BASH]"
-[ "$(sandbox_count)" = "1" ] \
-  && ok "live registration + switch OFF: the hook DID run (1 capture) -- 3a is not vacuous" \
-  || bad "the hook did not run with the switch off; 3a would prove nothing ($(sandbox_count) captures)"
+  && ok "registration under test + switch OFF (Bash): still byte-identical to vanilla" \
+  || bad "registration + switch OFF DIFFERS from vanilla: [$B_BASH]"
+
+ran="no"
+case " $REG_SCRIPTS " in
+  *" capture.sh "*)
+    # The observer's oracle: a capture appeared.
+    [ "$(sandbox_count)" = "1" ] \
+      && { ok "switch OFF: the observer hook DID run (1 capture) -- 3a is not vacuous"; ran="yes"; } \
+      || bad "capture.sh is registered and did not run with the switch off ($(sandbox_count) captures)"
+    ;;
+esac
+case " $REG_SCRIPTS " in
+  *" agent_route_actuator.sh "*)
+    # The actuator's oracle: with the switch OFF it must CHANGE the input. This
+    # is the direction §3 deliberately declines to assert when no actuator is
+    # registered -- with one registered it is precisely the proof that the hook
+    # ran, and the companion to 3a's "switch ON, and it did not".
+    B_AGENT=$(resolve "$SANDBOX/.claude/settings.local.json" "$AGENT_PAYLOAD")
+    [ "$B_AGENT" != "$VAN_AGENT" ] \
+      && { ok "switch OFF: the registered ACTUATOR DID run and rewrote the input -- 3a is not vacuous"; ran="yes"; } \
+      || bad "the registered actuator changed nothing with the switch off; 3a would prove nothing"
+    ;;
+esac
+[ "$ran" = "yes" ] \
+  || bad "no registered hook could be shown to have run at all ($REG_SCRIPTS) -- every assertion in §3 would be vacuous"
 
 # --- the actuator fixture ---------------------------------------------------
 # A hook of the shape JEV-35 will register: it returns permissionDecision allow
