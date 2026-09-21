@@ -64,15 +64,20 @@ find live.
 
 ### Phase A — dev, offline, at most four agents at a time
 
+**Waves renumbered 2026-09-21** so the table is topologically valid. The previous
+numbering placed three tickets in waves that ran *before* their own blockers, and
+left two tickets in no wave at all. Every move is listed in "The 2026-09-21
+reconciliation" below. A1 and A2 are unchanged, because they have already run.
+
 | wave | tickets | why these together |
 |---|---|---|
 | **A1** | **51**, **30 + 31** (one agent), **31b**, **44** | The shutdown/config-staleness cluster. 51 first because until it lands "stopped" is four manual steps and a belief. 30+31 share an agent (same drain loop); 31b is the same class of defect in five more fields. 44 pins the interpreter |
 | **A2** | **49**, **16** (run A only, 90 calls), **32**, **43** | The measurement instruments, before anything depends on their numbers. 49 corrects the cost pipeline **before** JEV-27 sizes a study on its output. 16 is a replay writer (`run_context: replay`). 43 resolves the contaminated wall-clock that 33 and 41 already quote |
-| **A3** | **27**, **46**, **47**, **48** | The science design, downstream of a corrected cost distribution (49) and a known flip rate (16). 46 replaces the rejected static-heuristic arm; 27 sizes a **three**-arm study, which is why it follows 46 |
-| **A4** | **34**, **29**, **17**, **28** | 34 builds `agent_route` **in shadow, deciding nothing** — buildable offline against replayed states. 29 builds and freezes the blinded grader. 17 replaces fitted thresholds with a rule. 28 reconciles Fable pricing, now inside a primary outcome |
-| **A5** | **35**, **36**, **25**, **50** | 35 writes the actuator **and its two gates** but does not arm it. 36 writes outcome measurement against fixtures. 50 is the writeup correction and touches no code |
-| **A6** | **39**, **12** | **Reclassified from Phase B on review**: all four are offline. 22 and 10 replay the *existing* 60 synthetic items against the arms; 39 and 12 read rows already on disk. None needs a hook, a surface or a running worker |
-| **A7** | **37**, **45** | The gate's own prerequisites. 37 builds the canary scheduler and wrapper so JEV-52 step 5 has something to run; 45 records the endpoint limitation and checks whether Cloudflare access is open |
+| **A3** | **34**, **29**, **17**, **28** | **Moved ahead of the science-design wave, because 34 is the head of the longest chain**: 46, 47, 25 and 35 all wait on it, and in the old numbering they sat in a wave that ran first. 34 builds `agent_route` **in shadow, deciding nothing** — buildable offline against replayed states. 29 builds and freezes the blinded grader. 17 replaces fitted thresholds with a rule. 28 reconciles Fable pricing, now inside a primary outcome |
+| **A4** | **55**, **46**, **47**, **25** | The science design, downstream of a corrected cost distribution (49), a known flip rate (16) and the surface (34). **55 leads the wave**: until the clustering unit is decided the primary interval cannot be computed from any amount of data, and 27 cannot be sized. 46 replaces the rejected static-heuristic arm; 47 makes both routing arms delegate identically; 25 adds the second routing dimension |
+| **A5** | **27**, **35**, **50** | 27 sizes a **three**-arm study on **clusters, not rows** — which is why it follows both 46 and 55. 35 writes the actuator **and its two gates** but does not arm it. 50 is the writeup correction and touches no code |
+| **A6** | **36**, **39**, **37** | 36 writes outcome measurement against fixtures, and needs 35's actuator to exist. 39 reads rows already on disk. 37 builds the canary scheduler and wrapper so JEV-52 step 5 has something to run |
+| **A7** | **48**, **45**, **56** | The last three, and the gate's remaining prerequisites. 48 asks whether we are measuring tier fit or task difficulty, and needs 36's outcome measurement. 45 records the endpoint limitation and checks whether Cloudflare access is open. 56 makes the gate's own step 1 satisfiable |
 
 **Spend decision (operator, 2026-09-20): minimise API spend, keep the analysis.**
 Offline replay is permitted in Phase A but is cut to the minimum that still
@@ -99,18 +104,24 @@ A single ticket, done by one agent, no parallelism:
 4. A canary baseline sweep recorded **before** the window opens, so drift has a
    reference (JEV-37).
 5. Pre-registration amended and committed with its hash: three routing arms,
-   the auth path, the Jev endpoint limitation (JEV-45), the corrected loss bound.
+   the auth path, the Jev endpoint limitation (JEV-45), the corrected loss bound,
+   **and the clustering unit JEV-55 decides** — without which the amendment
+   cannot state what the primary interval is.
 6. Only then: remove `.jev-disabled`, start the worker, register the first
    surface.
+
+Step 1's "from a clean checkout" is **currently impossible** and JEV-56 exists to
+resolve it: `tests/reversibility.sh` needs `.claude/settings.local.json`, which
+is gitignored by design, so four of its gates fail on any fresh clone.
 
 ### Phase B — live
 
 | wave | tickets | why |
 |---|---|---|
-| **B1** | **09**, **22**, **10**, **16** (runs B+C) | Alone. The inline shadow hook is the window's first live registration, and the one-registration-per-window rule makes it a wave by itself |
+| **B1** | **09**, **22**, **10**, **16** (runs B+C), **54** | Alone. The inline shadow hook is the window's first live registration, and the one-registration-per-window rule makes it a wave by itself. **54 joins this wave**: it is a replay sweep like 22, 10 and 16 B+C, it needs the same `replay.py` and the same spend, and the Phase A cut deferred every *additional* sweep for exactly this reason |
 | **B2** | **23**, **18**, **24b** | The routing A/B itself. 18 is the next surface in the queue. 24b adopts the working rule whose baseline 24a already froze |
 | **B3** | **19**, **20** | The last two surfaces |
-| **B4** | **53** | The writeup. Alone, because it depends on everything and owns no code |
+| **B4** | **12**, **53** | **12 joins the writeup wave**, and strictly before 53. It draws its figures from JEV-10's sweeps, and 10 is in B1 — so 12 could never have run in Phase A, whatever the old table said. 53 depends on everything and owns no code |
 
 ### What moved, and why
 
@@ -130,9 +141,49 @@ A single ticket, done by one agent, no parallelism:
   experiment is stopped" is a claim that took four manual steps to make true and
   cannot be re-asserted by a script.
 
+### The 2026-09-21 reconciliation
+
+A board audit found **five inconsistencies between the wave table and the
+tickets' own `Blocked by:` lines**, plus two tickets in no wave at all. The wave
+table was wrong in every case and the `Blocked by:` lines were right, so the
+table moved. Recorded here rather than silently corrected, because a plan that
+changes without saying so is how JEV-32's era boundary happened.
+
+1. **A3 could not run in its old slot.** It held 27, 46, 47 and 48. But 46 and
+   47 are `Blocked by: JEV-34`, which sat in A4 — *after* them — and 48 is
+   `Blocked by: JEV-36`, which sat in A5. Only 27 was genuinely downstream of
+   A2. **Fix:** 34's wave moved up to A3; 46 and 47 moved to A4 behind it; 48
+   moved to A7 behind 36. The old A3 was not a wave, it was three tickets
+   waiting on work scheduled after them.
+2. **JEV-12 was in A6 and blocked by JEV-10, which the spend cut had already
+   deferred to B1.** Both could not hold: a Phase A wave cannot depend on a
+   Phase B ticket. **Fix:** 12 moved to B4, immediately before 53.
+3. **The A6 row's prose was stale.** It read *"all four are offline… 22 and 10
+   replay the existing 60 synthetic items"* while the wave listed only 39 and
+   12 — text left over from before the spend cut removed 22 and 10. **Fix:**
+   rewritten to describe the tickets actually in the wave.
+4. **JEV-54 and JEV-55 were in no wave.** 55 states that it gates 27, 52 and the
+   primary metric itself, yet appeared nowhere in the plan and nowhere in 52's
+   blocker list — the single most load-bearing open ticket on the board was
+   invisible to anyone reading the plan alone. **Fix:** 55 now *leads* A4, ahead
+   of 27. 54 moved to B1 with the other deferred replay sweeps.
+5. **JEV-52's `Blocked by:` line stopped at A5 tickets.** It omitted 37, 39, 45,
+   12, 54 and 55 — including **37, which the gate's own step 5 depends on** for
+   the canary baseline, and **55, without which step 6's amendment cannot state
+   what the primary interval even is.** **Fix:** the line is now generated from
+   the wave table and says so.
+
+**One new defect was found during the audit and is filed as JEV-56**: the gate's
+step 1 requires the suite green *from a clean checkout*, and
+`tests/reversibility.sh` cannot be green on one — four of its gates need
+`.claude/settings.local.json`, which is gitignored by design.
+
 ### What the plan still deliberately does not parallelise
 
-**34 → 35 → 36 → 23 remains strictly serial**, now across A4 → A5 → A5 → B2.
+**34 → 35 → 36 → 23 remains strictly serial**, now across A3 → A5 → A6 → B2.
+The 2026-09-21 renumbering spread it across four waves instead of three, which
+lengthens the path and is the correct trade: 35 and 36 were sharing a wave while
+36 depends on 35, so the "wave" was never runnable in parallel anyway.
 It is the longest path and the obvious candidate for compression, and it should
 not be compressed: the split exists to put a verifiable checkpoint between "the
 classifier decides" and "the decision changes what runs". The dev/live gate now
@@ -379,7 +430,10 @@ retrain. The probability deltas are the only signal for the latter.
 
 **Status:** blocked
 **Labels:** analysis, security
-**Blocked by:** JEV-10 (the sweeps it draws figures from). JEV-05 is done
+**Blocked by:** JEV-10 (the sweeps it draws figures from). JEV-05 is done.
+**Moved to wave B4 on 2026-09-21**: it was listed in Phase A wave A6 while JEV-10
+had already been deferred to B1, so it was scheduled ahead of its own blocker.
+It now sits in B4, immediately before JEV-53, which consumes its figures.
 
 **Prior-art amendment (2026-09-20).** Add **decision-curve / net-benefit
 analysis**. The sweep found **nothing** applying it to LLM routing, gating,
@@ -545,9 +599,20 @@ checkboxes describe is **Run B, deferred to B1**.
 
 ## JEV-17: Replace the fitted thresholds with a rule
 
-**Status:** blocked
+**Status:** ready-for-agent — **unblocked 2026-09-21, with a stated limit**
 **Labels:** science
-**Blocked by:** JEV-16 (a dead-zone rule depends on the flip-rate result)
+**Blocked by:** ~~JEV-16~~ — **partially cleared.** JEV-16 Run A delivered the
+flip-rate result this ticket waited on and says so in its own words: the
+per-question dead-zone verdict "is JEV-17's input". The rule can be written now.
+
+**The limit, and it must be carried into the rule's wording.** Run A measured
+**`cc_haiku45` only**. There is still **no determinism baseline for `jev`** —
+that is Run B, deferred to B1. So the dead-zone verdict currently reads: viable
+for `destructive` (0 flips in 90 calls at either τ), not viable for
+`needs_review` on `cc_haiku45` (flips at |p − τ| ≥ 0.10, so the wobble is not a
+boundary effect and no threshold removes it). A rule written now is a rule
+written on the reference arm's wobble, not on Jev's, and must say so rather than
+implying the sweep covered both. Wave A3.
 
 **Prior-art amendment (2026-09-20).** Two independent results say a single
 fitted threshold will degenerate, and both should be cited in the rule's
@@ -812,9 +877,9 @@ practical, raising the share of spend that is routable at all.
 
 ## JEV-25: `verbosity` question — the second routing dimension
 
-**Status:** blocked
+**Status:** ready-for-agent — **unblocked 2026-09-21**, JEV-34 landed (`652d3e8`)
 **Labels:** questions, science
-**Blocked by:** JEV-34
+**Blocked by:** ~~JEV-34~~ — cleared. Wave A4.
 
 *(Was JEV-18. The `verbosity` question belongs to `questions/agent_route/v1.json`
 — the surface that routes — not to `user_prompt`, which is a shadow
@@ -1270,7 +1335,7 @@ in force).
 
 ## JEV-34: `agent_route` in shadow — the surface, deciding nothing
 
-**Status:** ready-for-agent
+**Status:** done 2026-09-21 (`652d3e8`) — **one box deferred to Phase B, stated below**
 **Labels:** hooks, science
 **Blocked by:** JEV-15
 
@@ -1294,22 +1359,36 @@ cannot arise. "Impossible by construction" is a claim about code that changes.
 **Demoable:** spawn a subagent; a routing decision appears in the data with a
 tier and a probability; `resolvedModel` is unchanged.
 
-- [ ] `questions/agent_route/v1.json` — `complexity` as a **score** with anchors describing the WORK, never naming a model, preserving the separation `user_prompt/v2.json` already argues for; tier selection stays a policy applied in analysis
-- [ ] State builder: `tool_input.prompt` + `tool_input.subagent_type`, payload-only
-- [ ] `agent_route` added to `config/surfaces.json` and to the surface list in `paths` — currently a second source of truth (JEV-31b)
-- [ ] The `JEV_ARM_SUBPROCESS` recursion guard, for the same reason `capture.sh` has it: the `cc_*` arms spawn `claude -p` in this repo
-- [ ] Fail open on every path, exit 0 always, hard timeout — it is synchronous on the spawn critical path
-- [ ] Measure the latency it adds to a subagent spawn, live. This is the one place in the study where a Jev call is not free
-- [ ] GATE 4 extended to `agent_route`, asserting the state cannot contain anything created after the spawn
-- [ ] Parameterise the three existing gates on surface — they are hardcoded to `pre_bash`
+- [x] `questions/agent_route/v1.json` — `complexity` as a **score** with anchors describing the WORK, never naming a model, preserving the separation `user_prompt/v2.json` already argues for; tier selection stays a policy applied in analysis
+- [x] State builder: `tool_input.prompt` + `tool_input.subagent_type`, payload-only. **Built wider than the box asked**, and the reasoning is in the `build_agent_route` docstring: SWE-Router measures a Bayes-error floor for prompt-plus-type alone, and 78 of 120 observed delegated tasks (65%) are `general-purpose`, the one agent type carrying no routing signal. `description`, `run_in_background`, the invoker's `agent_type`/`agent_id`, `permission_mode`, `effort.level` and `cwd` are added — all already in the payload, all free, each one justified against plan decision #7 per field. **`tool_input.model` is deliberately withheld**: it leaks nothing, but it names the answer and it is the field JEV-35 overwrites
+- [x] `agent_route` added to `config/surfaces.json` and to the surface list in `paths` — **both in one commit**, which is the JEV-31b failure mode
+- [x] The `JEV_ARM_SUBPROCESS` recursion guard, for the same reason `capture.sh` has it: the `cc_*` arms spawn `claude -p` in this repo
+- [x] Fail open on every path, exit 0 always, hard timeout — it is synchronous on the spawn critical path
+- [ ] ~~Measure the latency it adds to a subagent spawn, live~~ → **DEFERRED TO PHASE B, and it is a real deferral rather than a quiet drop.** It cannot be done in Phase A: measuring it requires the hook registered and firing, and no Phase A ticket may register a hook. This is **the one place in the study where a Jev call is not free** — every other surface observes a decision that has already been made, while this one sits on the spawn's critical path. It must be measured in the first live window and **JEV-52 must not treat this ticket as fully closed**: the surface is built and proven inert, not proven cheap
+- [x] GATE 4 extended to `agent_route`, asserting the state cannot contain anything created after the spawn. **Satisfied by construction**: the builder is a pure function of the payload dict, so a worker running an hour late produces the same bytes the hook would have — asserted at unit level in `tests/test_agent_route.py` rather than assumed
+- [x] Parameterise the three existing gates on surface — they are hardcoded to `pre_bash`. Done by JEV-15; `tests/gates.sh payload_for` now carries an `agent_route` case
+
+**Landed:** `652d3e8`. `tests/test_agent_route.py`, 22 tests. Full suite green,
+`mode: "off"` verified, no hook entry exists in `.claude/settings.local.json`.
+`test_there_is_no_actuator_in_this_repo_yet` **is designed to fail once JEV-35
+lands** — JEV-35 must update it deliberately, not delete it.
 
 ---
 
 ## JEV-35: Make the routing hook an actuator — behind two new gates
 
-**Status:** blocked
+**Status:** ready-for-agent — **unblocked 2026-09-21**. Both blockers are done: JEV-34 landed (`652d3e8`) and JEV-40 prints `OFF IS PROVEN EQUAL TO VANILLA -- JEV-35 may proceed`
 **Labels:** hooks, science, blocking
-**Blocked by:** JEV-34, **JEV-40**
+**Blocked by:** ~~JEV-34, JEV-40~~ — both cleared. Wave A5.
+
+**Two things this ticket must not do, and one it must.** It may **not** register
+a hook, change `agent_route`'s `mode: "off"`, or touch
+`.claude/settings.local.json` — building the actuator is Phase A, arming it is
+JEV-52. It **must** deliberately update
+`tests/test_agent_route.py::test_there_is_no_actuator_in_this_repo_yet`, which
+JEV-34 wrote to fail the moment an actuator exists ("Until then no…"). Deleting
+that test or routing around it removes the only assertion that the shadow
+surface stayed a shadow.
 
 **Prior-art amendment (2026-09-20).** Two semantics must be pre-registered
 before this is armed, because three shipped systems chose three different
@@ -2243,9 +2322,9 @@ unredacted command text changes too.
 
 ## JEV-46: `random_matched` — the third routing arm, and why it is NOT a static heuristic
 
-Status: blocked
+Status: ready-for-agent — **unblocked 2026-09-21**, JEV-34 landed (`652d3e8`)
 Labels: science, arms, prior-art
-Blocked by: JEV-34 (the surface)
+Blocked by: ~~JEV-34 (the surface)~~ — cleared. Wave A4, and it gates JEV-27.
 
 *Not blocked by JEV-27, though JEV-27 is blocked by this. Building the arm is
 independent of sizing the study: the mix is derived post hoc from `jev_routed`'s
@@ -2317,9 +2396,9 @@ before the first `random_matched` run.
 
 ## JEV-47: both routing arms must delegate identically, or we measure the delegation penalty
 
-Status: blocked
+Status: ready-for-agent — **unblocked 2026-09-21**, JEV-34 landed (`652d3e8`)
 Labels: science, threat-to-validity, prior-art
-Blocked by: JEV-34
+Blocked by: ~~JEV-34~~ — cleared. Wave A4.
 
 **The finding.** `AqueGen/model-routing` published 7 days of telemetry with a
 three-way comparison almost nobody makes: **`$1.36` doing the work inline <
@@ -2361,7 +2440,9 @@ delegation penalty with a routing label on it. Our design randomises assignment
 
 Status: blocked
 Labels: science, analysis, prior-art
-Blocked by: JEV-36 (outcome measurement)
+Blocked by: JEV-36 (outcome measurement). **Moved from wave A3 to A7 on
+2026-09-21**: JEV-36 sits in A6, so in the old numbering this ticket was
+scheduled three waves before the ticket it depends on.
 
 **The problem.** "Cost-Saving LLM Cascades with Early Abstention"
 (arXiv:2502.09054) reports that *"error patterns of small and large models are
@@ -2654,9 +2735,36 @@ nothing. Both corrected, and `worker.py` now uses `paths.SPOOL_CLAIMED` /
 
 Status: blocked
 Labels: gate, safety, science
-Blocked by: every ticket in Phase A — JEV-16, JEV-17, JEV-25, JEV-27, JEV-28,
-JEV-29, JEV-30, JEV-31, JEV-31b, JEV-32, JEV-34, JEV-35, JEV-36, JEV-43,
-JEV-44, JEV-45, JEV-46, JEV-47, JEV-48, JEV-49, JEV-50, JEV-51
+Blocked by: **every ticket in Phase A**, and as of 2026-09-21 the list below is
+read off the wave table rather than maintained by hand — which is how it came to
+omit six tickets, including two the gate's own steps depend on:
+
+| wave | blockers |
+|---|---|
+| A1 | JEV-30, JEV-31, JEV-31b, JEV-44, JEV-51 |
+| A2 | JEV-16 (Run A), JEV-32, JEV-43, JEV-49 |
+| A3 | JEV-17, JEV-28, JEV-29, **JEV-34** |
+| A4 | JEV-25, JEV-46, JEV-47, **JEV-55** |
+| A5 | JEV-27, JEV-35, JEV-50 |
+| A6 | JEV-36, JEV-37, JEV-39 |
+| A7 | JEV-45, JEV-48, **JEV-56** |
+
+**The six that were missing, and why two of them matter more than bookkeeping:**
+JEV-37, JEV-39, JEV-45, JEV-55 were absent entirely; JEV-12 and JEV-54 were
+absent and have since moved to Phase B, so they are correctly not blockers.
+
+- **JEV-37 is a prerequisite of this ticket's own step 5.** The gate requires a
+  canary baseline sweep recorded before the window opens, and 37 is the ticket
+  that builds the scheduler and wrapper to record it. The gate was blocking on
+  everything except the thing one of its steps runs.
+- **JEV-55 is a prerequisite of this ticket's own step 6.** The amendment must
+  state the primary interval, and 55 is the ticket deciding whether that
+  interval can be computed at all. Amending the pre-registration before 55
+  reports would commit us to a metric we already know is degenerate.
+
+**JEV-34 is `done` but carries one deferred box** — the live spawn-latency
+measurement, which Phase A cannot perform. This gate must not read 34 as fully
+closed: the surface is proven inert, not proven cheap.
 
 **Why this ticket exists.** The operator's constraint is that the system is
 dev-complete before any part of it goes live. A rule in prose is not a gate — an
@@ -2781,9 +2889,21 @@ document owns them:**
 
 ## JEV-54: does Jev do better with richer input? Test it offline before changing the hook
 
-Status: blocked
+Status: blocked — **on spend, not on the instrument**. Wave B1.
 Labels: science, arms, state
-Blocked by: JEV-16 (owns `replay.py`, the instrument this needs)
+Blocked by: ~~JEV-16 (owns `replay.py`, the instrument this needs)~~ — cleared.
+JEV-16 Run A landed and `replay.py` exists, with `--determinism` selection and
+`config_fingerprint` stamping fixed. **The instrument is ready; the sweep is
+not funded.** This ticket postdates the 2026-09-20 spend decision that cut Phase
+A to ~90 calls and it was never costed into it, so it moves to **B1** with the
+other deferred replay sweeps (22, 10, 16 runs B+C) rather than quietly spending
+against a budget that is already committed.
+
+**Partly overtaken by JEV-34.** `agent_route`'s state builder adopted this
+ticket's central argument — use the payload fields already captured and free —
+and cites it in `build_agent_route`. What remains here is the *`pre_bash`*
+question, which is the harder one, because `pre_bash` has a 487-row legacy
+corpus and enriching it forks an era boundary that `agent_route` did not have.
 
 **The question.** Jev currently receives three facts and nothing else. From
 `state_builders.build_pre_bash` (`src/state_builders.py:52-60`):
@@ -2877,7 +2997,8 @@ ride along on an experiment. Recorded here so the idea is not lost.
 
 ## Where richer input actually matters most, and it is not this surface
 
-**`agent_route` (JEV-34, wave A4) has not been built yet.** SWE-Router
+**`agent_route` (JEV-34, wave A3) was built on 2026-09-21 (`652d3e8`) and
+adopted this argument — see the note at the top of this ticket.** SWE-Router
 (arXiv:2607.00053) finds that routing on a task description alone "inherits an
 information-theoretic Bayes-error floor in agentic settings: a similar issue can
 hide either a localized typo or a multi-module refactor, and the prompt does not
@@ -2904,10 +3025,12 @@ rather than smuggled in here.
 
 ## JEV-55: the clustered bootstrap has ONE cluster — the primary interval cannot be computed
 
-Status: ready-for-agent
+Status: ready-for-agent — **leads wave A4**, ahead of JEV-27
 Labels: science, blocking, threat-to-validity
 Blocked by: none. **This gates JEV-27 (power analysis), JEV-52 (the gate) and
-the primary metric itself.**
+the primary metric itself.** Until 2026-09-21 it appeared in **no wave** and in
+**none of JEV-52's blockers**, so the most load-bearing open ticket on the board
+was invisible to anyone reading the execution plan alone. Both are now fixed.
 
 **Measured 2026-09-20, verified directly.**
 
@@ -2992,3 +3115,63 @@ than a footnote.
 - [ ] Naive-vs-clustered intervals published side by side whatever is decided
 - [ ] JEV-27's power analysis re-scoped to size on clusters, not rows
 - [ ] The limitation stated in the abstract, not a footnote
+
+---
+
+## JEV-56: `reversibility.sh` cannot be green on a clean checkout, which is what the gate demands
+
+Status: ready-for-agent
+Labels: defect, gate, safety
+Blocked by: none. **It blocks JEV-52 step 1 as that step is currently worded.**
+
+**Found 2026-09-21** during the board reconciliation, by running the full suite
+from a fresh worktree rather than from the working checkout.
+
+**The contradiction.** JEV-52 step 1 requires the suite green *"from a clean
+checkout, not from a working tree with uncommitted fixes"* — the right instinct,
+and the step that would have caught JEV-42. But `tests/reversibility.sh`
+**cannot** be green on a clean checkout. Four of its 42 gates fail:
+
+```
+FAIL  no .claude/settings.local.json -- the enumeration gate would pass vacuously
+FAIL  no registered hook handlers found -- this gate must not pass on an empty set
+FAIL  the hook did not run with the switch off; 3a would prove nothing (0 captures)
+FAIL  the parked registration is missing or altered
+```
+
+All four have one cause: they need `.claude/settings.local.json`, and that file
+is **gitignored by design** — deliberately, for the reason the README gives, so
+live hooks never travel to a clone or a cloud session. The two requirements are
+individually correct and jointly unsatisfiable.
+
+**Why this is not pedantry.** The four gates are failing *correctly*. Each is a
+guard against passing vacuously on an empty set, which is the discipline this
+repo keeps everywhere else. The defect is in the gate's wording, not the tests.
+As written, step 1 can only be satisfied by hand-copying an ignored file into a
+clean checkout — an undocumented manual step in the middle of the one ceremony
+the board designed to have none.
+
+**It also weakens the proof we actually publish.** `OFF IS PROVEN EQUAL TO
+VANILLA` is currently asserted against *the operator's own registration*, which
+is not the registration a reader cloning this repo would get. That is a smaller
+claim than `docs/REVERSIBILITY.md` implies.
+
+**What to decide** — a wording-and-fixture ticket, not a test rewrite:
+
+- [ ] Define what "clean checkout" means for a repo whose hook registration is
+      intentionally untracked. Most likely: clean checkout **plus a committed
+      fixture registration** the script materialises into a temp dir itself
+- [ ] Commit `config/settings.local.example.json` or equivalent, and have
+      `reversibility.sh` install it when no real registration exists — so the
+      gates test a *known* registration rather than whatever the operator happens
+      to have lying around
+- [ ] Separate the two questions the four gates conflate: *"is a registration
+      present and correct?"* (needs a real file) and *"does OFF equal vanilla?"*
+      (needs only a registration, real or fixture)
+- [ ] Reword JEV-52 step 1 to match, and state the manual step explicitly if one
+      survives
+- [ ] Note in `docs/REVERSIBILITY.md` what the proof is currently made against
+
+**Blocks nothing but the gate.** Every other wave is unaffected; this only has to
+land before JEV-52 runs.
+

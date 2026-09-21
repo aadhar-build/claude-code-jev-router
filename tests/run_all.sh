@@ -98,6 +98,9 @@ echo
 echo "=== seam 2 + 3: pipeline, statistics, report ==="
 guarded "test_pipeline.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_pipeline.py' 2>&1 | tail -4" || exit 1
 echo
+echo "=== the board: the wave plan and the tickets' own blockers must agree ==="
+guarded "test_board.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_board.py' 2>&1 | tail -4" || exit 1
+echo
 echo "=== JEV-34: the agent_route surface -- payload-only state, and NOT armed ==="
 guarded "test_agent_route.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_agent_route.py' 2>&1 | tail -4" || exit 1
 echo
