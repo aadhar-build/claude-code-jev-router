@@ -42,8 +42,25 @@ describes remain readable where tickets reference them.
 | **W3** | **The accuracy gate** — per-task pass/fail, blinded by construction (JEV-29 + JEV-36) | ✅ **done** (`df79e67`) — but it **exits 1 ("could not run")** until JEV-58 lands labels |
 | **W4** | **Jev enters**, aimed at the `general-purpose` residue (65–79%, disputed — see the corpus-size note below). **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3, and JEV-57 |
 | **W5** | **Unstick the gate and produce the first "after".** **06** (the before/after reporter — it has never existed), **57** (ledger `project` field, before a second repo installs), **58** (label `data/labels/`), **59** (re-snapshot under the corrected rule), then **52** — arm it | **THE CRITICAL PATH.** Nothing this project claims has ever been measured, because the actuator has never fired. 58 is the cheapest item and gates everything: without labels the accuracy gate cannot clear Class 1 at all |
-| **W6** | **Context reduction.** Must clear the +337-token / +557ms bar, so it fires only on large payloads | not started |
-| **W7** | **Operate** — canary on a schedule, latency SLO, weekly cost report | not started |
+| **W6** | **Context reduction — PROMOTED 2026-09-21.** Trim oversized tool results at ingestion, and rebuild compaction so it never loses file paths or errors. Must clear the +337-token / +557ms bar, so it fires only on large payloads | **This is the SPEED lever.** The main thread is where the human actually waits; routing delegated tasks cannot move felt latency at all (530× blocking gap). And compaction that loses context causes re-reading, which is rework |
+| **W7** | **Operate** — canary on a schedule, latency SLO, weekly report on rework rate and felt latency | not started |
+
+## The goal, corrected 2026-09-21
+
+> **Speed and avoiding rework.** Cost is a consequence, not the target.
+
+`SPEC.md` §2 is reordered accordingly: **R1 rework rate** is the primary
+criterion, **R2 felt latency** (blocking duration, not task duration) second,
+and realised cost is now **reported rather than gated**.
+
+Two measured facts govern everything downstream:
+
+- **Routing delegated tasks cannot improve felt latency.** Median task duration
+  794.6 s vs median *blocking* duration 1.5 s — 530×, because delegations run
+  in the background. Routing is a cost and rework lever only.
+- **An escalation pays twice, in money and in time**, because operator decision
+  3 is RESTART. So **down-routing is the risky direction** and must be gated
+  harder than up-routing — one wrong downgrade erases many correct ones.
 
 ## Four operator decisions, 2026-09-21
 

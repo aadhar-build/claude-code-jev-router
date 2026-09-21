@@ -93,20 +93,59 @@ a result to publish. The harness stops being the product and becomes the brake.
 
 ## 2. Success criteria
 
-Four numbers. An optimization ships only when all four are satisfied.
+**REORDERED 2026-09-21 on the operator's correction: the goal is SPEED and
+AVOIDING REWORK. Cost is a consequence, not the target.** The previous ordering
+led with token and cost reduction, which measured the wrong thing well.
 
 | # | Criterion | Measured how | Ships if |
 |---|---|---|---|
-| **S1** | **Token reduction** | input tokens per turn and per session, baseline vs treatment on the fixture suite | material reduction, stated with its spread |
-| **S2** | **Wall-clock reduction** | turn latency p50/p95 | no regression; reduction where claimed |
-| **S3** | **Quality non-regression** | the two-class guard in §6 | Class 1 and Class 2 both pass |
-| **S4** | **Net win after the layer's own cost** | Jev call latency + spend, subtracted from S1/S2 | net positive |
+| **R1** | **Rework rate** — how often a task has to be redone | escalations, retries, and task-level failures per delegated task, baseline vs treatment | **no increase.** This is the primary criterion |
+| **R2** | **Felt latency** — time the human actually waits | **blocking** duration p50/p95, measured separately from task duration | no regression; reduction where claimed |
+| **R3** | **Quality non-regression** | the two-class guard in §6, per-task pass/fail | Class 1 and Class 2 both pass |
+| **R4** | **Net win after the layer's own cost** | the layer's added latency and spend, subtracted from R1/R2 | net positive |
+| **R5** | **Realised cost per delegated task** | against the corrected $2.88 anchor (§11) | reported, **not** a gate |
 
-**S4 is not optional and is the criterion most likely to be quietly skipped.**
-The old README already learned this lesson the hard way and published an
-attribution table for it: a layer that saves 5,000 tokens but adds 250ms of
-gateway latency to every tool call has not obviously helped. Every optimization
-reports its own overhead in the same units as its win.
+### Why rework is the primary criterion, and why it is expensive
+
+Operator decision 3 is **RESTART on escalation**: a task sent to a higher tier
+starts from the original task, not from the first attempt's reasoning. So **an
+escalation pays for the work twice — and makes the human wait twice.** One wrong
+downgrade therefore wipes out the saving from many correct ones, and it wipes
+out the *time* saving completely, because the second attempt is serial with the
+first.
+
+That inverts the usual routing intuition: **down-routing is the risky direction
+and must be gated harder than up-routing.** The asymmetric down-route guard
+harvested from `tzachbon/claude-model-router-hook` (§7) is not a refinement, it
+is the core of the policy.
+
+### ⚠️ Routing delegated tasks CANNOT improve felt latency
+
+Measured, W3: median task duration **794.6 s** against median **blocking**
+duration **1.5 s** — a **530×** gap, because every observed delegation is
+`requestShape: background`. **A background subagent could be made twice as fast
+and the human's wait would not move.**
+
+So routing is a **cost** lever and a **rework** lever. It is not a speed lever,
+and no claim that it is one may be made. The speed levers are:
+
+1. **Not doing the work twice** (R1) — a redo costs the whole task again.
+2. **Context reduction on the MAIN thread**, where the human is actually
+   blocked. Fewer input tokens means faster time-to-first-token on the turns
+   that are synchronous with the user. This is why W6 exists and why it is no
+   longer bottom of the list.
+3. **Compaction that does not lose file paths and errors** — when it does, the
+   agent re-reads and re-derives, which *is* rework. It is the exact failure
+   `fast-jev-compaction` demonstrated by fabricating nine turns of completed
+   work (§5).
+
+### R4 is not optional and is the criterion most likely to be quietly skipped
+
+The old README learned this the hard way and published an attribution table for
+it: a layer that saves 5,000 tokens but adds 250 ms to every tool call has not
+obviously helped. `FINDINGS.md:563` is the measured version — a synchronous gate
+adds **+337 tokens and +557 ms per call and removes nothing**. Every
+optimization reports its own overhead in the same units as its win.
 
 ### What we explicitly do not claim
 
