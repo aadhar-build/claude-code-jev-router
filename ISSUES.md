@@ -3149,7 +3149,30 @@ guard against passing vacuously on an empty set, which is the discipline this
 repo keeps everywhere else. The defect is in the gate's wording, not the tests.
 As written, step 1 can only be satisfied by hand-copying an ignored file into a
 clean checkout — an undocumented manual step in the middle of the one ceremony
-the board designed to have none.
+the board designed to have none. **This was confirmed by search, not assumed:
+`reversibility.sh` has no fixture-materialisation path for the registration.**
+Section 0 hard-fails at `tests/reversibility.sh:67-69` when the file is absent,
+and nothing anywhere synthesises a stand-in.
+
+**A second, smaller defect found in the same pass.** The sandbox build does:
+
+```sh
+cp "$LIVE_SETTINGS" "$SANDBOX/.claude/settings.local.json" 2>/dev/null
+```
+
+`tests/reversibility.sh:257`. On a clean checkout that copy **fails silently**
+and sections 2–5 then run against a sandbox with no registration at all — which
+is why the failures cascade into gates 3a and the parked-registration check
+rather than stopping at section 0. A missing input should be a loud failure at
+the point of copying, not a quiet one three sections later.
+
+**The fix is already idiomatic here — follow the actuator fixture.**
+`tests/reversibility.sh:450-455` builds a hook of the shape JEV-35 will register
+and carries the canonical switch block *"EXTRACTED FROM THE REAL HOOK rather
+than retyped, so this fixture and the shipped hooks cannot drift apart."* That
+is exactly the pattern the registration needs: a fixture derived from the real
+artefact rather than a second copy of it that can rot. This ticket is applying
+an existing convention to the one input that was missed, not inventing one.
 
 **It also weakens the proof we actually publish.** `OFF IS PROVEN EQUAL TO
 VANILLA` is currently asserted against *the operator's own registration*, which

@@ -122,6 +122,50 @@ class TestTheBoardIsInternallyConsistent(unittest.TestCase):
         )
         self.assertGreaterEqual(len(self.sections), 50)
 
+    def test_the_edge_parser_finds_the_edges_we_checked_by_hand(self) -> None:
+        """The guard `_live_edges` needs and did not have.
+
+        `_live_edges` keeps the head of the `Blocked by:` line, cutting at the
+        first em-dash or sentence break. That heuristic is why the multi-blocker
+        lines survive -- they happen to have no sentence break before their last
+        blocker. "Happen to" is not a property; a blocker line written in a new
+        style would silently parse to zero edges and every scheduling assertion
+        below would pass by checking nothing.
+
+        So the multi-blocker tickets verified by hand during the 2026-09-21
+        reconciliation are pinned here. If the parser stops seeing these, it has
+        stopped seeing edges generally, and it says so instead of going quiet.
+
+        Recorded honestly: the first version of THIS test failed, and the
+        parser was right and the hand-written expectations were wrong. JEV-23
+        really does declare ten blockers and JEV-27 really does declare three.
+        The sets below were then read off the file rather than recalled, which
+        is the only way a fixture like this is worth anything.
+        """
+        expected = {
+            # ten blockers over five wrapped lines, two of them repeated
+            "JEV-23": {"52", "34", "35", "36", "24a", "27", "28", "29", "46", "47"},
+            # five blockers, wrapped, mixing bold and plain
+            "JEV-53": {"12", "23", "50", "48", "52"},
+            # bolded blockers with parentheticals, wrapped mid-parenthetical
+            "JEV-27": {"38", "49", "46"},
+            # the simplest possible line
+            "JEV-36": {"35"},
+            # one blocker followed by a second sentence that must NOT be read
+            "JEV-12": {"10"},
+        }
+        for ticket, want in expected.items():
+            with self.subTest(ticket=ticket):
+                bm = BLOCKED_RE.search(self.sections[ticket])
+                self.assertIsNotNone(bm, f"{ticket} has no parseable Blocked by:")
+                got = set(_live_edges(bm.group(1)))
+                self.assertEqual(
+                    want, got,
+                    f"{ticket}: parser found {sorted(got)}, expected "
+                    f"{sorted(want)} -- the Blocked by: style changed and "
+                    "_live_edges no longer reads it",
+                )
+
     def test_every_ticket_has_a_recognised_status(self) -> None:
         for name, blob in self.sections.items():
             with self.subTest(ticket=name):
