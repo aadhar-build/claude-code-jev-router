@@ -43,7 +43,7 @@ describes remain readable where tickets reference them.
 | **W4** | **Jev enters**, aimed at the `general-purpose` residue (65–79%, disputed — see the corpus-size note below). **Ship gate: beat the static rule on realised cost at equal task success, or we keep the rule** | blocked on W0, W1, W3, and JEV-57 |
 | **W5** | **Unstick the gate and produce the first "after".** **06** (the before/after reporter — it has never existed), **57** (ledger `project` field, before a second repo installs), **58** (label `data/labels/`), **59** (re-snapshot under the corrected rule), then **52** — arm it | **THE CRITICAL PATH.** Nothing this project claims has ever been measured, because the actuator has never fired. 58 is the cheapest item and gates everything: without labels the accuracy gate cannot clear Class 1 at all |
 | **W6** | **Context reduction — PROMOTED 2026-09-21.** Trim oversized tool results at ingestion, and rebuild compaction so it never loses file paths or errors. Must clear the +337-token / +557ms bar, so it fires only on large payloads | **This is the SPEED lever.** The main thread is where the human actually waits; routing delegated tasks cannot move felt latency at all (530× blocking gap). And compaction that loses context causes re-reading, which is rework |
-| **W7** | **Operate** — canary on a schedule, latency SLO, weekly report on rework rate and felt latency | not started |
+| **W7** | **Operate** — canary on a schedule, latency SLO, weekly report on rework rate and felt latency; **60** (observer hooks still drop captures silently), **61** (`doctor.py` blind to the INERT marker) | not started. 60 and 61 are W5's deliberately-left residuals, each with its reasoning recorded on the ticket |
 
 ## The goal, corrected 2026-09-21
 
@@ -3595,3 +3595,58 @@ baseline leaves the wrong numbers in place indefinitely, looking current.
 - [ ] One-off forced re-snapshot under the corrected rule
 - [ ] Anything quoting the manifest's totals (the "34% addressable" figure came
       from here) re-derived
+
+---
+
+## JEV-60: the observer hooks still drop captures silently on a symlinked or trailing-slash project dir
+
+Status: ready-for-agent
+Labels: defect, silent-loss
+Blocked by: none. **Residual deliberately left by W5 (`ca8ae71`), with its reasoning.**
+
+W5 fixed this on `hooks/agent_route_actuator.sh` by resolving both sides with
+`pwd -P`. **`hooks/capture.sh` and `hooks/inline_shadow_bash.sh` still use the
+byte comparison**, so a `CLAUDE_PROJECT_DIR` with a trailing slash, or reached
+through a symlink, makes the cwd guard never match and **every capture on those
+surfaces is dropped with no record at all**.
+
+**Why it was left, and the reasoning is sound:** the fix costs two more
+subshells on `capture.sh`, which is the only hook on a genuinely hot critical
+path (`5.37ms → 6.48ms` was already spent on the global switch against a 10ms
+budget), and a capture miss is **attrition** rather than a treatment/control
+collapse — unlike the actuator, where the same defect made treatment
+byte-identical to control.
+
+**Why it is still a ticket:** it is a silent loss, and this repository has now
+been bitten five times by failures that look exactly like success. Attrition
+that leaves no trace is indistinguishable from "nothing happened".
+
+- [ ] Decide: pay the two subshells, or resolve once and cache, or accept and
+      make the miss **loud** rather than silent
+- [ ] Whatever is chosen, a dropped capture must leave a record
+- [ ] Measure the critical-path cost of the fix against the 10ms budget and
+      state it in the hook header, as W5 did for the switch
+
+---
+
+## JEV-61: `doctor.py` does not know about the INERT marker
+
+Status: ready-for-agent
+Labels: defect, ops, small
+Blocked by: none. **Residual from W5 (`ca8ae71`).**
+
+W5 introduced a sticky `INERT` marker for the actuator paths that can neither
+route nor record. `src/doctor.py` reads `BREAKER-OPEN` and knows nothing about
+it, so the one command whose job is to report the tool's state will report a
+healthy system while the actuator is inert.
+
+**Design note to preserve, decided by W5 rather than left implicit:** `INERT`
+deliberately does **not** self-clear the way `BREAKER-OPEN` does. The breaker's
+state is derived from a log that keeps being written; an inert hook writes no
+decisions, so no later event could honestly clear it. **A stale false alarm
+beats a false negative here.** If symmetry is ever wanted, one `rm -f` after a
+successful ledger append provides it — but that is a decision, not a cleanup.
+
+- [ ] `doctor.py` reports `INERT`, with the marker's age and the recorded cause
+- [ ] It must be distinguishable from `BREAKER-OPEN` in the output — they mean
+      different things and have different remedies
