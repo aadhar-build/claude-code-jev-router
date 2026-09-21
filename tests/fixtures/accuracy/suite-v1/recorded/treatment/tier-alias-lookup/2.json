@@ -1,0 +1,9 @@
+{
+  "status": "timeout",
+  "tests_passed": true,
+  "tier": "cheap",
+  "cost_usd": 0.0024,
+  "task_duration_s": 47.8,
+  "blocking_duration_s": 0.6,
+  "diff": ""
+}

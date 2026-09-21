@@ -1,0 +1,9 @@
+{
+  "rule_violations": [],
+  "dimensions": {
+    "correctness": 8.0,
+    "changeability": 7.5,
+    "modularity": 7.0,
+    "tests": 7.0
+  }
+}

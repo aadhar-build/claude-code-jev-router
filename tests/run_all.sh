@@ -110,6 +110,9 @@ echo
 echo "=== JEV-35 / W1: the actuator at the hook's process boundary (no network, no spend) ==="
 guarded "test_agent_actuator.sh" bash -c "set -o pipefail; '$ROOT/tests/test_agent_actuator.sh' | tail -3" || exit 1
 echo
+echo "=== JEV-29 + JEV-36 / W3: the accuracy gate -- both classes, and 1 never reads as 0 ==="
+guarded "test_accuracy_gate.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_accuracy_gate.py' 2>&1 | tail -4" || exit 1
+echo
 echo "=== JEV-32: analysis joins rows to the config THEY ran under, and never pools ==="
 guarded "test_analyze_config_join.py" bash -c "set -o pipefail; \"$JEV_PY\" '$ROOT/tests/test_analyze_config_join.py' 2>&1 | tail -4" || exit 1
 echo

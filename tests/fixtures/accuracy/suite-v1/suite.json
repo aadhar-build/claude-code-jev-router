@@ -1,0 +1,129 @@
+{
+  "suite_id": "accuracy-suite-v1",
+  "_comment": "SPEC \u00a76 Class 2 fixture suite. 12 self-contained tasks, k=3 seeds per arm, paired on task. THESE FIXTURES ARE SYNTHETIC: the diffs and outcomes were written by hand to exercise the scorer, NOT mined from real transcripts. Mining real transcripts (abide's reader, used for task mining and never for scoring) is future work and is stated as such in .scratch/pivot/w3-accuracy-gate.md. Nothing here has ever been re-executed -- agent_route is mode:\"off\".",
+  "synthetic": true,
+  "provenance": "hand-written 2026-09-21; not mined from transcripts; never re-executed",
+  "seeds": 3,
+  "tasks": [
+    {
+      "id": "add-retry-backoff",
+      "target_file": "src/client.py",
+      "prompt": "The HTTP client retries immediately on 429. Add exponential backoff.",
+      "acceptance_note": "A function named retry_with_backoff exists and the sleep interval grows between attempts.",
+      "must_contain": [
+        "retry_with_backoff"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "fix-off-by-one-slice",
+      "target_file": "src/window.py",
+      "prompt": "last_n() drops the final element. Fix the slice.",
+      "acceptance_note": "The slice includes the final element.",
+      "must_contain": [
+        "values[start:end + 1]"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "guard-empty-input",
+      "target_file": "src/summarise.py",
+      "prompt": "summarise() divides by len(rows) and raises on an empty list. Guard it.",
+      "acceptance_note": "An explicit empty-input guard precedes the division.",
+      "must_contain": [
+        "if not rows:"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "dedupe-config-keys",
+      "target_file": "src/conf.py",
+      "prompt": "load_config() silently keeps duplicate keys. Reject them.",
+      "acceptance_note": "Duplicate keys are detected via a seen-set and reported.",
+      "must_contain": [
+        "seen: set[str]"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "normalise-timestamps",
+      "target_file": "src/clock.py",
+      "prompt": "Timestamps ending in Z fail to parse. Normalise before fromisoformat.",
+      "acceptance_note": "The Z suffix is rewritten to a numeric UTC offset.",
+      "must_contain": [
+        "replace(\"Z\", \"+00:00\")"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "exit-code-not-collapsed",
+      "target_file": "src/gate.py",
+      "prompt": "The gate returns 0 when it could not run. Give 'could not run' its own code.",
+      "acceptance_note": "A distinct non-zero exit code exists for the could-not-run case.",
+      "must_contain": [
+        "EXIT_COULD_NOT_RUN = 1"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "csv-quote-escaping",
+      "target_file": "src/export.py",
+      "prompt": "Embedded quotes corrupt the CSV export. Escape them.",
+      "acceptance_note": "Double quotes inside a field are doubled.",
+      "must_contain": [
+        "value.replace('\"', '\"\"')"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "cache-ttl-split",
+      "target_file": "src/price.py",
+      "prompt": "Cache-write tokens are priced at one multiplier. Split 5m from 1h.",
+      "acceptance_note": "The 1h cache-write tokens are priced separately from the 5m ones.",
+      "must_contain": [
+        "cache_creation_1h_input_tokens"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "path-traversal-guard",
+      "target_file": "src/serve.py",
+      "prompt": "The static handler serves ../ paths. Confine it to the root.",
+      "acceptance_note": "The resolved path is asserted to sit under the served root.",
+      "must_contain": [
+        "resolve().is_relative_to("
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "idempotent-append",
+      "target_file": "src/ledger.py",
+      "prompt": "Concurrent writers interleave and corrupt rows. Make the append atomic.",
+      "acceptance_note": "The write uses an append-mode file descriptor.",
+      "must_contain": [
+        "O_APPEND"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "clamp-probability",
+      "target_file": "src/score.py",
+      "prompt": "Probabilities outside [0,1] reach the threshold comparison. Clamp them.",
+      "acceptance_note": "The probability is clamped to the unit interval.",
+      "must_contain": [
+        "max(0.0, min(1.0,"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "id": "tier-alias-lookup",
+      "target_file": "src/router.py",
+      "prompt": "The router hardcodes a model id. Resolve it through the alias table.",
+      "acceptance_note": "The model id comes from the alias table rather than a literal.",
+      "must_contain": [
+        "aliases.get(tier)"
+      ],
+      "must_not_contain": []
+    }
+  ]
+}
