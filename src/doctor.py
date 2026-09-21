@@ -56,6 +56,7 @@ COMMITTABLE_DATA_PATHS = {
     "data/baseline/sessions.jsonl",
     "data/baseline/manifest.json",
     "data/baseline/delegation-pre-rule-v1.json",
+    "data/baseline/delegation-pre-rule-v1-corrected.json",
 }
 
 results: list[tuple[str, str, str]] = []

@@ -13,6 +13,7 @@ records its own provenance and its own unknowns.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -32,7 +33,9 @@ pyversion.require()
 
 
 import baseline as bl  # noqa: E402
+import config_loader as cl  # noqa: E402
 import paths  # noqa: E402
+import session_metrics as sm  # noqa: E402
 
 
 def rows() -> list[dict]:
@@ -57,6 +60,9 @@ class TestPathsRegistration(unittest.TestCase):
         self.assertIn("data/*", body)
         self.assertNotIn("\ndata/\n", body)
         self.assertIn("!data/baseline/sessions.jsonl", body)
+        # The corrected companion is committed for the same reason and would be
+        # silently orphaned by a stray edit above it.
+        self.assertIn("!data/baseline/delegation-pre-rule-v1-corrected.json", body)
 
 
 class TestSnapshotIsIdempotent(unittest.TestCase):
@@ -241,6 +247,214 @@ class TestDelegationBaseline(unittest.TestCase):
         w = self.rec["transcript_window"]
         self.assertEqual(w["cut_utc"], bl.Q17B_CUT_UTC)
         self.assertIn("first_request_utc", w)
+
+
+class TestTheCompletedCopyIsTheOneThatCounts(unittest.TestCase):
+    """The defect: `baseline.requests()` kept the FIRST copy of a duplicated
+    request and never read `usage.iterations[]`.
+
+    Claude Code writes one `(requestId, message.id)` up to nine times as a turn
+    streams. The early copies are placeholders carrying `input_tokens: 2`; the
+    completed breakdown arrives only in the last. Keeping the first keeps the
+    placeholder and throws the turn away -- and all 48 keys that grow across
+    their copies in this repo's corpus are inside SUBAGENT transcripts, so the
+    loss lands on the delegated side, which is the numerator of the one rate
+    the JEV-24a record exists to publish. Measured over the whole corpus the
+    two rules gave $105.09 against $171.94.
+
+    Shape below is fabricated to the measured pattern; no transcript content is
+    copied into this repo.
+    """
+
+    INPUT_RATE = 5e-06
+    OUTPUT_RATE = 2.5e-05
+
+    def _transcript(self) -> Path:
+        def row(usage):
+            return {"type": "assistant", "requestId": "req_s", "isSidechain": True,
+                    "timestamp": "2026-09-20T05:36:08Z",
+                    "message": {"role": "assistant", "id": "msg_s",
+                                "model": "claude-opus-5", "content": [], "usage": usage}}
+        placeholder = {"input_tokens": 2, "output_tokens": 0,
+                       "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+        completed = {"input_tokens": 4, "output_tokens": 691,
+                     "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                     "iterations": [{"input_tokens": 2, "output_tokens": 26},
+                                    {"input_tokens": 133139, "output_tokens": 350},
+                                    {"input_tokens": 2, "output_tokens": 315}]}
+        fh = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False)
+        for usage in (placeholder, placeholder, completed):
+            fh.write(json.dumps(row(usage)) + "\n")
+        fh.close()
+        self.addCleanup(lambda: Path(fh.name).unlink(missing_ok=True))
+        return Path(fh.name)
+
+    def test_three_copies_are_one_request(self):
+        reqs = list(bl.requests(self._transcript()))
+        self.assertEqual(len(reqs), 1)
+        self.assertTrue(reqs[0]["delegated"])
+        self.assertTrue(reqs[0]["priced"])
+
+    def test_the_cost_is_the_completed_copy_not_the_placeholder(self):
+        expected = 133143 * self.INPUT_RATE + 691 * self.OUTPUT_RATE
+        reqs = list(bl.requests(self._transcript()))
+        self.assertAlmostEqual(reqs[0]["cost_usd"], expected, places=9)
+
+    def test_the_quarantined_v1_rule_would_have_said_two_tokens(self):
+        """The bug this replaces, stated as a number so it cannot come back."""
+        legacy = list(bl.legacy_v1_requests(self._transcript()))
+        self.assertEqual(len(legacy), 1)
+        self.assertAlmostEqual(legacy[0]["cost_usd"], 2 * self.INPUT_RATE, places=9)
+        self.assertLess(legacy[0]["cost_usd"],
+                        list(bl.requests(self._transcript()))[0]["cost_usd"])
+
+    def test_the_production_path_does_not_use_the_quarantined_rule(self):
+        source = (ROOT / "src" / "baseline.py").read_text()
+        walk = source[source.index("def per_session_pre_cut"):
+                      source.index("def delegation_baseline_corrected")]
+        self.assertNotIn("legacy_v1_requests(path)", walk)
+
+
+class TestTheTwoModulesMayNotDiverge(unittest.TestCase):
+    """Two costing rules that must agree cannot be two pieces of code.
+
+    `baseline.requests` is now a projection of
+    `session_metrics.billable_requests`; this fails the moment somebody gives
+    baseline.py its own walk again. The identity asserted is the strongest one
+    available: per-request costs summed must equal the session-level total,
+    which `call_cost` makes exact because it is linear in tokens.
+    """
+
+    def _frozen_copy(self, path: Path) -> Path:
+        """Copy one session's files -- main transcript plus `subagents/` -- to a
+        temp dir so both passes read the SAME BYTES.
+
+        The corpus is live. `run_all.sh` deliberately runs while sessions are
+        being written (see its header), so a request appended between the two
+        reads would surface as a divergence that is not one. This test must go
+        red for exactly one reason: the two rules disagreeing.
+        """
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        dest = tmp / path.name
+        shutil.copy2(path, dest)
+        subs = path.with_suffix("") / "subagents"
+        if subs.is_dir():
+            out = dest.with_suffix("") / "subagents"
+            out.mkdir(parents=True)
+            for f in sorted(subs.glob("*.jsonl")):
+                shutil.copy2(f, out / f.name)
+        return dest
+
+    def _session_total_excluding_web_search(self, path: Path) -> float:
+        m = sm.analyse(path)
+        web = (m.web_search_requests or 0) * cl.pricing()["web_search_usd_per_request"]
+        return m.computed_cost_usd - web
+
+    def test_requests_is_a_projection_of_the_shared_helper(self):
+        source = (ROOT / "src" / "baseline.py").read_text()
+        body = source[source.index("def requests(path: Path)"):
+                      source.index("def legacy_v1_requests")]
+        self.assertIn("sm.billable_requests(path)", body)
+        for reimplemented in ("dedupe_key(", "normalise_usage(", "merge_copies(",
+                              "seen: set", "cl.cost_usd("):
+            self.assertNotIn(reimplemented, body,
+                             "baseline.py is re-implementing a session_metrics rule; "
+                             "that is exactly how the two diverged the first time")
+
+    def test_per_request_costs_sum_to_the_session_total_on_a_fixture(self):
+        fixture = TestTheCompletedCopyIsTheOneThatCounts()
+        fixture.addCleanup = lambda fn: None
+        path = fixture._transcript()
+        try:
+            total = sum(r["cost_usd"] for r in bl.requests(path))
+            self.assertAlmostEqual(total, self._session_total_excluding_web_search(path),
+                                   places=9)
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_per_request_costs_sum_to_the_session_total_on_the_real_corpus(self):
+        found = bl.transcripts()
+        if not found:
+            self.skipTest("no transcripts for this project on disk")
+        checked = 0
+        for live in found:
+            path = self._frozen_copy(live)
+            reqs = list(bl.requests(path))
+            if not reqs:
+                continue
+            if any(not r["priced"] for r in reqs):
+                # An unpriced model contributes 0 on both sides, but it also
+                # means the session total is a partial. Skip rather than assert
+                # an identity that is true for the wrong reason.
+                continue
+            checked += 1
+            self.assertAlmostEqual(
+                sum(r["cost_usd"] for r in reqs),
+                self._session_total_excluding_web_search(path),
+                # session_metrics rounds its session total to 6 places, so the
+                # tolerance is that rounding and nothing more. A real divergence
+                # between the two rules is cents to dollars, not 5e-7.
+                delta=2e-6,
+                msg=f"{live.name}: baseline.py and session_metrics.py disagree",
+            )
+        if not checked:
+            self.skipTest("no fully priced session on disk")
+
+
+class TestTheFrozenRecordIsImmutable(unittest.TestCase):
+    """The frozen record is the only 'before' the project has. Finding a defect
+    in how it was computed is exactly the moment somebody reaches for --force."""
+
+    def test_force_is_refused_rather_than_honoured(self):
+        if not bl.DELEGATION.exists():
+            self.skipTest("delegation baseline not frozen yet")
+        before = bl.DELEGATION.read_text()
+        with self.assertRaises(RuntimeError):
+            bl.delegation_baseline(force=True)
+        self.assertEqual(bl.DELEGATION.read_text(), before)
+
+
+class TestCorrectedCompanion(unittest.TestCase):
+    """The correction is published beside the frozen record, never over it."""
+
+    def setUp(self):
+        if not bl.CORRECTED.exists():
+            self.skipTest("corrected companion not written yet")
+        self.rec = json.loads(bl.CORRECTED.read_text())
+
+    def test_it_names_the_rule_that_produced_it(self):
+        self.assertEqual(self.rec["costing_rule"]["name"],
+                         "session_metrics.billable_requests")
+        self.assertEqual(self.rec["costing_rule"]["dedupe_key"],
+                         "(requestId, message.id)")
+
+    def test_it_preserves_the_frozen_record_rather_than_replacing_it(self):
+        self.assertTrue(bl.DELEGATION.exists())
+        self.assertEqual(self.rec["supersedes_for_analysis"], bl.DELEGATION.name)
+        self.assertIsNotNone(self.rec["as_frozen"]["all_sessions"])
+
+    def test_it_uses_the_same_cut_as_the_frozen_record(self):
+        self.assertEqual(self.rec["cut"]["timestamp_utc"], bl.Q17B_CUT_UTC)
+        self.assertTrue(self.rec["cut"]["same_cut_as_frozen"])
+
+    def test_both_sides_of_the_rate_are_recomputed(self):
+        old = self.rec["frozen_rule_today"]["interactive_sessions_only"]
+        new = self.rec["corrected"]["interactive_sessions_only"]
+        self.assertGreater(new["delegated_cost_usd"], old["delegated_cost_usd"])
+        self.assertGreater(new["main_session_cost_usd"], old["main_session_cost_usd"])
+        self.assertGreater(new["delegation_rate_by_spend"],
+                           old["delegation_rate_by_spend"])
+
+    def test_it_is_labelled_a_lower_bound(self):
+        self.assertIn("LOWER BOUND", self.rec["lower_bound"])
+        self.assertIn("27.6", self.rec["lower_bound"])
+
+    def test_it_records_the_corpus_it_actually_read(self):
+        """paths.ROOT is the worktree when this runs from one, and the slug
+        Claude Code keys transcripts on would then be a near-empty corpus."""
+        self.assertIn("transcript_dir", self.rec["corpus"])
+        self.assertIn("project_root", self.rec["corpus"])
 
 
 if __name__ == "__main__":

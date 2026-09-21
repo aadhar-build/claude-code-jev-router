@@ -47,6 +47,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import re
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -63,6 +65,12 @@ import store  # noqa: E402
 SESSIONS = paths.BASELINE / "sessions.jsonl"
 MANIFEST = paths.BASELINE / "manifest.json"
 DELEGATION = paths.BASELINE / "delegation-pre-rule-v1.json"
+# The corrected companion. The frozen v1 record above STAYS -- it is the
+# pre-registered artifact and several things depend on its being immutable --
+# but it was computed under a defective request rule, so it is no longer the
+# file analysis should read. This one is, and it carries both numbers plus the
+# reason they differ. See `delegation_baseline_corrected`.
+CORRECTED = paths.BASELINE / "delegation-pre-rule-v1-corrected.json"
 
 SCHEMA_VERSION = "baseline-v1"
 
@@ -149,9 +157,49 @@ def retention_finding() -> dict[str, Any]:
 # Corpus
 # ---------------------------------------------------------------------------
 
+BASELINE_PROJECT_ENV = "JEV_BASELINE_PROJECT"
+
+
+def baseline_project_root() -> Path:
+    """Which project's transcripts this module reads, defaulting to this one.
+
+    Claude Code keys both `~/.claude/projects/<slug>/` and the `project` field
+    of `~/.claude/history.jsonl` on the working directory's absolute path. A
+    GIT WORKTREE has a different absolute path, so running this module from
+    `.claude/worktrees/<name>` silently reads a different, near-empty corpus
+    and produces a baseline of zeros that looks like a finished answer. That is
+    not a hypothetical: the corrected companion was computed from a worktree.
+
+    `$JEV_BASELINE_PROJECT` names the project root to read instead, and BOTH
+    the transcript directory and the prompt-index filter are derived from it,
+    so the two can never point at different projects. Whatever it resolves to
+    is recorded in every artifact this module writes.
+    """
+    override = os.environ.get(BASELINE_PROJECT_ENV)
+    return Path(override).resolve() if override else paths.ROOT
+
+
 def project_dir() -> Path:
-    slug = str(paths.ROOT).replace("/", "-")
-    return paths.CLAUDE_PROJECTS / slug
+    """Claude Code's transcript directory for this project.
+
+    The slug replaces EVERY non-alphanumeric character with a dash, not just
+    `/`. The old `replace("/", "-")` is right for a path made of letters,
+    digits and slashes and wrong for any other -- `.claude/worktrees/x` maps to
+    `--claude-worktrees-x`, and the naive slug looked for `-.claude-...`, found
+    nothing, and reported an empty corpus rather than an error. An empty corpus
+    is the dangerous failure here: it produces a baseline of zeros that looks
+    like a finished answer.
+
+    The naive form is still tried as a fallback so an existing directory
+    written under it is not orphaned.
+    """
+    root = str(baseline_project_root())
+    slug = re.sub(r"[^a-zA-Z0-9]", "-", root)
+    candidate = paths.CLAUDE_PROJECTS / slug
+    if candidate.is_dir():
+        return candidate
+    legacy = paths.CLAUDE_PROJECTS / root.replace("/", "-")
+    return legacy if legacy.is_dir() else candidate
 
 
 def transcripts() -> list[Path]:
@@ -198,14 +246,54 @@ def requests(path: Path) -> Iterator[dict[str, Any]]:
     """One record per DEDUPLICATED billable request, carrying its timestamp and
     whether it ran inside a subagent.
 
+    **This function owns no counting rules.** It is a thin projection of
+    `session_metrics.billable_requests`, which is the one place the dedupe key,
+    the `iterations[]` asymmetry, the keep-the-COMPLETED-copy rule and the
+    cache-write TTL split are written down. It used to own its own walk, and
+    that is exactly how the two diverged: it deduped on `requestId` alone, kept
+    the FIRST copy -- the `input_tokens: 2` placeholder -- and never read
+    `usage.iterations[]`. Over this repo's corpus that understated delegated
+    spend by 38.9% ($105.09 against $171.94), because all 48 growing keys sit
+    inside subagent transcripts. `tests/test_baseline.py` now fails the moment
+    the two rules disagree again.
+
     `session_metrics.analyse` aggregates a whole session, which is the wrong
     granularity for JEV-24a: the "delegate where possible" rule was adopted
     *mid-session* in the only real work session this repo has, so a
     session-level cut is meaningless here. See `cut_note` in the frozen record.
 
-    Dedupe is by `requestId` across the main transcript AND its subagents
-    together, and `usage.iterations[]` is never read -- the two double-counting
-    hazards `session_metrics` documents.
+    A model absent from `config/pricing.json` prices as None upstream. It is
+    projected to 0.0 here with `priced=False` beside it, so an unpriced request
+    contributes to neither numerator nor denominator and is still countable.
+    """
+    for record in sm.billable_requests(path):
+        yield {
+            "ts": record["ts"],
+            "model": record["model"],
+            "cost_usd": record["cost_usd"] if record["priced"] else 0.0,
+            "priced": record["priced"],
+            "delegated": record["delegated"],
+        }
+
+
+def legacy_v1_requests(path: Path) -> Iterator[dict[str, Any]]:
+    """QUARANTINED. The defective rule `delegation-pre-rule-v1.json` was frozen
+    under. Nothing in the production path may call this.
+
+    It is kept for one purpose only: the corrected companion has to say what
+    the frozen rule yields *today*, so that the movement between the frozen
+    file and the corrected one can be split into the part caused by the rule
+    and the part caused by `config/pricing.json` drifting underneath it
+    (`pricing-2026-09-20` -> `-20b` priced `claude-opus-4-7`, which had been
+    counted as unpriced). Without this, the two effects are one number and
+    neither is attributable.
+
+    Its three defects, named so nobody restores it by accident:
+      1. dedupes on `requestId` alone, not the `(requestId, message.id)` pair;
+      2. keeps the FIRST copy of a duplicated request -- the streaming
+         placeholder carrying `input_tokens: 2` -- instead of the completed one;
+      3. never reads `usage.iterations[]`, and prices cache writes at one flat
+         multiplier rather than splitting 5-minute from 1-hour TTL.
     """
     seen: set[str] = set()
     for line in sm._lines(path):
@@ -224,9 +312,6 @@ def requests(path: Path) -> Iterator[dict[str, Any]]:
             "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
         }
         model = message.get("model") or "unknown"
-        # A model absent from config/pricing.json prices as None, NOT as zero.
-        # `claude-opus-4-7` is unpriced on this corpus, and coercing it to 0.0
-        # would silently shrink the denominator of every rate below.
         cost = cl.cost_usd(model, bucket)
         yield {
             "ts": sm._parse_ts(line.get("timestamp")),
@@ -296,7 +381,7 @@ def prompt_index() -> list[dict[str, Any]]:
             row = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if row.get("project") != str(paths.ROOT):
+        if row.get("project") != str(baseline_project_root()):
             continue
         ts = row.get("timestamp")
         out.append({
@@ -514,32 +599,25 @@ def snapshot() -> dict[str, Any]:
 # JEV-24a
 # ---------------------------------------------------------------------------
 
-def delegation_baseline(force: bool = False) -> dict[str, Any]:
-    """The pre-rule delegation baseline: the fraction of spend that was
-    delegated to subagents BEFORE the "delegate where possible" rule.
+def per_session_pre_cut(
+    request_fn: Any = None,
+) -> list[dict[str, Any]]:
+    """Per-session pre-cut figures, under whichever request rule is handed in.
 
-    Cut at `Q17B_CUT_UTC`, at REQUEST level rather than session level -- see
-    `requests()` for why the session-level cut the ticket describes does not
-    work on this corpus.
+    Factored out of `delegation_baseline` so the corrected companion computes
+    NUMERATOR AND DENOMINATOR over the same window, the same sessions and the
+    same code -- only the per-request rule changes. A corrected rate whose two
+    halves came from different passes is not a corrected rate.
 
-    Two measures, because they answer different questions and can disagree
-    sharply. `by_spend` is the one A2.6 registers ("the fraction of spend that
-    was delegated"). `by_task_count` needs a denominator and none is
-    self-evident, so all three raw counts are frozen and the chosen denominator
-    is named rather than implied.
+    `request_fn` defaults to `requests` (the shared, canonical rule). The only
+    other legitimate argument is `legacy_v1_requests`, and only for the
+    side-by-side inside the companion.
     """
-    # FROZEN means frozen. The cost side is computed through
-    # config/pricing.json, so the day JEV-28 reconciles Fable's rates a re-run
-    # would silently move a number the pre-registration treats as fixed. The
-    # file is written once and thereafter refuses to be overwritten without
-    # --force, and it stamps the pricing version it was computed under.
-    if DELEGATION.exists() and not force:
-        return json.loads(DELEGATION.read_text())
-
+    fn = request_fn or requests
     cut = _cut()
     per_session = []
     for path in transcripts():
-        reqs = [r for r in requests(path) if r["ts"] and r["ts"] < cut]
+        reqs = [r for r in fn(path) if r["ts"] and r["ts"] < cut]
         tasks = [t for t in delegated_tasks(path)
                  if t["started_at"] and datetime.fromisoformat(t["started_at"]) < cut]
         prompts = [r for r in prompt_index()
@@ -558,33 +636,74 @@ def delegation_baseline(force: bool = False) -> dict[str, Any]:
             "first_request_utc": min((r["ts"] for r in reqs), default=None),
             "last_request_utc": max((r["ts"] for r in reqs), default=None),
         })
+    return per_session
 
-    def totals(rows: list[dict[str, Any]]) -> dict[str, Any]:
-        main = sum(r["main_cost_usd"] for r in rows)
-        deleg = sum(r["delegated_cost_usd"] for r in rows)
-        tasks = sum(r["delegated_tasks"] for r in rows)
-        prompts = sum(r["human_prompts"] for r in rows)
-        total = main + deleg
-        unpriced = sum(r["unpriced_requests_pre_cut"] for r in rows)
-        return {
-            "sessions": len(rows),
-            "unpriced_requests": unpriced,
-            "unpriced_models": sorted({m for r in rows for m in r["unpriced_models_pre_cut"]}),
-            "unpriced_note": (
-                "requests on a model absent from config/pricing.json contribute "
-                "0 to both numerator and denominator of the by-spend rate. They "
-                "are counted here rather than hidden."
-            ),
-            "main_session_cost_usd": round(main, 6),
-            "delegated_cost_usd": round(deleg, 6),
-            "total_cost_usd": round(total, 6),
-            "delegated_tasks": tasks,
-            "human_prompts": prompts,
-            "delegation_rate_by_spend": round(deleg / total, 6) if total else None,
-            "delegation_rate_by_task_count": (
-                round(tasks / (tasks + prompts), 6) if (tasks + prompts) else None),
-        }
 
+def totals_of(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fold per-session rows into the registered rates."""
+    main = sum(r["main_cost_usd"] for r in rows)
+    deleg = sum(r["delegated_cost_usd"] for r in rows)
+    tasks = sum(r["delegated_tasks"] for r in rows)
+    prompts = sum(r["human_prompts"] for r in rows)
+    total = main + deleg
+    unpriced = sum(r["unpriced_requests_pre_cut"] for r in rows)
+    return {
+        "sessions": len(rows),
+        "unpriced_requests": unpriced,
+        "unpriced_models": sorted({m for r in rows for m in r["unpriced_models_pre_cut"]}),
+        "unpriced_note": (
+            "requests on a model absent from config/pricing.json contribute "
+            "0 to both numerator and denominator of the by-spend rate. They "
+            "are counted here rather than hidden."
+        ),
+        "main_session_cost_usd": round(main, 6),
+        "delegated_cost_usd": round(deleg, 6),
+        "total_cost_usd": round(total, 6),
+        "delegated_tasks": tasks,
+        "human_prompts": prompts,
+        "delegation_rate_by_spend": round(deleg / total, 6) if total else None,
+        "delegation_rate_by_task_count": (
+            round(tasks / (tasks + prompts), 6) if (tasks + prompts) else None),
+        "cost_per_delegated_task_usd": round(deleg / tasks, 6) if tasks else None,
+    }
+
+
+def delegation_baseline(force: bool = False) -> dict[str, Any]:
+    """The pre-rule delegation baseline: the fraction of spend that was
+    delegated to subagents BEFORE the "delegate where possible" rule.
+
+    Cut at `Q17B_CUT_UTC`, at REQUEST level rather than session level -- see
+    `requests()` for why the session-level cut the ticket describes does not
+    work on this corpus.
+
+    Two measures, because they answer different questions and can disagree
+    sharply. `by_spend` is the one A2.6 registers ("the fraction of spend that
+    was delegated"). `by_task_count` needs a denominator and none is
+    self-evident, so all three raw counts are frozen and the chosen denominator
+    is named rather than implied.
+    """
+    # FROZEN means frozen, and as of the costing-rule fix it means frozen with
+    # no escape hatch at all. The cost side is computed through
+    # config/pricing.json, so the day JEV-28 reconciles Fable's rates a re-run
+    # would silently move a number the pre-registration treats as fixed.
+    #
+    # `force` used to overwrite this file. That made the ONLY "before" the
+    # project has one flag away from being destroyed -- and the costing defect
+    # is exactly the kind of discovery that tempts somebody to use it. The
+    # frozen artifact is now immutable; corrections go to the companion, which
+    # `delegation_baseline_corrected()` writes and which states both numbers
+    # and the reason they differ.
+    if DELEGATION.exists():
+        if force:
+            raise RuntimeError(
+                f"{DELEGATION.name} is frozen (JEV-24a) and will not be rewritten. "
+                "Things depend on its being frozen. Write the corrected companion "
+                f"instead: baseline.py --corrected  ->  {CORRECTED.name}"
+            )
+        return json.loads(DELEGATION.read_text())
+
+    per_session = per_session_pre_cut()
+    totals = totals_of
     interactive_rows = [r for r in per_session if r["kind"] == "interactive"]
     stamps = [r["first_request_utc"] for r in per_session if r["first_request_utc"]]
     ends = [r["last_request_utc"] for r in per_session if r["last_request_utc"]]
@@ -660,19 +779,219 @@ def delegation_baseline(force: bool = False) -> dict[str, Any]:
     return record
 
 
+# ---------------------------------------------------------------------------
+# The corrected companion
+# ---------------------------------------------------------------------------
+
+CORRECTION_REASON = (
+    "delegation-pre-rule-v1.json was computed by a request walk private to "
+    "baseline.py that deduped on `requestId` alone, kept the FIRST copy of a "
+    "duplicated request and never read `usage.iterations[]`. Claude Code writes "
+    "the same request up to 9 times as a turn streams; the early copies are "
+    "placeholders carrying `input_tokens: 2` and the COMPLETED breakdown "
+    "arrives only in the last. Keeping the first therefore keeps the "
+    "placeholder and discards the turn. All 48 keys that grow across their "
+    "copies in this corpus are inside subagent transcripts, so the error lands "
+    "almost entirely on the DELEGATED side -- which is the numerator of the "
+    "one rate this record exists to publish. The same walk also priced cache "
+    "writes at a single flat multiplier instead of splitting 1-hour TTL (2x) "
+    "from 5-minute (1.25x); the main session is 100% 1-hour TTL, so that half "
+    "of the fix moves the denominator. Both halves are now delegated to "
+    "session_metrics.billable_requests, the module where each of these rules "
+    "was bought with a real bug and written down."
+)
+
+LOWER_BOUND_NOTE = (
+    "EVERY cost here is a LOWER BOUND, corrected or not. FINDINGS.md Part 1 "
+    "establishes that transcript-derived cost runs about 27.6% under Claude "
+    "Code's own first-party total for the same window, and this correction "
+    "does not close that gap -- it removes a second, independent undercount "
+    "sitting on top of it. Requests on a model absent from config/pricing.json "
+    "still contribute zero to both sides and are counted separately."
+)
+
+
+def delegation_baseline_corrected(write: bool = True) -> dict[str, Any]:
+    """Recompute the JEV-24a baseline under the corrected costing rule, as a
+    COMPANION to the frozen record rather than a replacement for it.
+
+    The frozen `delegation-pre-rule-v1.json` is left exactly as it is. This
+    file records three passes over the same cut, the same sessions and the same
+    corpus, so the movement can be attributed instead of merely observed:
+
+      `as_frozen`            the frozen record, quoted verbatim from disk
+      `frozen_rule_today`    the frozen (defective) rule re-run against today's
+                             corpus and today's config/pricing.json. Differs
+                             from `as_frozen` ONLY by pricing drift and corpus
+                             growth, never by the rule.
+      `corrected`            the shared rule, same window. Differs from
+                             `frozen_rule_today` ONLY by the rule.
+
+    Numerator and denominator are both recomputed in every pass, from the same
+    function, because the W0 finding is right that the denominator moves too:
+    the main session is entirely 1-hour-TTL cache writes, which the flat
+    multiplier under-priced.
+    """
+    frozen = json.loads(DELEGATION.read_text()) if DELEGATION.exists() else None
+
+    corrected_rows = per_session_pre_cut(requests)
+    legacy_rows = per_session_pre_cut(legacy_v1_requests)
+
+    def scopes(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "all_sessions": totals_of(rows),
+            "interactive_sessions_only": totals_of(
+                [r for r in rows if r["kind"] == "interactive"]),
+        }
+
+    def movement(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key in ("main_session_cost_usd", "delegated_cost_usd", "total_cost_usd",
+                    "delegation_rate_by_spend", "cost_per_delegated_task_usd"):
+            b, a = before.get(key), after.get(key)
+            if not isinstance(b, (int, float)) or not isinstance(a, (int, float)):
+                continue
+            out[key] = {
+                "before": b,
+                "after": a,
+                "delta": round(a - b, 6),
+                "pct_change": round((a - b) / b * 100, 2) if b else None,
+                "before_understates_after_by_pct": round((a - b) / a * 100, 2) if a else None,
+            }
+        return out
+
+    stamps = [r["first_request_utc"] for r in corrected_rows if r["first_request_utc"]]
+    ends = [r["last_request_utc"] for r in corrected_rows if r["last_request_utc"]]
+
+    record = {
+        "schema": "delegation-pre-rule-v1-corrected",
+        "ticket": "JEV-24a",
+        "supersedes_for_analysis": DELEGATION.name,
+        "supersedes_note": (
+            f"{DELEGATION.name} is NOT deleted, NOT edited and NOT re-frozen. It "
+            "remains the pre-registered artifact and the record of what was "
+            "published. This file is what analysis should read; the frozen one is "
+            "what the project said before it found the defect. Both are kept so "
+            "the correction itself stays auditable."
+        ),
+        "computed_at": store.utcnow(),
+        "correction_reason": CORRECTION_REASON,
+        "lower_bound": LOWER_BOUND_NOTE,
+        "costing_rule": {
+            "name": "session_metrics.billable_requests",
+            "module": "src/session_metrics.py",
+            "dedupe_key": "(requestId, message.id)",
+            "duplicate_copy_rule": "per-field maximum across every copy -- the "
+                                   "COMPLETED copy wins over the streaming "
+                                   "placeholders",
+            "iterations_rule": "token fields summed from usage.iterations[]; scalar "
+                               "cache fields taken from the top level and NOT summed; "
+                               "the cache_creation TTL sub-object follows the token "
+                               "rule",
+            "cache_write_pricing": "5-minute TTL at 1.25x input, 1-hour TTL at 2x, "
+                                   "split read per row rather than assumed",
+            "request_timestamp": "the earliest copy of a request; 0 of 2197 keys in "
+                                 "this corpus have copies either side of the cut, so "
+                                 "the choice does not move the window",
+        },
+        "superseded_rule": {
+            "name": "baseline.legacy_v1_requests",
+            "status": "QUARANTINED -- retained only to compute frozen_rule_today",
+            "dedupe_key": "requestId alone",
+            "duplicate_copy_rule": "keeps the FIRST copy (the input_tokens: 2 "
+                                   "placeholder)",
+            "iterations_rule": "usage.iterations[] never read",
+            "cache_write_pricing": "one flat multiplier, no TTL split",
+        },
+        # The cut is copied from the frozen record's constants, not re-derived.
+        # A corrected figure computed over a different window is not comparable
+        # to the thing it corrects.
+        "cut": {
+            "timestamp_utc": Q17B_CUT_UTC,
+            "commit": Q17B_CUT_COMMIT,
+            "basis": Q17B_CUT_BASIS,
+            "same_cut_as_frozen": bool(
+                frozen and frozen["cut"]["timestamp_utc"] == Q17B_CUT_UTC),
+        },
+        "corpus": {
+            "project_root": str(baseline_project_root()),
+            "transcript_dir": str(project_dir()),
+            "sessions_scanned": len(corrected_rows),
+            "sessions_in_frozen_record": len(frozen["per_session"]) if frozen else None,
+            "sessions_with_pre_cut_spend": sum(
+                1 for r in corrected_rows if r["requests_pre_cut"]),
+            "note": (
+                "The corpus has grown since the freeze, but the cut does the work: "
+                "a session that started after 2026-09-20T11:11:49Z contributes zero "
+                "pre-cut requests. Only the sessions that carried pre-cut spend at "
+                "freeze time carry any now, so this is the same window over the same "
+                "material."
+            ),
+        },
+        "pricing_version": cl.pricing()["version"],
+        "frozen_pricing_version": frozen["pricing_version"] if frozen else None,
+        "as_frozen": {
+            "all_sessions": frozen["all_sessions"] if frozen else None,
+            "interactive_sessions_only": frozen["interactive_sessions_only"] if frozen else None,
+        },
+        "frozen_rule_today": scopes(legacy_rows),
+        "corrected": scopes(corrected_rows),
+        "movement_rule_only": {
+            scope: movement(totals_of(
+                [r for r in legacy_rows if scope == "all_sessions" or r["kind"] == "interactive"]),
+                totals_of(
+                [r for r in corrected_rows if scope == "all_sessions" or r["kind"] == "interactive"]))
+            for scope in ("all_sessions", "interactive_sessions_only")
+        },
+        "movement_vs_frozen_record": {
+            scope: movement(frozen[scope], totals_of(
+                [r for r in corrected_rows if scope == "all_sessions" or r["kind"] == "interactive"]))
+            for scope in ("all_sessions", "interactive_sessions_only")
+        } if frozen else None,
+        "transcript_window": {
+            "first_request_utc": min(stamps).isoformat() if stamps else None,
+            "last_pre_cut_request_utc": max(ends).isoformat() if ends else None,
+            "cut_utc": Q17B_CUT_UTC,
+        },
+        "denominators": frozen["denominators"] if frozen else None,
+        "cut_note": frozen["cut_note"] if frozen else None,
+        "per_session": [
+            {**r,
+             "first_request_utc": r["first_request_utc"].isoformat() if r["first_request_utc"] else None,
+             "last_request_utc": r["last_request_utc"].isoformat() if r["last_request_utc"] else None}
+            for r in corrected_rows if r["requests_pre_cut"]
+        ],
+        "limitations": frozen["limitations"] if frozen else None,
+        "external_validity_note": frozen["external_validity_note"] if frozen else None,
+    }
+    if write:
+        paths.BASELINE.mkdir(parents=True, exist_ok=True)
+        CORRECTED.write_text(json.dumps(record, indent=2) + "\n")
+    return record
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Persist the 'before' baseline (JEV-38/24a).")
     parser.add_argument("--snapshot", action="store_true", help="append changed sessions")
     parser.add_argument("--delegation", action="store_true",
                         help="freeze the JEV-24a baseline (once; refuses to overwrite)")
+    parser.add_argument("--corrected", action="store_true",
+                        help="write the corrected companion beside the frozen record")
     parser.add_argument("--force", action="store_true",
-                        help="re-freeze the JEV-24a baseline, overwriting it")
+                        help="(refused) the frozen JEV-24a record is immutable; "
+                             "use --corrected")
+    parser.add_argument("--transcript-dir", metavar="PROJECT_ROOT",
+                        help="project root whose transcripts to read, for when this "
+                             "runs from a git worktree whose path is not the project's "
+                             "(sets $" + BASELINE_PROJECT_ENV + ")")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.transcript_dir:
+        os.environ[BASELINE_PROJECT_ENV] = args.transcript_dir
     # Snapshotting is the ROUTINE action and is the no-flag default. Freezing
     # the delegation baseline is a one-shot and must be asked for by name, so
     # that a routine re-snapshot can never rewrite a pre-registered number.
-    if not (args.snapshot or args.delegation):
+    if not (args.snapshot or args.delegation or args.corrected):
         args.snapshot = True
 
     if args.snapshot:
@@ -708,9 +1027,37 @@ def main() -> int:
                 print(f"  {'':<18} by task count {t['delegation_rate_by_task_count']} "
                       f"({t['delegated_tasks']} tasks / {t['human_prompts']} prompts)")
             print(f"  pricing           {record['pricing_version']}")
-            print(f"  frozen_at         {record['frozen_at']}"
-                  f"{'  (already frozen; --force to recompute)' if not args.force else '  (RE-FROZEN)'}")
+            print(f"  frozen_at         {record['frozen_at']}  (immutable)")
             print(f"  file              {DELEGATION}")
+
+    if args.corrected:
+        record = delegation_baseline_corrected()
+        if args.json:
+            print(json.dumps(record, indent=2))
+        else:
+            print()
+            print(f"JEV-24a delegation baseline, CORRECTED (cut {Q17B_CUT_UTC})")
+            print(f"  corpus            {record['corpus']['transcript_dir']}")
+            for scope in ("all_sessions", "interactive_sessions_only"):
+                frz = (record["as_frozen"] or {}).get(scope) or {}
+                old = record["frozen_rule_today"][scope]
+                new = record["corrected"][scope]
+                print(f"  {scope}")
+                print(f"    as frozen       delegated ${frz.get('delegated_cost_usd', 0):.4f} "
+                      f"of ${frz.get('total_cost_usd', 0):.4f}  "
+                      f"rate {frz.get('delegation_rate_by_spend')}")
+                print(f"    frozen rule now delegated ${old['delegated_cost_usd']:.4f} "
+                      f"of ${old['total_cost_usd']:.4f}  "
+                      f"rate {old['delegation_rate_by_spend']}")
+                print(f"    CORRECTED       delegated ${new['delegated_cost_usd']:.4f} "
+                      f"of ${new['total_cost_usd']:.4f}  "
+                      f"rate {new['delegation_rate_by_spend']}")
+                print(f"    per task        ${new['cost_per_delegated_task_usd']} "
+                      f"over {new['delegated_tasks']} delegated tasks")
+            print(f"  pricing           {record['pricing_version']} "
+                  f"(frozen under {record['frozen_pricing_version']})")
+            print("  all figures are LOWER BOUNDS -- see FINDINGS.md Part 1")
+            print(f"  file              {CORRECTED}")
     return 0
 
 

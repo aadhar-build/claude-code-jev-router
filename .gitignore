@@ -37,6 +37,7 @@ data/baseline/*
 !data/baseline/sessions.jsonl
 !data/baseline/manifest.json
 !data/baseline/delegation-pre-rule-v1.json
+!data/baseline/delegation-pre-rule-v1-corrected.json
 spool/
 logs/
 # reports/ is deliberately NOT ignored: reports are the publishable artifact,

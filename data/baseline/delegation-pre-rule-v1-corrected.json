@@ -1,0 +1,310 @@
+{
+  "schema": "delegation-pre-rule-v1-corrected",
+  "ticket": "JEV-24a",
+  "supersedes_for_analysis": "delegation-pre-rule-v1.json",
+  "supersedes_note": "delegation-pre-rule-v1.json is NOT deleted, NOT edited and NOT re-frozen. It remains the pre-registered artifact and the record of what was published. This file is what analysis should read; the frozen one is what the project said before it found the defect. Both are kept so the correction itself stays auditable.",
+  "computed_at": "2026-09-21T06:16:19.874+00:00",
+  "correction_reason": "delegation-pre-rule-v1.json was computed by a request walk private to baseline.py that deduped on `requestId` alone, kept the FIRST copy of a duplicated request and never read `usage.iterations[]`. Claude Code writes the same request up to 9 times as a turn streams; the early copies are placeholders carrying `input_tokens: 2` and the COMPLETED breakdown arrives only in the last. Keeping the first therefore keeps the placeholder and discards the turn. All 48 keys that grow across their copies in this corpus are inside subagent transcripts, so the error lands almost entirely on the DELEGATED side -- which is the numerator of the one rate this record exists to publish. The same walk also priced cache writes at a single flat multiplier instead of splitting 1-hour TTL (2x) from 5-minute (1.25x); the main session is 100% 1-hour TTL, so that half of the fix moves the denominator. Both halves are now delegated to session_metrics.billable_requests, the module where each of these rules was bought with a real bug and written down.",
+  "lower_bound": "EVERY cost here is a LOWER BOUND, corrected or not. FINDINGS.md Part 1 establishes that transcript-derived cost runs about 27.6% under Claude Code's own first-party total for the same window, and this correction does not close that gap -- it removes a second, independent undercount sitting on top of it. Requests on a model absent from config/pricing.json still contribute zero to both sides and are counted separately.",
+  "costing_rule": {
+    "name": "session_metrics.billable_requests",
+    "module": "src/session_metrics.py",
+    "dedupe_key": "(requestId, message.id)",
+    "duplicate_copy_rule": "per-field maximum across every copy -- the COMPLETED copy wins over the streaming placeholders",
+    "iterations_rule": "token fields summed from usage.iterations[]; scalar cache fields taken from the top level and NOT summed; the cache_creation TTL sub-object follows the token rule",
+    "cache_write_pricing": "5-minute TTL at 1.25x input, 1-hour TTL at 2x, split read per row rather than assumed",
+    "request_timestamp": "the earliest copy of a request; 0 of 2197 keys in this corpus have copies either side of the cut, so the choice does not move the window"
+  },
+  "superseded_rule": {
+    "name": "baseline.legacy_v1_requests",
+    "status": "QUARANTINED -- retained only to compute frozen_rule_today",
+    "dedupe_key": "requestId alone",
+    "duplicate_copy_rule": "keeps the FIRST copy (the input_tokens: 2 placeholder)",
+    "iterations_rule": "usage.iterations[] never read",
+    "cache_write_pricing": "one flat multiplier, no TTL split"
+  },
+  "cut": {
+    "timestamp_utc": "2026-09-20T11:11:49Z",
+    "commit": "f890a3b9cddee9109638381968935d001bc14ffc",
+    "basis": "first durable record of Q17b: the commit that introduced the Q17b row into SPEC.md. The rule was answered at or before this instant, never after, so the cut cannot admit post-rule behaviour.",
+    "same_cut_as_frozen": true
+  },
+  "corpus": {
+    "project_root": "/Users/aadharagarwal/projects/JEV-experiments",
+    "transcript_dir": "/Users/aadharagarwal/.claude/projects/-Users-aadharagarwal-projects-JEV-experiments",
+    "sessions_scanned": 44,
+    "sessions_in_frozen_record": 15,
+    "sessions_with_pre_cut_spend": 2,
+    "note": "The corpus has grown since the freeze, but the cut does the work: a session that started after 2026-09-20T11:11:49Z contributes zero pre-cut requests. Only the sessions that carried pre-cut spend at freeze time carry any now, so this is the same window over the same material."
+  },
+  "pricing_version": "pricing-2026-09-20b",
+  "frozen_pricing_version": "pricing-2026-09-20",
+  "as_frozen": {
+    "all_sessions": {
+      "sessions": 15,
+      "unpriced_requests": 6,
+      "unpriced_models": [
+        "claude-opus-4-7"
+      ],
+      "unpriced_note": "requests on a model absent from config/pricing.json contribute 0 to both numerator and denominator of the by-spend rate. They are counted here rather than hidden.",
+      "main_session_cost_usd": 56.95676,
+      "delegated_cost_usd": 11.039621,
+      "total_cost_usd": 67.996381,
+      "delegated_tasks": 7,
+      "human_prompts": 37,
+      "delegation_rate_by_spend": 0.162356,
+      "delegation_rate_by_task_count": 0.159091
+    },
+    "interactive_sessions_only": {
+      "sessions": 1,
+      "unpriced_requests": 0,
+      "unpriced_models": [],
+      "unpriced_note": "requests on a model absent from config/pricing.json contribute 0 to both numerator and denominator of the by-spend rate. They are counted here rather than hidden.",
+      "main_session_cost_usd": 56.95676,
+      "delegated_cost_usd": 11.039621,
+      "total_cost_usd": 67.996381,
+      "delegated_tasks": 7,
+      "human_prompts": 37,
+      "delegation_rate_by_spend": 0.162356,
+      "delegation_rate_by_task_count": 0.159091
+    }
+  },
+  "frozen_rule_today": {
+    "all_sessions": {
+      "sessions": 44,
+      "unpriced_requests": 0,
+      "unpriced_models": [],
+      "unpriced_note": "requests on a model absent from config/pricing.json contribute 0 to both numerator and denominator of the by-spend rate. They are counted here rather than hidden.",
+      "main_session_cost_usd": 57.570205,
+      "delegated_cost_usd": 11.039621,
+      "total_cost_usd": 68.609826,
+      "delegated_tasks": 7,
+      "human_prompts": 37,
+      "delegation_rate_by_spend": 0.160904,
+      "delegation_rate_by_task_count": 0.159091,
+      "cost_per_delegated_task_usd": 1.577089
+    },
+    "interactive_sessions_only": {
+      "sessions": 1,
+      "unpriced_requests": 0,
+      "unpriced_models": [],
+      "unpriced_note": "requests on a model absent from config/pricing.json contribute 0 to both numerator and denominator of the by-spend rate. They are counted here rather than hidden.",
+      "main_session_cost_usd": 56.95676,
+      "delegated_cost_usd": 11.039621,
+      "total_cost_usd": 67.996381,
+      "delegated_tasks": 7,
+      "human_prompts": 37,
+      "delegation_rate_by_spend": 0.162356,
+      "delegation_rate_by_task_count": 0.159091,
+      "cost_per_delegated_task_usd": 1.577089
+    }
+  },
+  "corrected": {
+    "all_sessions": {
+      "sessions": 44,
+      "unpriced_requests": 0,
+      "unpriced_models": [],
+      "unpriced_note": "requests on a model absent from config/pricing.json contribute 0 to both numerator and denominator of the by-spend rate. They are counted here rather than hidden.",
+      "main_session_cost_usd": 65.173251,
+      "delegated_cost_usd": 20.158486,
+      "total_cost_usd": 85.331737,
+      "delegated_tasks": 7,
+      "human_prompts": 37,
+      "delegation_rate_by_spend": 0.236237,
+      "delegation_rate_by_task_count": 0.159091,
+      "cost_per_delegated_task_usd": 2.879784
+    },
+    "interactive_sessions_only": {
+      "sessions": 1,
+      "unpriced_requests": 0,
+      "unpriced_models": [],
+      "unpriced_note": "requests on a model absent from config/pricing.json contribute 0 to both numerator and denominator of the by-spend rate. They are counted here rather than hidden.",
+      "main_session_cost_usd": 64.559806,
+      "delegated_cost_usd": 20.158486,
+      "total_cost_usd": 84.718292,
+      "delegated_tasks": 7,
+      "human_prompts": 37,
+      "delegation_rate_by_spend": 0.237947,
+      "delegation_rate_by_task_count": 0.159091,
+      "cost_per_delegated_task_usd": 2.879784
+    }
+  },
+  "movement_rule_only": {
+    "all_sessions": {
+      "main_session_cost_usd": {
+        "before": 57.570205,
+        "after": 65.173251,
+        "delta": 7.603046,
+        "pct_change": 13.21,
+        "before_understates_after_by_pct": 11.67
+      },
+      "delegated_cost_usd": {
+        "before": 11.039621,
+        "after": 20.158486,
+        "delta": 9.118865,
+        "pct_change": 82.6,
+        "before_understates_after_by_pct": 45.24
+      },
+      "total_cost_usd": {
+        "before": 68.609826,
+        "after": 85.331737,
+        "delta": 16.721911,
+        "pct_change": 24.37,
+        "before_understates_after_by_pct": 19.6
+      },
+      "delegation_rate_by_spend": {
+        "before": 0.160904,
+        "after": 0.236237,
+        "delta": 0.075333,
+        "pct_change": 46.82,
+        "before_understates_after_by_pct": 31.89
+      },
+      "cost_per_delegated_task_usd": {
+        "before": 1.577089,
+        "after": 2.879784,
+        "delta": 1.302695,
+        "pct_change": 82.6,
+        "before_understates_after_by_pct": 45.24
+      }
+    },
+    "interactive_sessions_only": {
+      "main_session_cost_usd": {
+        "before": 56.95676,
+        "after": 64.559806,
+        "delta": 7.603046,
+        "pct_change": 13.35,
+        "before_understates_after_by_pct": 11.78
+      },
+      "delegated_cost_usd": {
+        "before": 11.039621,
+        "after": 20.158486,
+        "delta": 9.118865,
+        "pct_change": 82.6,
+        "before_understates_after_by_pct": 45.24
+      },
+      "total_cost_usd": {
+        "before": 67.996381,
+        "after": 84.718292,
+        "delta": 16.721911,
+        "pct_change": 24.59,
+        "before_understates_after_by_pct": 19.74
+      },
+      "delegation_rate_by_spend": {
+        "before": 0.162356,
+        "after": 0.237947,
+        "delta": 0.075591,
+        "pct_change": 46.56,
+        "before_understates_after_by_pct": 31.77
+      },
+      "cost_per_delegated_task_usd": {
+        "before": 1.577089,
+        "after": 2.879784,
+        "delta": 1.302695,
+        "pct_change": 82.6,
+        "before_understates_after_by_pct": 45.24
+      }
+    }
+  },
+  "movement_vs_frozen_record": {
+    "all_sessions": {
+      "main_session_cost_usd": {
+        "before": 56.95676,
+        "after": 65.173251,
+        "delta": 8.216491,
+        "pct_change": 14.43,
+        "before_understates_after_by_pct": 12.61
+      },
+      "delegated_cost_usd": {
+        "before": 11.039621,
+        "after": 20.158486,
+        "delta": 9.118865,
+        "pct_change": 82.6,
+        "before_understates_after_by_pct": 45.24
+      },
+      "total_cost_usd": {
+        "before": 67.996381,
+        "after": 85.331737,
+        "delta": 17.335356,
+        "pct_change": 25.49,
+        "before_understates_after_by_pct": 20.32
+      },
+      "delegation_rate_by_spend": {
+        "before": 0.162356,
+        "after": 0.236237,
+        "delta": 0.073881,
+        "pct_change": 45.51,
+        "before_understates_after_by_pct": 31.27
+      }
+    },
+    "interactive_sessions_only": {
+      "main_session_cost_usd": {
+        "before": 56.95676,
+        "after": 64.559806,
+        "delta": 7.603046,
+        "pct_change": 13.35,
+        "before_understates_after_by_pct": 11.78
+      },
+      "delegated_cost_usd": {
+        "before": 11.039621,
+        "after": 20.158486,
+        "delta": 9.118865,
+        "pct_change": 82.6,
+        "before_understates_after_by_pct": 45.24
+      },
+      "total_cost_usd": {
+        "before": 67.996381,
+        "after": 84.718292,
+        "delta": 16.721911,
+        "pct_change": 24.59,
+        "before_understates_after_by_pct": 19.74
+      },
+      "delegation_rate_by_spend": {
+        "before": 0.162356,
+        "after": 0.237947,
+        "delta": 0.075591,
+        "pct_change": 46.56,
+        "before_understates_after_by_pct": 31.77
+      }
+    }
+  },
+  "transcript_window": {
+    "first_request_utc": "2026-09-19T19:58:56.537000+00:00",
+    "last_pre_cut_request_utc": "2026-09-20T11:11:46.821000+00:00",
+    "cut_utc": "2026-09-20T11:11:49Z"
+  },
+  "denominators": {
+    "by_spend": "delegated_cost_usd / (main_session_cost_usd + delegated_cost_usd), over deduplicated billable requests timestamped before the cut. This is the measure A2.6 registers and is the PRIMARY figure.",
+    "by_task_count": "delegated_tasks / (delegated_tasks + human_prompts). A 'unit of work' has no canonical count in a transcript; a typed human prompt is the closest available analogue of a unit of work that was NOT delegated. The raw counts are frozen beside the ratio so any other denominator can be recomputed."
+  },
+  "cut_note": "JEV-24a says 'sessions after that point are already post-rule'. On this corpus that unit does not work: the rule was adopted MID-SESSION inside 4ba49645, the only sustained work session the repo has, which spans 2026-09-19T19:58Z to the present. A session-level cut would either drop the entire real corpus or admit the post-rule half of it. The cut is therefore applied per billable REQUEST and per delegated TASK, by timestamp. This is a deviation from the ticket's literal wording and is recorded as one.",
+  "per_session": [
+    {
+      "session_id": "20299ea6-2465-47e3-990e-214ceca98deb",
+      "kind": "tool_invoked",
+      "requests_pre_cut": 6,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 0.613445,
+      "delegated_cost_usd": 0,
+      "delegated_tasks": 0,
+      "human_prompts": 0,
+      "first_request_utc": "2026-09-20T05:37:39.335000+00:00",
+      "last_request_utc": "2026-09-20T05:39:15.694000+00:00"
+    },
+    {
+      "session_id": "4ba49645-fb8d-4fb2-b496-c274f6ed1490",
+      "kind": "interactive",
+      "requests_pre_cut": 478,
+      "unpriced_requests_pre_cut": 0,
+      "unpriced_models_pre_cut": [],
+      "main_cost_usd": 64.559806,
+      "delegated_cost_usd": 20.158486,
+      "delegated_tasks": 7,
+      "human_prompts": 37,
+      "first_request_utc": "2026-09-19T19:58:56.537000+00:00",
+      "last_request_utc": "2026-09-20T11:11:46.821000+00:00"
+    }
+  ],
+  "limitations": "The pre-cut window is roughly 15 hours of a single-author, single-repo corpus. It is a point estimate from one session, not a sample. It bounds nothing and must be reported as an anchor, not as a population rate.",
+  "external_validity_note": "PREREGISTRATION A2.6 registers this as the anchor for the confound: the 'delegate where possible' rule deliberately raises the delegation rate, improving power and lowering external validity. This is the rate before that reshaping. A2.5 asks for the analysis with and without this experiment's own infrastructure work -- on this corpus essentially ALL the work is infrastructure work on this experiment, so the 'without' variant is empty and the split offered instead is interactive versus tool-invoked sessions."
+}

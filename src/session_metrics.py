@@ -341,6 +341,89 @@ def _parse_ts(value: Any) -> datetime | None:
         return None
 
 
+def billable_requests(path: Path) -> Iterator[dict[str, Any]]:
+    """THE per-request unit. One record per deduplicated billable request,
+    priced, with every counting rule in this module already applied.
+
+    This exists because it was written twice. `src/baseline.py` grew its own
+    request-level walk that deduped on `requestId` alone, kept the FIRST copy
+    and never read `usage.iterations[]` -- i.e. it reproduced all three of the
+    bugs this module's docstrings exist to prevent. Measured over this repo's
+    own corpus the two rules disagreed by $66.85 of delegated spend
+    ($105.09 vs $171.94, the frozen rule understating by 38.9%), because all
+    48 growing keys live in subagent transcripts. Two costing rules that must
+    agree cannot be two pieces of code; anything wanting per-request cost
+    calls this.
+
+    Each record carries:
+
+      `request_id`, `message_id`   the `dedupe_key` pair
+      `model`      the model of the LAST copy seen, matching `analyse`
+      `usage`      normalised and merged across every copy, so the completed
+                   copy wins over the `input_tokens: 2` placeholders
+      `cost_usd`   `call_cost` of that usage -- **None** for a model absent
+                   from `config/pricing.json`, never a guessed zero
+      `priced`     False exactly when `cost_usd` is None
+      `ts`         the EARLIEST copy's timestamp. A request is placed in time
+                   by when it began, which is the semantics a windowed cut
+                   needs and it matches `delegated_tasks`' `started_at`.
+                   `last_ts` carries the other end so a caller can see whether
+                   a key straddles its cut. On this corpus none do: 0 of 2,197
+                   keys have copies either side of the JEV-24a cut, so the
+                   choice does not move the frozen window.
+      `copies`     how many transcript lines carried this key (up to 9 here)
+      `delegated`  True if ANY copy came from a `subagents/*.jsonl` file or
+                   carried `isSidechain`. Sticky across copies on purpose: a
+                   request is delegated or it is not, and a placeholder copy
+                   missing the flag must not un-delegate it.
+
+    Summing `cost_usd` over one session equals `analyse(path).computed_cost_usd`
+    minus the web-search line, which `analyse` adds from `cost-state` and which
+    is not a per-call charge. `tests/test_baseline.py` pins that identity so
+    the two rules cannot drift apart again.
+    """
+    order: list[tuple[str, str | None]] = []
+    acc: dict[tuple[str, str | None], dict[str, Any]] = {}
+
+    for line in _lines(path):
+        message = line.get("message") or {}
+        if message.get("role") != "assistant":
+            continue
+        key = dedupe_key(line)
+        if key is None:
+            continue
+        ts = _parse_ts(line.get("timestamp"))
+        delegated = bool(line.get("_subagent_file")) or bool(line.get("isSidechain"))
+        if key not in acc:
+            order.append(key)
+            acc[key] = {
+                "request_id": key[0],
+                "message_id": key[1],
+                "model": "unknown",
+                "ts": ts,
+                "last_ts": ts,
+                "copies": 0,
+                "delegated": False,
+                "subagent_file": line.get("_subagent_file"),
+                "usage": None,
+            }
+        rec = acc[key]
+        rec["model"] = message.get("model") or "unknown"
+        rec["copies"] += 1
+        if ts is not None:
+            rec["ts"] = ts if rec["ts"] is None or ts < rec["ts"] else rec["ts"]
+            rec["last_ts"] = ts if rec["last_ts"] is None or ts > rec["last_ts"] else rec["last_ts"]
+        rec["delegated"] = rec["delegated"] or delegated
+        rec["usage"] = merge_copies(rec["usage"], normalise_usage(message.get("usage") or {}))
+
+    for key in order:
+        rec = acc[key]
+        cost = call_cost(rec["model"], rec["usage"])
+        rec["cost_usd"] = cost
+        rec["priced"] = cost is not None
+        yield rec
+
+
 def analyse(path: Path, strict: bool = False) -> SessionMetrics:
     """Harvest one session. `strict=True` refuses to return a partial total.
 
