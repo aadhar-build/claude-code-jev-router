@@ -8,9 +8,37 @@
 # learned routers frequently fail to beat a trivial static rule; this is that
 # rule, shipped first, as the baseline anything cleverer has to beat.
 #
-# BUILT, NOT ARMED. `agent_route` is `mode: "off"` in config/surfaces.json and
-# no entry for this script exists in .claude/settings.local.json. Arming is a
-# separate deliberate act (JEV-52).
+# WHAT KEEPS THIS INERT -- corrected 2026-09-21, and read this before you
+# believe any config file about it.
+#
+# TWO THINGS, AND ONLY TWO:
+#   (a) no entry for this script in the routed project's
+#       .claude/settings.local.json -- i.e. `jev install` has not been run, or
+#       `jev uninstall` has been; and
+#   (b) the kill switches, tested by the two canonical blocks further down --
+#       the global one, the per-project one, and the machine-wide one. Their
+#       paths are written out THERE and deliberately not repeated here: a
+#       second copy of the switch path outside the blocks that own it is the
+#       thing that drifts, and tests/reversibility.sh fails the hook for it.
+#       (That guard caught this very comment on its first draft.)
+#
+# `config/surfaces.json` IS NOT ONE OF THEM. THIS SCRIPT NEVER READS THAT FILE.
+# `surfaces.agent_route.mode` is not consulted anywhere in the routing path --
+# not here, and not in src/install.py, which registers from
+# config/registration.json alone. Setting it to "off", to "shadow", or to
+# anything else changes NOTHING about whether this hook rewrites
+# `tool_input.model`.
+#
+# THERE IS NO SHADOW MODE FOR THIS ACTUATOR. Registering it IS arming it: once
+# the entry exists and no switch is set, it rewrites. The record-only
+# `agent_route` surface described by JEV-34 is the capture.sh/spool path -- a
+# different script, which does not write data/agent_route/assignments/.
+#
+# This header used to say "`agent_route` is `mode: off` in config/surfaces.json"
+# as though that were a control. It is not one. During the JEV-52 gate run that
+# sentence nearly produced a live, model-rewriting hook under the belief that it
+# was shadowed. Arming is a deliberate act (JEV-52), performed by registering
+# the entry and clearing the switch, and by nothing else.
 #
 # ---------------------------------------------------------------------------
 # FAIL SAFE AND FAIL TO FRONTIER ARE NOT THE SAME THING

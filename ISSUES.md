@@ -3916,3 +3916,62 @@ successful ledger append provides it — but that is a decision, not a cleanup.
 - [ ] `doctor.py` reports `INERT`, with the marker's age and the recorded cause
 - [ ] It must be distinguishable from `BREAKER-OPEN` in the output — they mean
       different things and have different remedies
+
+---
+
+## JEV-62: `doctor.py` rejects its own supported foreign-project hook registration
+
+Status: ready-for-agent
+Labels: defect, doctor, safety, foreign-install
+Blocked by: none.
+
+**Found 2026-09-23** while activating the router in
+`/Users/aadharagarwal/projects/portfolio-design-explorations`.
+
+`./jev install /Users/aadharagarwal/projects/portfolio-design-explorations --yes`
+creates the supported foreign-project registration in
+`.claude/settings.local.json` with the absolute command
+`/Users/aadharagarwal/projects/JEV-experiments/hooks/agent_route_actuator.sh`.
+The install record at `.claude/jev-install.json` records the same command.
+There is no `.jev-disabled` in the portfolio root, so that registration is
+eligible to run.
+
+**Expected.** `python3 -B src/doctor.py`, run from JEV_HOME, accepts a
+registered hook that has the canonical kill-switch block and is either
+`$CLAUDE_PROJECT_DIR`-anchored **or** an absolute path into JEV_HOME. The latter
+is required for a foreign project because the hook lives in JEV_HOME.
+
+**Actual.** The command exits 1 with 15 PASS / 1 FAIL:
+
+```
+FAIL  switch-coverage  registered without an anchored kill-switch check: PreToolUse/Agent
+```
+
+This is a diagnostic false positive, not evidence that the portfolio hook lacks
+an opt-out. `src/reversibility.py:94` sets `anchored` only when the command text
+contains `CLAUDE_PROJECT_DIR`, and `src/doctor.py:246-250` treats every false
+`anchored` value as unsafe. The installed command is absolute, so it is rejected
+by that literal test even though `tests/reversibility.sh:290-320` explicitly
+allows the two valid forms: `$CLAUDE_PROJECT_DIR`-anchored or an absolute path
+into a JEV install. `config/registration.json:3` also specifies an exact
+absolute `$JEV_HOME/<script>` command for foreign settings.
+
+The real actuator has both checks: the JEV_HOME/global and machine-wide checks
+at `hooks/agent_route_actuator.sh:181-205`, and the per-project opt-out
+`$CLAUDE_PROJECT_DIR/.jev-disabled` at lines 207-223. The failure therefore
+comes from the doctor's representation check, not the hook's switch behavior.
+
+**Offline regression.** Extend the doctor/reversibility coverage so the
+`switch-coverage` predicate accepts the same two command shapes as
+`tests/reversibility.sh`. Preserve a negative case for relative and unrelated
+absolute commands. Run `bash tests/test_jev_home.sh` for the focused existing
+foreign-install test: it exercises the real actuator with distinct JEV_HOME and
+project roots and proves global, machine-wide, and per-project switches stop
+routing. `bash tests/reversibility.sh` is the broader registration audit.
+
+**Verification evidence — 2026-09-23.** `bash tests/test_jev_home.sh` completed
+with exit 0: **37 passed / 0 failed**. It exercises the foreign-install shape
+with JEV_HOME and the routed project in different directories, then verifies
+that the global, machine-wide, and per-project switches stop the real actuator.
+This confirms the offline regression is green; it does not close this ticket,
+because `doctor.py` still rejects the supported absolute registration.
