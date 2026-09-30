@@ -153,4 +153,4 @@ A fuller write-up, including the things this project got wrong and caught, is co
 
 ## Licence
 
-MIT.
+MIT. Built by [Aadhar Agarwal](https://aadhar.build); the write-ups on routing and evals live there.
