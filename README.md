@@ -8,6 +8,8 @@ Opt-in per repository. Reversible in one command. Fails safe.
 ./jev install /path/to/your/repo --yes
 ```
 
+![Install, one routing decision, the ledger line it writes, and the off switch](docs/demo.gif)
+
 ---
 
 ## Should you use this?
